@@ -487,7 +487,8 @@ function drawBoard()
     }
 
     // Hover indicator at top
-    if (!gameOver && hoverCol >= 0 && !droppingDisc)
+    const isHumanTurn = gameMode === 'pvp' || currentPlayer === PLAYER_HUMAN;
+    if (!gameOver && hoverCol >= 0 && !droppingDisc && isHumanTurn)
     {
         const isValid = board[ROWS - 1][hoverCol] === DISC_EMPTY;
         if (isValid)
