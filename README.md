@@ -22,7 +22,7 @@ LittleJS and everything in this repository is **MIT licensed!** See [LICENSE](LI
 - [LittleJS AI Games Video](https://www.youtube.com/watch?v=xl8S1pSx1z0) - 20 quick game demos made with LittleJS AI
 
 
-## 🕹️ Featured Games
+## 🕹️ Featured Games Made With AI
 
 | Game | Play |
 |------|------|
@@ -38,9 +38,11 @@ LittleJS and everything in this repository is **MIT licensed!** See [LICENSE](LI
 | Othello | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/othello.html) |
 | Orbitswarm | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/orbitswarm.html) |
 
-## 🕹️ Works in Progress
+## 🕹️ Works in Progress Made With AI
 
 These games are playable but need some iteration and polish to take them to the next level.
+
+Did you make a game you think should be included? Send a pull request!
 
 | Game | Play |
 |------|------|
