@@ -7,527 +7,438 @@
 <script>
 'use strict';
 
-// engine settings, do not remove
 debugWatermark = false;
 showEngineVersion = false;
 paused = false;
+setDebugKey('Backquote');
 
 gravity = vec2(0, -30);
-cameraPos = vec2(0, 0);
-cameraScale = 32;
+cameraScale = 24;
 
-// AI can use this class to make sound effects
-class SoundGenerator extends Sound 
+class SoundGenerator extends Sound
 {
     constructor(params = {})
     {
         const {
-            volume = 1,
-            randomness = .05,
-            frequency = 220,
-            attack = 0,
-            release = .1,
-            shapeCurve = 1,
-            slide = 0,
-            pitchJump = 0,
-            pitchJumpTime = 0,
-            repeatTime = 0,
-            noise = 0,
-            bitCrush = 0,
-            delay = 0,
+            volume=1, randomness=.05, frequency=220, attack=0, release=.1,
+            shapeCurve=1, slide=0, pitchJump=0, pitchJumpTime=0, repeatTime=0,
+            noise=0, bitCrush=0, delay=0,
         } = params;
-        
-        super([volume, randomness, frequency, attack, 0, release, 0, shapeCurve, slide, 0, pitchJump, pitchJumpTime, repeatTime, noise, 0, bitCrush, delay, 1, 0, 0, 0]);
+        super([volume, randomness, frequency, attack, 0, release, 0, shapeCurve, slide, 0,
+            pitchJump, pitchJumpTime, repeatTime, noise, 0, bitCrush, delay, 1, 0, 0, 0]);
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Pinball Game
+// Layout
 
-// Table dimensions
-const TABLE_WIDTH = 12;
-const TABLE_HEIGHT = 20;
-const WALL_THICKNESS = 0.5;
+const PLAY_W = 20;                       // symmetric playfield width
+const PLAY_H = 34;                       // taller table
+const WALL_T = 0.3;
 
-// Game objects
-let ball;
-let leftFlipper, rightFlipper;
-let leftFlipperJoint, rightFlipperJoint;
-let plunger;
-let plungerJoint;
-let groundBody;
-let bumpers = [];
+// Vertical walls end where the dome begins
+const WALL_TOP_Y = 20;
 
-// Game state
-let score = 0;
-let balls = 3;
-let gameOver = false;
-let plungerPower = 0;
-let isPullingPlunger = false;
+// Playfield spans x = -10 to +10 (symmetric around x=0)
+const PLAY_HALF_W = PLAY_W / 2;          // 10
 
-// Sounds
-let sfxBumper, sfxFlipper, sfxLaunch, sfxLose, sfxWall;
+// Launch lane is a separate channel to the right of the playfield
+const LANE_INNER_X = PLAY_HALF_W + WALL_T/2;     // 10.15 - playfield right wall center
+const LANE_OUTER_X = PLAY_HALF_W + 2 + WALL_T/2; // 12.15 - lane outer wall center
+const LANE_CENTER_X = (LANE_INNER_X + LANE_OUTER_X) / 2;  // 11.15
+const LANE_FLOOR_Y = 0.9;
+const LANE_BOTTOM = 1.5;
+
+// Top arcs
+const DOME_CENTER = vec2(0, WALL_TOP_Y);
+const DOME_RADIUS = 10;                  // inner arc - the playfield ceiling
+const RAIL_RADIUS = 12;                  // outer arc - the launcher top rail
+const DOME_END_ANGLE = 2.0;              // inner arc stops before full semicircle (leaves left exit open)
+const RAIL_END_ANGLE = 2.4;              // outer rail extends a bit further
+
+const BALL_DIAMETER = 1;
+const BALL_SPAWN = vec2(LANE_CENTER_X, 2.3);
+
+const FLIPPER_LENGTH = 3.2;
+const FLIPPER_THICKNESS = 0.5;
+const FLIPPER_REST_ANGLE = 0.35;
+const FLIPPER_FLIP_ANGLE = 0.85;
+const FLIPPER_MOTOR_SPEED = 45;
+const FLIPPER_MOTOR_TORQUE = 20000;
+const LEFT_PIVOT = vec2(-4.2, 3.4);
+const RIGHT_PIVOT = vec2(4.2, 3.4);
+
+const DRAIN_Y = -1.5;
+const LAUNCH_MIN = 38;
+const LAUNCH_MAX = 60;
+
+const WALL_COLOR = hsl(0.55, 0.4, 0.7);
+const RAIL_COLOR = hsl(0.55, 0.5, 0.6);
+const SLING_COLOR = hsl(0, 0.8, 0.45);
+const FLIPPER_COLOR = hsl(0.05, 0.9, 0.55);
+const BALL_COLOR = hsl(0, 0, 0.9);
 
 ///////////////////////////////////////////////////////////////////////////////
-// Custom Bumper class
-class Bumper
+// State
+
+let ball = null;
+let leftFlipper, rightFlipper;
+let bumpers = [];
+let slingshots = [];
+let score = 0;
+let highScore = 0;
+let ballsLeft = 3;
+let gameOver = false;
+let launchCharge = 0;
+let hasLaunchedEver = false;
+let sfxBumper, sfxFlipper, sfxDrain, sfxLaunch, sfxWall, sfxSling;
+
+///////////////////////////////////////////////////////////////////////////////
+// Ball
+
+class Ball extends Box2dObject
 {
-    constructor(pos, radius, points, color)
+    constructor(pos)
     {
-        this.pos = pos;
-        this.radius = radius;
-        this.points = points;
-        this.color = color;
-        this.hitTimer = 0;
-        
-        // Create static body for the bumper
-        this.body = new Box2dStaticObject(pos);
-        this.body.addCircle(radius);
+        super(pos, vec2(BALL_DIAMETER), undefined, 0, BALL_COLOR);
+        this.addCircle(BALL_DIAMETER, vec2(), 1, 0.05, 0.25);
+        this.setBullet(true);
+        this.setLinearDamping(0.15);
     }
-    
-    hit()
+    beginContact(other)
     {
-        this.hitTimer = 0.2;
-        score += this.points;
-        sfxBumper && sfxBumper.play(this.pos);
+        const speed = this.getLinearVelocity().length();
+        if (speed > 7 && !(other instanceof Bumper) && !(other instanceof Flipper) && !(other instanceof Slingshot))
+            sfxWall && sfxWall.play(this.pos, 0.4, clamp(speed/20, 0.5, 2));
     }
-    
-    update()
-    {
-        if (this.hitTimer > 0)
-            this.hitTimer -= timeDelta;
-    }
-    
     render()
     {
-        const flash = this.hitTimer > 0 ? 1.5 : 1;
-        const diameter = this.radius * 2 * (this.hitTimer > 0 ? 1.15 : 1);
-        drawCircle(this.pos, diameter, this.color.scale(flash, 1));
-        drawCircle(this.pos, diameter * 0.6, WHITE);
-        
-        // Draw points value - size based on diameter for proper fit
-        drawText(this.points.toString(), this.pos, diameter * 0.4, BLACK, 0.05);
+        drawCircle(this.pos, BALL_DIAMETER, BALL_COLOR, 0.08, BLACK);
+        drawCircle(this.pos.add(vec2(-0.15, 0.15)), 0.3, hsl(0, 0, 1, 0.5));
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-async function gameInit()
-{
-    await box2dInit();
-    
-    setCanvasFixedSize(vec2(720, 1080));
-    canvasClearColor = hsl(0.6, 0.3, 0.15);
-    cameraPos = vec2(0, 2);
-    cameraScale = 48;
-    
-    // Sounds
-    sfxBumper = new SoundGenerator({ frequency: 600, release: 0.08, pitchJump: 200, pitchJumpTime: 0.02, volume: 0.7 });
-    sfxFlipper = new SoundGenerator({ frequency: 300, release: 0.05, slide: 0.5, volume: 0.5 });
-    sfxLaunch = new SoundGenerator({ frequency: 150, release: 0.15, slide: 2, volume: 0.6 });
-    sfxLose = new SoundGenerator({ frequency: 100, release: 0.4, slide: -0.5, noise: 0.1, volume: 0.7 });
-    sfxWall = new SoundGenerator({ frequency: 400, release: 0.03, volume: 0.3 });
-    
-    // Create ground body for joints
-    groundBody = new Box2dStaticObject(vec2(0, -20));
-    
-    createTable();
-    createFlippers();
-    createPlunger();
-    createBumpers();
-    spawnBall();
-}
+// Bumper
 
-function createTable()
+class Bumper extends Box2dStaticObject
 {
-    const hw = TABLE_WIDTH / 2; // 6
-    const hh = TABLE_HEIGHT / 2; // 10
-    
-    // Left wall - full height
-    const leftWall = new Box2dStaticObject(vec2(-hw - WALL_THICKNESS/2, 0));
-    leftWall.addBox(vec2(WALL_THICKNESS, TABLE_HEIGHT + 2));
-    leftWall.color = hsl(0.55, 0.6, 0.4);
-    
-    // Right wall - only above the plunger lane entrance (stops at y=hh-3)
-    const rightWallTop = new Box2dStaticObject(vec2(hw + WALL_THICKNESS/2, hh - 1.5));
-    rightWallTop.addBox(vec2(WALL_THICKNESS, 3));
-    rightWallTop.color = hsl(0.55, 0.6, 0.4);
-    
-    // Lane separator (between main play area and plunger lane) - doesn't go all the way up
-    const laneSep = new Box2dStaticObject(vec2(hw, -2));
-    laneSep.addBox(vec2(WALL_THICKNESS, 14));
-    laneSep.color = hsl(0.55, 0.6, 0.4);
-    
-    // Plunger lane right wall
-    const plungerWall = new Box2dStaticObject(vec2(hw + 1.5 + WALL_THICKNESS/2, -2));
-    plungerWall.addBox(vec2(WALL_THICKNESS, 16));
-    plungerWall.color = hsl(0.55, 0.6, 0.4);
-    
-    // Top wall
-    const topWall = new Box2dStaticObject(vec2(0, hh + WALL_THICKNESS/2));
-    topWall.addBox(vec2(TABLE_WIDTH + 3.5, WALL_THICKNESS));
-    topWall.color = hsl(0.55, 0.6, 0.4);
-    
-    // Top left corner guide (angled)
-    const topLeftGuide = new Box2dStaticObject(vec2(-hw + 0.5, hh - 1.5));
-    topLeftGuide.addPoly([vec2(0, 0), vec2(-1.5, -2), vec2(-1.5, 0)]);
-    topLeftGuide.color = hsl(0.55, 0.6, 0.4);
-    
-    // Curved top-right guide - series of polygon segments to loop ball from plunger lane
-    // This creates a quarter-circle arc from the plunger lane into play area
-    const curveSegments = 8;
-    const curveRadiusInner = 1.5;
-    const curveRadiusOuter = 2.0;
-    const curveCenter = vec2(hw, hh - 2);
-    
-    // Build the curve as connected polygon segments
-    for (let i = 0; i < curveSegments; i++)
+    constructor(pos, radius = 1)
     {
-        const a1 = (i / curveSegments) * PI * 0.5; // 0 to 90 degrees
-        const a2 = ((i + 1) / curveSegments) * PI * 0.5;
-        
-        // Inner and outer points for this segment
-        const inner1 = vec2(Math.cos(a1) * curveRadiusInner, Math.sin(a1) * curveRadiusInner);
-        const inner2 = vec2(Math.cos(a2) * curveRadiusInner, Math.sin(a2) * curveRadiusInner);
-        const outer1 = vec2(Math.cos(a1) * curveRadiusOuter, Math.sin(a1) * curveRadiusOuter);
-        const outer2 = vec2(Math.cos(a2) * curveRadiusOuter, Math.sin(a2) * curveRadiusOuter);
-        
-        const seg = new Box2dStaticObject(curveCenter);
-        seg.addPoly([inner1, outer1, outer2, inner2]);
-        seg.color = hsl(0.55, 0.6, 0.4);
+        super(pos, vec2(radius * 2));
+        this.radius = radius;
+        this.addCircle(radius * 2, vec2(), 0, 0.1, 1.2);
+        this.flashTime = 0;
     }
-    
-    // Bottom slants leading to flippers - positioned to not interfere with plunger lane
-    const leftSlant = new Box2dStaticObject(vec2(-hw + 1.2, -hh + 3.5));
-    leftSlant.addPoly([vec2(-2, 3), vec2(-2, -1), vec2(0, -1)]);
-    leftSlant.color = hsl(0.08, 0.7, 0.45);
-    
-    // Right slant - moved left to avoid plunger lane
-    const rightSlant = new Box2dStaticObject(vec2(hw - 2.2, -hh + 3.5));
-    rightSlant.addPoly([vec2(2, 3), vec2(2, -1), vec2(0, -1)]);
-    rightSlant.color = hsl(0.08, 0.7, 0.45);
-    
-    // Outlane walls (slingshot dividers)
-    const leftOutlane = new Box2dStaticObject(vec2(-hw + 2.8, -hh + 2));
-    leftOutlane.addBox(vec2(0.3, 3));
-    leftOutlane.color = hsl(0.55, 0.6, 0.4);
-    
-    const rightOutlane = new Box2dStaticObject(vec2(hw - 3.8, -hh + 2));
-    rightOutlane.addBox(vec2(0.3, 3));
-    rightOutlane.color = hsl(0.55, 0.6, 0.4);
+    beginContact(other)
+    {
+        if (other === ball)
+        {
+            this.flashTime = 0.2;
+            score += 100;
+            sfxBumper && sfxBumper.play(this.pos);
+            const dir = other.pos.subtract(this.pos).normalize();
+            other.applyAcceleration(dir.scale(18));
+        }
+    }
+    render()
+    {
+        const flash = this.flashTime > 0;
+        const outer = flash ? WHITE : hsl(0.13, 0.9, 0.55);
+        const inner = flash ? hsl(0.13, 1, 0.85) : hsl(0.13, 0.9, 0.35);
+        drawCircle(this.pos, this.radius * 2, outer, 0.15, BLACK);
+        drawCircle(this.pos, this.radius * 1.1, inner);
+        this.flashTime = Math.max(0, this.flashTime - 1/60);
+    }
 }
 
-function createFlippers()
+///////////////////////////////////////////////////////////////////////////////
+// Slingshot
+
+class Slingshot extends Box2dStaticObject
 {
-    const flipperLength = 2.2;
-    const flipperHeight = 0.4;
-    const flipperY = -TABLE_HEIGHT/2 + 1.5;
-    const flipperSpacing = 1.4;
-    const pivotOffset = flipperLength/2 - 0.3; // distance from center to pivot
-    
-    // Left flipper - pivot on left end, extends to the right
-    const leftPivotX = -flipperSpacing;
-    leftFlipper = new Box2dObject(vec2(leftPivotX + pivotOffset, flipperY));
-    leftFlipper.addBox(vec2(flipperLength, flipperHeight));
-    leftFlipper.color = hsl(0.0, 0.8, 0.5);
-    
-    // Create revolute joint for left flipper - pivot at left end
-    leftFlipperJoint = new Box2dRevoluteJoint(leftFlipper, groundBody, 
-        vec2(leftPivotX, flipperY));
-    leftFlipperJoint.setLimits(-0.55, 0.1); // rest down, flip up
-    leftFlipperJoint.enableMotor(true);
-    leftFlipperJoint.setMotorSpeed(15); // positive to go down (rest position)
-    leftFlipperJoint.setMaxMotorTorque(100);
-    
-    // Right flipper - pivot on right end, extends to the left
-    const rightPivotX = flipperSpacing;
-    rightFlipper = new Box2dObject(vec2(rightPivotX - pivotOffset, flipperY));
-    rightFlipper.addBox(vec2(flipperLength, flipperHeight));
-    rightFlipper.color = hsl(0.0, 0.8, 0.5);
-    
-    // Create revolute joint for right flipper - pivot at right end
-    rightFlipperJoint = new Box2dRevoluteJoint(rightFlipper, groundBody,
-        vec2(rightPivotX, flipperY));
-    rightFlipperJoint.setLimits(-0.1, 0.55); // rest down, flip up
-    rightFlipperJoint.enableMotor(true);
-    rightFlipperJoint.setMotorSpeed(-15); // negative to go down (rest position)
-    rightFlipperJoint.setMaxMotorTorque(100);
+    constructor(pos, size, angle, kickDir)
+    {
+        super(pos, size, undefined, angle);
+        this.addBox(size, vec2(), 0, 0, 0.1, 0.4);
+        this.color = SLING_COLOR;
+        this.kickDir = kickDir;
+        this.flashTime = 0;
+    }
+    beginContact(other)
+    {
+        if (other === ball)
+        {
+            this.flashTime = 0.12;
+            score += 25;
+            sfxSling && sfxSling.play(this.pos);
+            other.applyAcceleration(this.kickDir.scale(10));
+        }
+    }
+    render()
+    {
+        const color = this.flashTime > 0 ? WHITE : SLING_COLOR;
+        drawRect(this.pos, this.size, color, this.angle);
+        this.flashTime = Math.max(0, this.flashTime - 1/60);
+    }
 }
 
-function createPlunger()
+///////////////////////////////////////////////////////////////////////////////
+// Flipper
+
+class Flipper extends Box2dObject
 {
-    const plungerX = TABLE_WIDTH/2 + 0.75;
-    const plungerY = -TABLE_HEIGHT/2 + 1;
-    
-    // Plunger (dynamic body) - positioned in the lane to push ball
-    plunger = new Box2dObject(vec2(plungerX, plungerY));
-    plunger.addBox(vec2(0.8, 0.5));
-    plunger.color = hsl(0.1, 0.8, 0.5);
-    
-    // Prismatic joint to constrain plunger movement vertically
-    plungerJoint = new Box2dPrismaticJoint(plunger, groundBody,
-        vec2(plungerX, plungerY), vec2(0, 1));
-    plungerJoint.setLimits(-2, 0); // can move 2 units down from rest
-    plungerJoint.enableMotor(true);
-    plungerJoint.setMotorSpeed(0);
-    plungerJoint.setMaxMotorForce(200);
-    
-    // Plunger lane bottom stopper
-    const plungerBottom = new Box2dStaticObject(vec2(plungerX, -TABLE_HEIGHT/2 - 1));
-    plungerBottom.addBox(vec2(1.5, 0.5));
-    plungerBottom.color = hsl(0.55, 0.6, 0.3);
+    constructor(pivotPos, facingRight)
+    {
+        const dir = facingRight ? 1 : -1;
+        const centerPos = pivotPos.add(vec2(dir * FLIPPER_LENGTH / 2, 0));
+        super(centerPos, vec2(FLIPPER_LENGTH, FLIPPER_THICKNESS), undefined, 0, FLIPPER_COLOR);
+        this.pivotPos = pivotPos;
+        this.facingRight = facingRight;
+        this.addBox(vec2(FLIPPER_LENGTH, FLIPPER_THICKNESS), vec2(), 0, 3, 0.1, 0.05);
+        this.setBullet(true);
+        this.setAngularDamping(0.5);
+
+        this.anchor = new Box2dStaticObject(pivotPos, vec2(0.2));
+        this.joint = new Box2dRevoluteJoint(this.anchor, this, pivotPos);
+        this.joint.enableLimit(true);
+        if (facingRight)
+            this.joint.setLimits(-FLIPPER_REST_ANGLE, FLIPPER_FLIP_ANGLE);
+        else
+            this.joint.setLimits(-FLIPPER_FLIP_ANGLE, FLIPPER_REST_ANGLE);
+        this.joint.enableMotor(true);
+        this.joint.setMaxMotorTorque(FLIPPER_MOTOR_TORQUE);
+        this.setMotor(false);
+    }
+    setMotor(active)
+    {
+        const dir = this.facingRight ? 1 : -1;
+        const speed = (active ? FLIPPER_MOTOR_SPEED : -FLIPPER_MOTOR_SPEED) * dir;
+        this.joint.setMotorSpeed(speed);
+    }
+    render()
+    {
+        drawRect(this.pos, vec2(FLIPPER_LENGTH, FLIPPER_THICKNESS), FLIPPER_COLOR, this.angle);
+        drawCircle(this.pivotPos, FLIPPER_THICKNESS * 1.4, hsl(0, 0, 0.2));
+    }
 }
 
-function createBumpers()
+///////////////////////////////////////////////////////////////////////////////
+// World build helpers
+
+function addWall(pos, size, angle = 0, color = WALL_COLOR)
 {
-    bumpers = [];
-    
-    // Top bumpers (triangle formation)
-    bumpers.push(new Bumper(vec2(0, 5), 0.8, 100, hsl(0.0, 0.9, 0.55)));
-    bumpers.push(new Bumper(vec2(-2, 3), 0.7, 50, hsl(0.15, 0.9, 0.55)));
-    bumpers.push(new Bumper(vec2(2, 3), 0.7, 50, hsl(0.15, 0.9, 0.55)));
-    
-    // Middle bumpers
-    bumpers.push(new Bumper(vec2(-1, 0), 0.6, 25, hsl(0.6, 0.9, 0.55)));
-    bumpers.push(new Bumper(vec2(1.5, 1), 0.6, 25, hsl(0.6, 0.9, 0.55)));
-    
-    // Upper side bumpers
-    bumpers.push(new Bumper(vec2(-4, 6), 0.5, 75, hsl(0.85, 0.9, 0.55)));
-    bumpers.push(new Bumper(vec2(4, 6), 0.5, 75, hsl(0.85, 0.9, 0.55)));
+    const w = new Box2dStaticObject(pos, size, undefined, angle);
+    w.addBox(size);
+    w.color = color;
+    return w;
+}
+
+function buildArc(center, radius, startA, endA, numSegs, thickness = 0.3, color = RAIL_COLOR)
+{
+    for (let i = 0; i < numSegs; i++)
+    {
+        const a1 = startA + (endA - startA) * (i / numSegs);
+        const a2 = startA + (endA - startA) * ((i + 1) / numSegs);
+        const p1 = vec2(center.x + radius * Math.cos(a1), center.y + radius * Math.sin(a1));
+        const p2 = vec2(center.x + radius * Math.cos(a2), center.y + radius * Math.sin(a2));
+        const mid = p1.add(p2).scale(0.5);
+        const length = p1.distance(p2);
+        const segAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+        addWall(mid, vec2(length + 0.08, thickness), -segAngle, color);
+    }
+}
+
+function buildWorld()
+{
+    // Playfield side walls (up to where the dome takes over)
+    addWall(vec2(-LANE_INNER_X, WALL_TOP_Y/2), vec2(WALL_T, WALL_TOP_Y));
+    addWall(vec2(LANE_INNER_X, WALL_TOP_Y/2), vec2(WALL_T, WALL_TOP_Y));
+
+    // Launch lane outer wall
+    addWall(vec2(LANE_OUTER_X, WALL_TOP_Y/2), vec2(WALL_T, WALL_TOP_Y));
+
+    // Lane floor
+    const laneFloorW = LANE_OUTER_X - LANE_INNER_X + WALL_T;
+    addWall(vec2(LANE_CENTER_X, LANE_FLOOR_Y), vec2(laneFloorW, 0.3));
+
+    // Playfield dome (inner arc): ceiling of the main playfield, stops short on the left for exit
+    buildArc(DOME_CENTER, DOME_RADIUS, 0, DOME_END_ANGLE, 14);
+
+    // Launcher top rail (outer arc): curved channel over the dome that guides the launched ball
+    buildArc(DOME_CENTER, RAIL_RADIUS, 0, RAIL_END_ANGLE, 18);
+
+    // Slingshots above flippers (symmetric, near flipper pivots)
+    slingshots.push(new Slingshot(vec2(-6.25, 5.5), vec2(4.0, 0.6), 0.686, vec2(0.633, 0.774)));
+    slingshots.push(new Slingshot(vec2(6.25, 5.5), vec2(4.0, 0.6), -0.686, vec2(-0.633, 0.774)));
+
+    // Bumpers (upper triangle, symmetric about x=0)
+    bumpers.push(new Bumper(vec2(-3, 14), 1.0));
+    bumpers.push(new Bumper(vec2(3, 14), 1.0));
+    bumpers.push(new Bumper(vec2(0, 18), 1.0));
+
+    // Flippers
+    leftFlipper = new Flipper(LEFT_PIVOT, true);
+    rightFlipper = new Flipper(RIGHT_PIVOT, false);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Launch
+
+function canLaunch()
+{
+    if (!ball) return false;
+    // Ball is in the lane (right of playfield wall) near the floor and slow
+    return ball.pos.x > LANE_INNER_X + WALL_T/2
+        && ball.pos.y < 5
+        && ball.getLinearVelocity().length() < 3;
+}
+
+function launchBall(power)
+{
+    if (!ball) return;
+    ball.setLinearVelocity(vec2(0, power));
+    hasLaunchedEver = true;
+    sfxLaunch && sfxLaunch.play(ball.pos);
 }
 
 function spawnBall()
 {
-    if (ball)
-        ball.destroy();
-    
-    const plungerX = TABLE_WIDTH/2 + 0.75;
-    // Spawn ball just above the plunger, in the plunger lane
-    ball = new Box2dObject(vec2(plungerX, -TABLE_HEIGHT/2 + 2));
-    ball.addCircle(0.35); // radius for collision
-    ball.color = hsl(0, 0, 0.85);
-    ball.setLinearDamping(0.1);
-    
-    isPullingPlunger = false;
-    plungerPower = 0;
+    if (ball) { ball.destroy(); ball = null; }
+    ball = new Ball(BALL_SPAWN);
+    launchCharge = 0;
+}
+
+function loseBall()
+{
+    sfxDrain && sfxDrain.play();
+    ballsLeft--;
+    if (ballsLeft <= 0)
+    {
+        gameOver = true;
+        highScore = Math.max(highScore, score);
+    }
+    else
+    {
+        spawnBall();
+    }
 }
 
 function resetGame()
 {
     score = 0;
-    balls = 3;
+    ballsLeft = 3;
     gameOver = false;
+    hasLaunchedEver = false;
     spawnBall();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+async function gameInit()
+{
+    setCanvasFixedSize(vec2(720, 1080));
+    cameraPos = vec2(0, PLAY_H/2);
+
+    await box2dInit();
+
+    sfxBumper = new SoundGenerator({ frequency: 440, release: 0.08, volume: 0.4, pitchJump: 200, pitchJumpTime: 0.02 });
+    sfxSling = new SoundGenerator({ frequency: 320, release: 0.06, volume: 0.35, pitchJump: 120, pitchJumpTime: 0.02 });
+    sfxFlipper = new SoundGenerator({ frequency: 180, release: 0.05, volume: 0.3, noise: 0.3 });
+    sfxDrain = new SoundGenerator({ frequency: 120, release: 0.4, volume: 0.5, slide: -0.2 });
+    sfxLaunch = new SoundGenerator({ frequency: 90, release: 0.3, volume: 0.5, slide: 0.3 });
+    sfxWall = new SoundGenerator({ frequency: 300, release: 0.04, volume: 0.2, noise: 0.2 });
+
+    buildWorld();
+    resetGame();
+}
+
 function gameUpdate()
 {
     if (gameOver)
     {
-        if (keyWasPressed('Space') || mouseWasPressed(0))
+        if (keyWasPressed('Space') || keyWasPressed('Enter'))
             resetGame();
         return;
     }
-    
-    // Flipper controls
+
+    const leftPressed = keyWasPressed('ArrowLeft') || keyWasPressed('KeyA') || keyWasPressed('KeyZ');
+    const rightPressed = keyWasPressed('ArrowRight') || keyWasPressed('KeyD') || keyWasPressed('Slash');
     const leftActive = keyIsDown('ArrowLeft') || keyIsDown('KeyA') || keyIsDown('KeyZ');
     const rightActive = keyIsDown('ArrowRight') || keyIsDown('KeyD') || keyIsDown('Slash');
-    
-    // Control flippers via motor speed
-    if (leftActive)
+    if (leftPressed) sfxFlipper && sfxFlipper.play(leftFlipper.pos, 0.5);
+    if (rightPressed) sfxFlipper && sfxFlipper.play(rightFlipper.pos, 0.5);
+    leftFlipper.setMotor(leftActive);
+    rightFlipper.setMotor(rightActive);
+
+    if (canLaunch())
     {
-        leftFlipperJoint.setMotorSpeed(-25); // negative to flip up
-        if (keyWasPressed('ArrowLeft') || keyWasPressed('KeyA') || keyWasPressed('KeyZ'))
-            sfxFlipper && sfxFlipper.play();
+        if (keyIsDown('Space'))
+            launchCharge = Math.min(LAUNCH_MAX, launchCharge + 1.2);
+        else if (launchCharge > 0)
+        {
+            launchBall(Math.max(LAUNCH_MIN, launchCharge));
+            launchCharge = 0;
+        }
     }
     else
     {
-        leftFlipperJoint.setMotorSpeed(15); // positive to rest down
+        launchCharge = 0;
     }
-    
-    if (rightActive)
-    {
-        rightFlipperJoint.setMotorSpeed(25); // positive to flip up
-        if (keyWasPressed('ArrowRight') || keyWasPressed('KeyD') || keyWasPressed('Slash'))
-            sfxFlipper && sfxFlipper.play();
-    }
-    else
-    {
-        rightFlipperJoint.setMotorSpeed(-15); // negative to rest down
-    }
-    
-    // Plunger controls
-    const plungerActive = keyIsDown('Space') || keyIsDown('ArrowDown');
-    
-    if (plungerActive)
-    {
-        isPullingPlunger = true;
-        plungerPower = min(plungerPower + timeDelta * 2, 1);
-        plungerJoint.setMotorSpeed(-15); // pull down
-    }
-    else if (isPullingPlunger)
-    {
-        // Release plunger! Launch with force proportional to power
-        const launchSpeed = 60 + plungerPower * 100;
-        plungerJoint.setMotorSpeed(launchSpeed);
-        sfxLaunch && sfxLaunch.play();
-        isPullingPlunger = false;
-        plungerPower = 0;
-    }
-    else
-    {
-        plungerJoint.setMotorSpeed(5);
-    }
-    
-    // Check ball collisions with bumpers
-    if (ball)
-    {
-        const ballPos = ball.pos;
-        const ballVel = ball.getLinearVelocity();
-        const ballSpeed = ballVel.length();
-        
-        for (const bumper of bumpers)
-        {
-            bumper.update();
-            
-            const dist = ballPos.distance(bumper.pos);
-            if (dist < bumper.radius + 0.5 && ballSpeed > 2)
-            {
-                // Check if we just hit this bumper
-                const dir = ballPos.subtract(bumper.pos).normalize();
-                const velDir = ballVel.normalize();
-                
-                // Only trigger if moving toward bumper
-                if (dir.dot(velDir) < 0.3)
-                {
-                    bumper.hit();
-                }
-            }
-        }
-        
-        // Check if ball fell out
-        if (ballPos.y < -TABLE_HEIGHT/2 - 2)
-        {
-            balls--;
-            sfxLose && sfxLose.play();
-            
-            if (balls <= 0)
-            {
-                gameOver = true;
-            }
-            else
-            {
-                spawnBall();
-            }
-        }
-        
-        // Add some spin when ball hits walls
-        if (abs(ballPos.x) > TABLE_WIDTH/2 - 1)
-        {
-            if (ballSpeed > 5)
-                sfxWall && sfxWall.play(ballPos);
-        }
-    }
-    
-    // Restart
-    if (keyWasPressed('KeyR'))
-        resetGame();
+
+    if (ball && ball.pos.y < DRAIN_Y) loseBall();
 }
 
-///////////////////////////////////////////////////////////////////////////////
 function gameUpdatePost()
 {
-    // Keep camera centered on table
-    cameraPos = vec2(0, 2);
+    cameraPos = vec2(0, PLAY_H/2);
 }
 
-///////////////////////////////////////////////////////////////////////////////
 function gameRender()
 {
-    // Draw table background
-    drawRect(vec2(0.5, 0), vec2(TABLE_WIDTH + 3, TABLE_HEIGHT + 2), hsl(0.55, 0.4, 0.2));
-    
-    // Draw main playfield
-    drawRect(vec2(0, 0), vec2(TABLE_WIDTH - 0.5, TABLE_HEIGHT - 0.5), hsl(0.35, 0.5, 0.25));
-    
-    // Draw plunger lane background
-    drawRect(vec2(TABLE_WIDTH/2 + 0.75, 0), vec2(1.3, TABLE_HEIGHT), hsl(0.35, 0.4, 0.2));
-    
-    // Draw decorative lines (guide rails visual)
-    drawLine(vec2(-4, -3), vec2(-2, 6), 0.08, hsl(0.15, 0.6, 0.5));
-    drawLine(vec2(3, -3), vec2(1.5, 6), 0.08, hsl(0.15, 0.6, 0.5));
-    
-    // Draw target zones
-    drawCircle(vec2(0, 7), 1.5, hsl(0.6, 0.3, 0.3));
-    drawCircle(vec2(-3.5, 2), 1, hsl(0.1, 0.3, 0.3));
-    drawCircle(vec2(2.5, 2), 1, hsl(0.1, 0.3, 0.3));
+    // Playfield rectangle (below the dome)
+    drawRectGradient(vec2(0, WALL_TOP_Y/2), vec2(PLAY_W, WALL_TOP_Y),
+                     hsl(0.62, 0.6, 0.15), hsl(0.7, 0.5, 0.05));
+    // Dome interior fill
+    drawCircle(DOME_CENTER, DOME_RADIUS * 2, hsl(0.62, 0.6, 0.18));
+
+    // Lane tint (narrow strip on the right, outside playfield)
+    const laneH = WALL_TOP_Y - LANE_FLOOR_Y;
+    drawRect(vec2(LANE_CENTER_X, (WALL_TOP_Y + LANE_FLOOR_Y)/2),
+             vec2(LANE_OUTER_X - LANE_INNER_X, laneH),
+             hsl(0.7, 0.3, 0.12));
+
+    // Launcher gauge inside the lane
+    if (canLaunch())
+    {
+        const frac = launchCharge / LAUNCH_MAX;
+        drawRect(vec2(LANE_CENTER_X, 6), vec2(0.35, 8), hsl(0, 0, 0.15));
+        if (frac > 0)
+            drawRect(vec2(LANE_CENTER_X, 2 + frac * 4), vec2(0.35, frac * 8), hsl(0.33 - frac * 0.33, 1, 0.5));
+    }
 }
 
-///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
-    // Render bumpers (on top of balls)
-    for (const bumper of bumpers)
-        bumper.render();
-    
-    // Draw ball shine - size is diameter
-    if (ball)
-    {
-        const shineOffset = vec2(-0.1, 0.1);
-        drawCircle(ball.pos.add(shineOffset), 0.12, hsl(0, 0, 1, 0.6));
-    }
-    
-    // Draw plunger power indicator
-    if (isPullingPlunger)
-    {
-        const plungerX = TABLE_WIDTH/2 + 2.5;
-        const barHeight = 6;
-        const barY = -TABLE_HEIGHT/2 + 3;
-        
-        // Background
-        drawRect(vec2(plungerX, barY), vec2(0.5, barHeight), hsl(0, 0, 0.2));
-        
-        // Power fill
-        const fillHeight = barHeight * plungerPower;
-        drawRect(vec2(plungerX, barY - barHeight/2 + fillHeight/2), 
-            vec2(0.4, fillHeight), hsl(lerp(0.3, 0, plungerPower), 0.9, 0.5));
-    }
-    
-    // HUD
-    const hudY = 40;
-    drawTextScreen('PINBALL', vec2(mainCanvasSize.x/2, hudY), 50, 
-        hsl(0.1, 0.9, 0.6), 4, hsl(0, 0, 0));
-    
-    drawTextScreen('SCORE: ' + score, vec2(mainCanvasSize.x/2, hudY + 50), 32,
-        WHITE, 3, BLACK);
-    
-    // Draw balls remaining
-    const ballsText = 'BALLS: ';
-    drawTextScreen(ballsText, vec2(mainCanvasSize.x/2 - 50, hudY + 85), 24, WHITE, 2, BLACK);
-    for (let i = 0; i < balls; i++)
-    {
-        drawTextScreen('●', vec2(mainCanvasSize.x/2 + 10 + i * 25, hudY + 85), 24, 
-            hsl(0, 0, 0.85), 2, BLACK);
-    }
-    
-    // Controls
-    drawTextScreen('LEFT/RIGHT or A/D: Flippers   SPACE/DOWN: Launch   R: Restart',
-        vec2(mainCanvasSize.x/2, mainCanvasSize.y - 30), 18, hsl(0, 0, 0.7), 2, BLACK);
-    
-    // Game over screen
+    drawTextScreen('SCORE: ' + score, vec2(mainCanvasSize.x/2, 40), 30, WHITE, 4, BLACK);
+    drawTextScreen('BALLS: ' + ballsLeft, vec2(80, 40), 22, WHITE, 3, BLACK);
+    if (highScore)
+        drawTextScreen('HI: ' + highScore, vec2(mainCanvasSize.x - 100, 40), 22, hsl(0.15, 1, 0.7), 3, BLACK);
+
     if (gameOver)
     {
-        drawRect(cameraPos, vec2(100, 100), hsl(0, 0, 0, 0.7));
-        drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 40), 60,
-            hsl(0, 0.9, 0.6), 5, BLACK);
-        drawTextScreen('Final Score: ' + score, vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 20), 36,
-            WHITE, 3, BLACK);
-        drawTextScreen('Press SPACE to play again', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 70), 24,
-            hsl(0.15, 0.8, 0.6), 2, BLACK);
+        drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 40), 60, hsl(0, 0.9, 0.6), 5, BLACK);
+        drawTextScreen('Press SPACE to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 20), 24, WHITE, 3, BLACK);
     }
+    else if (canLaunch())
+    {
+        const msg = hasLaunchedEver ? 'Hold SPACE to relaunch' : 'Hold SPACE to launch';
+        drawTextScreen(msg, vec2(mainCanvasSize.x/2, mainCanvasSize.y - 60), 22, WHITE, 3, BLACK);
+    }
+
+    drawTextScreen('A/D or Arrows: Flippers', vec2(mainCanvasSize.x/2, mainCanvasSize.y - 30), 16, hsl(0, 0, 0.7), 2, BLACK);
 }
 
-///////////////////////////////////////////////////////////////////////////////
 engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
 
 </script>
