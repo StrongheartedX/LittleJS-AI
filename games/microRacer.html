@@ -42,6 +42,7 @@ const TERRAIN_ROAD_EDGE = 2;
 const TERRAIN_SAND      = 3;
 const TERRAIN_WALL      = 4;
 const WALL_THICKNESS    = 2;   // tiles
+const OFFROAD_BUFFER    = 5;   // tiles of drivable grass between sand and wall
 const CAR_RADIUS        = 0.55;
 
 const TOTAL_LAPS  = 3;
@@ -206,30 +207,43 @@ function generateTrack(seed)
     for (const p of trackPoints) stamp(p, ROAD_RADIUS + EDGE_WIDTH, TERRAIN_ROAD_EDGE);
     for (const p of trackPoints) stamp(p, ROAD_RADIUS, TERRAIN_ROAD);
 
-    // walls: dilate the non-grass region into grass, WALL_THICKNESS times
-    // each iteration, any grass tile adjacent to non-grass becomes a wall
-    for (let pass = 0; pass < WALL_THICKNESS; pass++)
+    // walls: BFS distance field from non-grass cells, walls form a ring
+    // at distance (OFFROAD_BUFFER, OFFROAD_BUFFER + WALL_THICKNESS]
+    // so there's drivable grass between sand and wall
+    const maxDist = OFFROAD_BUFFER + WALL_THICKNESS;
+    const dist = new Int16Array(GRID_W * GRID_H).fill(maxDist + 1);
+    const queue = [];
+    for (let x = 0; x < GRID_W; x++)
+    for (let y = 0; y < GRID_H; y++)
     {
-        const toWall = [];
-        for (let x = 0; x < GRID_W; x++)
-        for (let y = 0; y < GRID_H; y++)
+        if (terrain[tIndex(x, y)] !== TERRAIN_GRASS)
         {
-            if (terrain[tIndex(x, y)] !== TERRAIN_GRASS) continue;
-            let adj = false;
-            outer: for (let dx = -1; dx <= 1; dx++)
-            for (let dy = -1; dy <= 1; dy++)
-            {
-                if (dx === 0 && dy === 0) continue;
-                const t = getTerrain(x + dx, y + dy);
-                if (t !== TERRAIN_GRASS && t !== TERRAIN_WALL)
-                {
-                    adj = true;
-                    break outer;
-                }
-            }
-            if (adj) toWall.push([x, y]);
+            dist[tIndex(x, y)] = 0;
+            queue.push([x, y]);
         }
-        for (const [x, y] of toWall) terrain[tIndex(x, y)] = TERRAIN_WALL;
+    }
+    let head = 0;
+    while (head < queue.length)
+    {
+        const [x, y] = queue[head++];
+        const d = dist[tIndex(x, y)];
+        if (d >= maxDist) continue;
+        const nd = d + 1;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]])
+        {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+            if (dist[tIndex(nx, ny)] > nd)
+            {
+                dist[tIndex(nx, ny)] = nd;
+                queue.push([nx, ny]);
+            }
+        }
+    }
+    for (let i = 0; i < GRID_W * GRID_H; i++)
+    {
+        const d = dist[i];
+        if (d > OFFROAD_BUFFER && d <= maxDist) terrain[i] = TERRAIN_WALL;
     }
 
     // pick finish line at trackPoints[0]
@@ -333,6 +347,7 @@ class Car
         this.boostTimer = 0;
         this.aiLaneOffset = 0;
         this.bumpCooldown = 0;
+        this.steerInput = 0;   // smoothed steering input for front-wheel rendering
     }
 
     forward() { return vec2().setAngle(this.angle, 1); }
@@ -355,6 +370,8 @@ class Car
             throttle = ai.throttle;
             turn = ai.turn;
         }
+        // smooth steering input toward current command for wheel rendering
+        this.steerInput = this.steerInput * 0.75 + turn * 0.25;
 
         const tType = terrainAt(this.pos);
         const onRoad = tType === TERRAIN_ROAD;
@@ -545,15 +562,20 @@ class Car
         const sideUnit = vec2().setAngle(this.angle + Math.PI/2, 1);
         const black = hsl(0, 0, .08);
 
-        // wheels first (under body edges)
+        // wheels first (under body edges). front wheels rotate with steering.
         const wheelSize = vec2(0.22, 0.5);
         const wheelFwd = this.size.y * 0.38;
         const wheelSide = this.size.x * 0.5 + 0.02;
+        const maxSteerVis = 0.55;   // ~31° max visible steer
+        const frontAngle = this.angle + this.steerInput * maxSteerVis;
         for (const fy of [-wheelFwd, wheelFwd])
-        for (const sx of [-wheelSide, wheelSide])
         {
-            const wp = this.pos.add(fwd.scale(fy)).add(sideUnit.scale(sx));
-            drawRect(wp, wheelSize, black, this.angle);
+            const wheelAng = fy > 0 ? frontAngle : this.angle;
+            for (const sx of [-wheelSide, wheelSide])
+            {
+                const wp = this.pos.add(fwd.scale(fy)).add(sideUnit.scale(sx));
+                drawRect(wp, wheelSize, black, wheelAng);
+            }
         }
 
         // body
@@ -763,11 +785,11 @@ function gameUpdatePost()
         pendingSkids.length = 0;
     }
 
-    // camera follows player, lead slightly in direction of travel
+    // camera follows player, lead further ahead at higher speeds
     const speed = player.velocity.length();
-    const lead = player.forward().scale(clamp(speed * 8, 2, 7));
+    const lead = player.forward().scale(clamp(speed * 9, 2, 10));
     const target = player.pos.add(lead);
-    cameraPos = cameraPos.lerp(target, 0.12);
+    cameraPos = cameraPos.lerp(target, 0.1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
