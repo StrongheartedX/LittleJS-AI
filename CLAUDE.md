@@ -7,7 +7,7 @@ Core goals
 
 Project constraints
 - One HTML file only (index.html). No build step.
-- Use the provided index.html as a starting point.
+- Use one of the HTML files from the templates folder as a starting point.
 - Do not include any other libraries, only littlejs.
 - Do not change the html or css, only write JavaScript.
 - No external assets (no images, textures, spritesheets, audio files).
