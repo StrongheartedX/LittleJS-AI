@@ -202,11 +202,11 @@ class Ragdoll
         
         this.createRevoluteJoint(
             this.parts.upperArmL, this.parts.lowerArmL,
-            elbowL, -2.5, 0
+            elbowL, -2.5, 2.5
         );
         this.createRevoluteJoint(
             this.parts.upperArmR, this.parts.lowerArmR,
-            elbowR, 0, 2.5
+            elbowR, -2.5, 2.5
         );
         
         // Hips
@@ -228,11 +228,11 @@ class Ragdoll
         
         this.createRevoluteJoint(
             this.parts.upperLegL, this.parts.lowerLegL,
-            kneeL, -2.5, 0
+            kneeL, -2.5, 2.5
         );
         this.createRevoluteJoint(
             this.parts.upperLegR, this.parts.lowerLegR,
-            kneeR, -2.5, 0
+            kneeR, -2.5, 2.5
         );
     }
     
@@ -378,7 +378,7 @@ async function gameInit()
     createPlatforms();
     
     // Spawn initial ragdoll
-    spawnRagdoll(WORLD_WIDTH / 2, 20);
+    spawnRagdoll(WORLD_WIDTH / 2, 10);
 }
 
 function spawnRagdoll(x, y)
