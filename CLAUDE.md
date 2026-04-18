@@ -8,7 +8,7 @@ Core goals
 Project constraints
 - One self-contained HTML file per prototype. No build step, no bundler.
 - Start from templates/index.html. Use templates/indexBox2d.html only if the game needs Box2D physics (rigid bodies, joints, ragdolls).
-- Write new prototypes into local/ unless the user specifies otherwise.
+- Write each new prototype as its own .html file in games/ (named after the game). The only index.html lives in templates/.
 - Do not include any other libraries, only littlejs.
 - Do not change the html or css, only write JavaScript.
 - No external assets (no images, textures, spritesheets, audio files).
@@ -27,7 +27,7 @@ Output format
 - Step summary (1-3 lines)
 - Quick test instructions (expected result, controls)
 - Next step options (2-4 choices)
-- Write code directly to index.html
+- Write code directly to the prototype's .html file in games/
 
 Common pitfalls
 - For drawCircle and drawEllipse, the size is the diameter not the radius.
