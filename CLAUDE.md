@@ -6,8 +6,9 @@ Core goals
 - Work in short iterations. After each step, suggest the next small step.
 
 Project constraints
-- One HTML file only (index.html). No build step.
-- Use one of the HTML files from the templates folder as a starting point.
+- One self-contained HTML file per prototype. No build step, no bundler.
+- Start from templates/index.html. Use templates/indexBox2d.html only if the game needs Box2D physics (rigid bodies, joints, ragdolls).
+- Write new prototypes into local/ unless the user specifies otherwise.
 - Do not include any other libraries, only littlejs.
 - Do not change the html or css, only write JavaScript.
 - No external assets (no images, textures, spritesheets, audio files).
@@ -39,3 +40,5 @@ Common pitfalls
 Notes
 - Drawing functions are in world space by default with a screenSpace parameter
 - Use keyDirection() to get directional input as a vec2.
+- GPT/reference.md and GPT/tutorial.md document the LittleJS API in detail; consult them for unfamiliar functions.
+- Test by opening the .html file directly in a browser — dist/littlejs.js is local, no server required.
