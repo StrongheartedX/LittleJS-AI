@@ -248,14 +248,14 @@ class Player extends EngineObject
 {
     constructor(pos)
     {
-        super(pos, vec2(.82, .92));
+        super(pos, vec2(1, 1));
         this.vel = vec2();
         this.onGround = false;
         this.facing = 1;
         this.won = false;
-        this.jumpHold = 0;
-        this.jumpHolding = false;
         this.prevJumpDown = false;
+        this.coyoteTimer = 0;
+        this.bufferTimer = 0;
 
         // disable built-in physics/collision (we do custom tile collision)
         this.setCollision(false, false, false, false);
@@ -271,63 +271,84 @@ class Player extends EngineObject
         const run   = keyIsDown('ShiftLeft')  || keyIsDown('KeyX');
         const jumpDown = keyIsDown('Space') || keyIsDown('ArrowUp') || keyIsDown('KeyZ');
         const jumpPressed = jumpDown && !this.prevJumpDown;
-        const jumpReleased = !jumpDown && this.prevJumpDown;
 
-        // movement tuning (per-frame values, engine is fixed 60fps)
-        const accel = run ? .045 : .032;
-        const maxSpeed = run ? .34 : .24;
-        const friction = this.onGround ? .78 : .92;
-        const gravity = .022;
-        const jumpVel = .46;
-        const jumpHoldFrames = 12;     // frames you can hold to gain extra height
-        const jumpHoldBoost  = .012;   // added upward velocity per frame while holding
-        const jumpCut        = .45;    // release early => reduce upward velocity
+        // SMB-feel tuning (per-frame, engine is fixed 60fps)
+        const WALK_ACCEL    = .032;
+        const RUN_ACCEL     = .045;
+        const WALK_MAX      = .24;
+        const RUN_MAX       = .34;
+        const AIR_ACCEL_MUL = .7;      // reduced horizontal control in air
+        const SKID_DECEL    = .085;    // deceleration when input opposes ground velocity
+        const IDLE_FRICTION = .6;     // ground friction when no directional input
+        const GRAVITY_RISE  = .020;    // base gravity (rising and at apex)
+        const GRAVITY_FALL  = .030;    // slightly heavier while falling (vel.y < 0)
+        const JUMP_CUT      = .4;      // multiply upward vel when jump released (short hop)
+        const JUMP_VEL  = .50;     // jump velocity
+        const TERMINAL_VEL  = -.9;
+        const COYOTE_FRAMES = 6;
+        const BUFFER_FRAMES = 6;
+
+        const accel = run ? RUN_ACCEL : WALK_ACCEL;
+        const maxSpeed = run ? RUN_MAX : WALK_MAX;
+
+        // coyote + buffer timers
+        if (this.onGround) this.coyoteTimer = COYOTE_FRAMES;
+        else if (this.coyoteTimer > 0) this.coyoteTimer--;
+
+        if (jumpPressed) this.bufferTimer = BUFFER_FRAMES;
+        else if (this.bufferTimer > 0) this.bufferTimer--;
 
         if (!this.won)
         {
-            if (left)  { this.vel.x -= accel; this.facing = -1; }
-            if (right) { this.vel.x += accel; this.facing =  1; }
-
-            // friction when no input, or always a bit when on ground
-            if (!left && !right)
-                this.vel.x *= friction;
-
-            // clamp
-            this.vel.x = clamp(this.vel.x, -maxSpeed, maxSpeed);
-
-            // jump (variable height)
-            if (jumpPressed && this.onGround)
+            // horizontal: skid takes priority, then accel, then idle friction
+            if (this.onGround && left && this.vel.x > 0)
             {
-                this.vel.y = jumpVel;
+                this.vel.x = max(0, this.vel.x - SKID_DECEL);
+                this.facing = -1;
+            }
+            else if (this.onGround && right && this.vel.x < 0)
+            {
+                this.vel.x = min(0, this.vel.x + SKID_DECEL);
+                this.facing = 1;
+            }
+            else if (left)
+            {
+                this.vel.x -= accel * (this.onGround ? 1 : AIR_ACCEL_MUL);
+                this.facing = -1;
+            }
+            else if (right)
+            {
+                this.vel.x += accel * (this.onGround ? 1 : AIR_ACCEL_MUL);
+                this.facing = 1;
+            }
+            else if (this.onGround)
+                this.vel.x *= IDLE_FRICTION;
+
+            // on ground: clamp to current walk/run limit; in air: preserve running momentum
+            this.vel.x = this.onGround
+                ? clamp(this.vel.x, -maxSpeed, maxSpeed)
+                : clamp(this.vel.x, -RUN_MAX, RUN_MAX);
+
+            // jump: coyote + buffer — speed-scaled initial velocity
+            if (this.bufferTimer > 0 && this.coyoteTimer > 0)
+            {
+                this.vel.y = JUMP_VEL;
+                this.coyoteTimer = 0;
+                this.bufferTimer = 0;
                 this.onGround = false;
-                this.jumpHolding = true;
-                this.jumpHold = jumpHoldFrames;
                 sfxJump.play(this.pos);
             }
 
-            // hold to go higher (only while rising)
-            if (this.jumpHolding)
-            {
-                if (jumpDown && this.jumpHold > 0 && this.vel.y > 0)
-                {
-                    this.vel.y += jumpHoldBoost;
-                    this.jumpHold--;
-                }
-                else
-                    this.jumpHolding = false;
-            }
-
-            // short hop if released early
+            // short hop: cut upward velocity if jump released mid-rise
+            const jumpReleased = !jumpDown && this.prevJumpDown;
             if (jumpReleased && this.vel.y > 0)
-            {
-                this.vel.y *= jumpCut;
-                this.jumpHolding = false;
-            }
+                this.vel.y *= JUMP_CUT;
         }
 
-        // gravity
+        // gravity: base while rising/floating, a little heavier when falling
+        const gravity = (this.vel.y < 0) ? GRAVITY_FALL : GRAVITY_RISE;
         this.vel.y -= gravity;
-        this.vel.y = max(this.vel.y, -0.9);
+        this.vel.y = max(this.vel.y, TERMINAL_VEL);
 
         // move + collide
         this.moveAndCollide();
@@ -415,8 +436,6 @@ class Player extends EngineObject
                     this.pos.y = ySide - half.y;
                     this.vel.y = 0;
                     sfxBump.play(this.pos);
-                    this.jumpHolding = false;
-                    this.jumpHold = 0;
                     break;
                 }
             }
@@ -430,8 +449,6 @@ class Player extends EngineObject
                     this.pos.y = ySide + 1 + half.y;
                     this.vel.y = 0;
                     this.onGround = true;
-                    this.jumpHolding = false;
-                    this.jumpHold = 0;
                     break;
                 }
             }
@@ -564,8 +581,8 @@ function gameRender()
     {
         const cx = cameraPos.x*.35 + i*10 + 3;
         const cy = 10 + (i%3)*2 + oscillate(.3, 1, time+i)*.2;
-        drawRect(vec2(cx, cy), vec2(3.2, 1.1), rgb(1,1,1,.65));
-        drawRect(vec2(cx+1.2, cy+.4), vec2(2.6, .9), rgb(1,1,1,.65));
+        drawEllipse(vec2(cx, cy), vec2(3.2, 1.1), rgb(1,1,1,.65));
+        drawEllipse(vec2(cx+1.2, cy+.4), vec2(2.6, .9), rgb(1,1,1,.65));
     }
 
     // draw visible tiles only
