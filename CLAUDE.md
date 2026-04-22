@@ -7,7 +7,7 @@ Core goals
 
 Project constraints
 - One self-contained HTML file per prototype. No build step, no bundler.
-- Start from templates/game.html. Use templates/box2dGame.html only if the game needs Box2D physics (rigid bodies, joints, ragdolls).
+- Start from templates/game.html. Use templates/boardGame.html for grid/board games (has menu, hover, AI opponent scaffolding). Use templates/box2dGame.html only if the game needs Box2D physics (rigid bodies, joints, ragdolls).
 - Write each new prototype as its own .html file in games/ (named after the game).
 - Do not include any other libraries, only littlejs.
 - Do not change the html or css, only write JavaScript.
@@ -32,9 +32,11 @@ Output format
 Common pitfalls
 - For drawCircle and drawEllipse, the size is the diameter not the radius.
 - Clockwise is positive for angles.
+- Y-axis is up-positive in world space (gravity.y is negative to fall down).
+- drawText uses world units (size ~3 is normal); drawTextScreen uses pixels (size ~80 is normal). Do not mix them up.
+- When using the Box2D template, call `await box2dInit()` at the top of gameInit before creating any bodies.
 - Do not redefine shortcuts to Math functions.
 - Do not write new audio code, just use SoundGenerator to make sounds.
-- Do not change html or css, only write JavaScript.
 - Do not replace \n with new lines for text inside strings.
 
 Notes
