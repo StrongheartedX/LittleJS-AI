@@ -251,10 +251,10 @@ soundDefaultTaper = .7  // Default range percent to taper off sound (0-1)
 
 ```javascript
 // Keyboard
-keyIsDown(key)                        // Is key down?
-keyWasPressed(key)                    // Was key pressed this frame?
-keyWasReleased(key)                   // Was key released this frame?
-keyDirection(up, down, left, right)   // Get input vector from arrow keys or wasd
+keyIsDown(key)       // Is key down?
+keyWasPressed(key)   // Was key pressed this frame?
+keyWasReleased(key)  // Was key released this frame?
+keyDirection()       // Get input vector from arrow keys or wasd
 
 // Mouse / Touch
 mousePos                              // World space mouse position
