@@ -264,18 +264,21 @@ function gameUpdatePost()
 ///////////////////////////////////////////////////////////////////////////////
 function gameRender()
 {
-    // draw each 1x1 sprite in a row, gently rotating
+    // show the full atlas underneath the sprites
+    const atlasSize = vec2(6);
+    const fullAtlas = new TileInfo(vec2(), vec2(ATLAS_SIZE));
+    drawRect(vec2(0,-1), atlasSize, GRAY);
+    drawTile(vec2(0,-1), atlasSize, fullAtlas, WHITE);
+
+    // draw all sprites in a row on top, gently rotating
     const row = [sprites.circle, sprites.star, sprites.gem,
-                 sprites.gear, sprites.heart, sprites.bolt];
+                 sprites.gear, sprites.heart, sprites.bolt, sprites.face];
     const angle = time;
     for (let i = 0; i < row.length; i++)
     {
-        const x = (i - (row.length - 1)/2) * 2.2;
-        drawTile(vec2(x, 1.5), vec2(2), row[i], WHITE, angle);
+        const x = (i - (row.length - 1)/2) * 1.8;
+        drawTile(vec2(x, 3), vec2(1.5), row[i], WHITE, angle);
     }
-
-    // draw the 2x2 face sprite below, at double size
-    drawTile(vec2(0, -2.5), vec2(4), sprites.face);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
