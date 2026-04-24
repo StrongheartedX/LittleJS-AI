@@ -45,44 +45,9 @@ class SoundGenerator extends Sound
 ///////////////////////////////////////////////////////////////////////////////
 // UI SYSTEM TEMPLATE
 
-// Build a tiny procedural atlas (4x1 of 128px tiles) so UITile works
-// without any external image assets. Swap or remove if not needed.
-function createDemoAtlas()
-{
-    const tileSize = 128, cols = 4;
-    const cvs = document.createElement('canvas');
-    cvs.width = tileSize * cols;
-    cvs.height = tileSize;
-    const ctx = cvs.getContext('2d');
-
-    const glyphs = ['♥', '★', '◆', '☀'];
-    const hues = [0, .15, .55, .8];
-    for (let i = 0; i < cols; i++)
-    {
-        const x = i * tileSize;
-        const grad = ctx.createRadialGradient(
-            x + tileSize/2, tileSize/2, 8,
-            x + tileSize/2, tileSize/2, tileSize/1.4);
-        grad.addColorStop(0, `hsl(${hues[i]*360},90%,70%)`);
-        grad.addColorStop(1, `hsl(${hues[i]*360},70%,25%)`);
-        ctx.fillStyle = grad;
-        ctx.fillRect(x, 0, tileSize, tileSize);
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 96px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(glyphs[i], x + tileSize/2, tileSize/2 + 6);
-    }
-
-    textureInfos[0] = new TextureInfo(cvs);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
-    createDemoAtlas();
-
     // setup ui system plugin
     new UISystemPlugin;
     uiSystem.defaultSoundPress = new Sound([.5,0,220]);
@@ -96,11 +61,8 @@ async function gameInit()
     canvasClearColor = hsl(0,0,.8);
 
     // example text
-    uiMenu.addChild(new UIText(vec2(-100,-120), vec2(450, 80),
+    uiMenu.addChild(new UIText(vec2(0,-120), vec2(600, 80),
         'LittleJS UI\nSystem Demo'));
-
-    // example image
-    uiMenu.addChild(new UITile(vec2(230,-140), vec2(170), tile(3, 128)));
 
     // example checkbox
     const checkbox = new UICheckbox(vec2(-170,0), vec2(50));
