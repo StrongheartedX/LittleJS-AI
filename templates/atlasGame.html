@@ -1,0 +1,296 @@
+<!DOCTYPE html><head>
+<title>LittleJS Texture Atlas Template</title>
+<meta charset="utf-8">
+</head><body style="background:#000">
+<script src="../dist/littlejs.js"></script>
+<script>
+'use strict';
+
+// engine settings, do not remove
+debugWatermark = false;
+showEngineVersion = false;
+paused = false;
+
+// engine settings, customize if necessary
+gravity = vec2(0, 0);
+cameraPos = vec2(0, 0);
+cameraScale = 64;
+
+// AI can use this class to make sound effects
+class SoundGenerator extends Sound
+{
+    constructor(params = {})
+    {
+        const {
+            volume = 1,
+            randomness = .05,
+            frequency = 220,
+            attack = 0,
+            release = .1,
+            shapeCurve = 1,
+            slide = 0,
+            pitchJump = 0,
+            pitchJumpTime = 0,
+            repeatTime = 0,
+            noise = 0,
+            bitCrush = 0,
+            delay = 0,
+        } = params;
+
+        super([volume, randomness, frequency, attack, 0, release, 0, shapeCurve, slide, 0,
+            pitchJump, pitchJumpTime, repeatTime, noise, 0, bitCrush, delay, 1, 0, 0, 0]);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// TEXTURE ATLAS TEMPLATE
+//
+// Builds a 2048x2048 atlas of 256px tiles entirely from canvas draw ops.
+// drawToAtlas(pos, size, drawFn) paints a sprite into the atlas and returns
+// a TileInfo ready to use with drawTile.
+
+const ATLAS_SIZE = 2048;
+const TILE_SIZE = 256;
+
+let atlasCanvas, atlasCtx;
+const sprites = {}; // named TileInfo lookup populated in gameInit
+
+function initAtlas()
+{
+    atlasCanvas = document.createElement('canvas');
+    atlasCanvas.width = atlasCanvas.height = ATLAS_SIZE;
+    atlasCtx = atlasCanvas.getContext('2d');
+
+    // replace the engine's default texture with our atlas canvas
+    textureInfos[0] && textureInfos[0].destroyWebGLTexture();
+    textureInfos[0] = new TextureInfo(atlasCanvas);
+}
+
+// Draw a sprite into the atlas at (pos) with (size), both in tile units.
+// drawFn receives (ctx, pxSize) — ctx is translated so (0,0) is the sprite's
+// top-left corner. Returns a TileInfo for use with drawTile.
+function drawToAtlas(pos, size, drawFn)
+{
+    const px = pos.scale(TILE_SIZE);
+    const pxSize = size.scale(TILE_SIZE);
+    atlasCtx.save();
+    atlasCtx.translate(px.x, px.y);
+    drawFn(atlasCtx, pxSize);
+    atlasCtx.restore();
+
+    // re-upload canvas pixels to WebGL so the sprite is visible immediately
+    textureInfos[0].createWebGLTexture();
+    return new TileInfo(px, pxSize, textureInfos[0]);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// SPRITE PAINTERS — each fills a transparent tile using canvas ops
+
+function paintCircle(ctx, s)
+{
+    const r = s.x/2 - 12;
+    const g = ctx.createRadialGradient(s.x*.4, s.y*.35, r*.1, s.x/2, s.y/2, r);
+    g.addColorStop(0, '#ffb3b3');
+    g.addColorStop(1, '#b40000');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s.x/2, s.y/2, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#400';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+}
+
+function paintStar(ctx, s)
+{
+    const cx = s.x/2, cy = s.y/2, rOuter = s.x/2 - 16, rInner = rOuter * .45;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++)
+    {
+        const a = -Math.PI/2 + i * Math.PI/5;
+        const r = i % 2 ? rInner : rOuter;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#ffd23f';
+    ctx.fill();
+    ctx.strokeStyle = '#8a5a00';
+    ctx.lineWidth = 10;
+    ctx.stroke();
+}
+
+function paintGem(ctx, s)
+{
+    const cx = s.x/2, top = 28, bot = s.y - 28, sideY = s.y*.38;
+    const left = 32, right = s.x - 32;
+    ctx.beginPath();
+    ctx.moveTo(cx, top);
+    ctx.lineTo(right, sideY);
+    ctx.lineTo(cx, bot);
+    ctx.lineTo(left, sideY);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, top, 0, bot);
+    g.addColorStop(0, '#9be9ff');
+    g.addColorStop(1, '#0a5f8a');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = '#022';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+    // highlight facet
+    ctx.beginPath();
+    ctx.moveTo(cx, top);
+    ctx.lineTo(cx - 30, sideY);
+    ctx.lineTo(cx, bot);
+    ctx.lineTo(cx + 30, sideY);
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(255,255,255,.5)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+}
+
+function paintGear(ctx, s)
+{
+    const cx = s.x/2, cy = s.y/2;
+    const teeth = 10, rOuter = s.x/2 - 16, rInner = rOuter - 28;
+    ctx.beginPath();
+    for (let i = 0; i < teeth*2; i++)
+    {
+        const a = i * Math.PI / teeth;
+        const r = i % 2 ? rInner : rOuter;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#888';
+    ctx.fill();
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+    // center hole
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner*.45, 0, Math.PI*2);
+    ctx.fillStyle = '#222';
+    ctx.fill();
+}
+
+function paintHeart(ctx, s)
+{
+    const cx = s.x/2, cy = s.y*.3;
+    const w = s.x*.2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + w*.4);
+    ctx.bezierCurveTo(cx, cy - w*.4, cx - w*2, cy - w*.4, cx - w*2, cy + w*.3);
+    ctx.bezierCurveTo(cx - w*2, cy + w*1.1, cx, cy + w*2.2, cx, cy + w*3);
+    ctx.bezierCurveTo(cx, cy + w*2.2, cx + w*2, cy + w*1.1, cx + w*2, cy + w*.3);
+    ctx.bezierCurveTo(cx + w*2, cy - w*.4, cx, cy - w*.4, cx, cy + w*.4);
+    ctx.closePath();
+    ctx.fillStyle = '#ff3b6c';
+    ctx.fill();
+    ctx.strokeStyle = '#661022';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+}
+
+function paintBolt(ctx, s)
+{
+    ctx.beginPath();
+    ctx.moveTo(s.x*.55, 24);
+    ctx.lineTo(s.x*.2,  s.y*.55);
+    ctx.lineTo(s.x*.45, s.y*.55);
+    ctx.lineTo(s.x*.3,  s.y - 24);
+    ctx.lineTo(s.x*.8,  s.y*.4);
+    ctx.lineTo(s.x*.55, s.y*.4);
+    ctx.lineTo(s.x*.8,  24);
+    ctx.closePath();
+    ctx.fillStyle = '#fff46a';
+    ctx.fill();
+    ctx.strokeStyle = '#7a5a00';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+}
+
+// 2x2 example: a simple face showing a sprite larger than one tile
+function paintFace(ctx, s)
+{
+    const cx = s.x/2, cy = s.y/2, r = s.x/2 - 24;
+    ctx.fillStyle = '#ffd18a';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#5a3a00';
+    ctx.lineWidth = 12;
+    ctx.stroke();
+    // eyes
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(cx - r*.35, cy - r*.15, r*.12, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + r*.35, cy - r*.15, r*.12, 0, Math.PI*2); ctx.fill();
+    // smile
+    ctx.beginPath();
+    ctx.arc(cx, cy + r*.1, r*.45, .15*Math.PI, .85*Math.PI);
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#5a1010';
+    ctx.stroke();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+async function gameInit()
+{
+    initAtlas();
+
+    // populate the atlas — (tilePos, tileSize, drawFn)
+    sprites.circle = drawToAtlas(vec2(0,0), vec2(1), paintCircle);
+    sprites.star   = drawToAtlas(vec2(1,0), vec2(1), paintStar);
+    sprites.gem    = drawToAtlas(vec2(2,0), vec2(1), paintGem);
+    sprites.gear   = drawToAtlas(vec2(3,0), vec2(1), paintGear);
+    sprites.heart  = drawToAtlas(vec2(4,0), vec2(1), paintHeart);
+    sprites.bolt   = drawToAtlas(vec2(5,0), vec2(1), paintBolt);
+    sprites.face   = drawToAtlas(vec2(0,1), vec2(2), paintFace);
+
+    canvasClearColor = hsl(.6, .2, .15);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdate()
+{
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdatePost()
+{
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRender()
+{
+    // draw each 1x1 sprite in a row, gently rotating
+    const row = [sprites.circle, sprites.star, sprites.gem,
+                 sprites.gear, sprites.heart, sprites.bolt];
+    const angle = time;
+    for (let i = 0; i < row.length; i++)
+    {
+        const x = (i - (row.length - 1)/2) * 2.2;
+        drawTile(vec2(x, 1.5), vec2(2), row[i], WHITE, angle);
+    }
+
+    // draw the 2x2 face sprite below, at double size
+    drawTile(vec2(0, -2.5), vec2(4), sprites.face);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRenderPost()
+{
+    drawTextScreen('Texture Atlas Template',
+        vec2(mainCanvasSize.x/2, 60), 50,
+        WHITE, 4, BLACK);
+    drawTextScreen('2048 atlas • 256 tiles • drawn in code',
+        vec2(mainCanvasSize.x/2, 110), 24,
+        hsl(0,0,.7), 2, BLACK);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Startup LittleJS Engine
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
+
+</script></body></html>
