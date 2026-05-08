@@ -15,6 +15,8 @@ const tweakRegistry = new Map();
 let tweakPanelEl = null;
 let tweakRowsEl = null;
 let tweakPanelVisible = false;
+let tweakStorageKey = null;
+let tweakStoredValues = null;
 
 function tweak(path, options = {})
 {
@@ -61,6 +63,16 @@ function tweak(path, options = {})
 
     tweakRegistry.set(path, entry);
     tweakRowsEl.appendChild(entry.rowEl);
+
+    const stored = tweakStoredValues && tweakStoredValues[path];
+    if (stored !== undefined)
+    {
+        const restored = restoreStoredValue(type, stored);
+        if (restored !== undefined)
+            entry.applyValue(restored);
+        else
+            console.warn('tweak: stored value for "' + path + '" type mismatch, ignoring');
+    }
 }
 
 function tweakEngineDefaults()
@@ -73,6 +85,17 @@ function tweakEngineDefaults()
 function initTweakSystem()
 {
     if (tweakPanelEl) return;
+
+    tweakStorageKey = 'littlejs-tweaks-' + location.pathname;
+    try
+    {
+        const raw = localStorage.getItem(tweakStorageKey);
+        tweakStoredValues = raw ? JSON.parse(raw) : {};
+    }
+    catch (e)
+    {
+        tweakStoredValues = {};
+    }
 
     tweakPanelEl = document.createElement('div');
     tweakPanelEl.style.cssText =
@@ -179,6 +202,7 @@ function buildNumberRow(path, codeDefault, options)
             const v = parseFloat(slider.value);
             setByPath(window, path, v);
             num.value = String(v);
+            persistTweakValue(path, v);
         });
     }
 
@@ -188,6 +212,7 @@ function buildNumberRow(path, codeDefault, options)
         if (Number.isNaN(v)) return;
         setByPath(window, path, v);
         if (slider) slider.value = String(v);
+        persistTweakValue(path, v);
     });
 
     return {
@@ -231,6 +256,7 @@ function buildBooleanRow(path, codeDefault, options)
     cb.addEventListener('change', () =>
     {
         setByPath(window, path, cb.checked);
+        persistTweakValue(path, cb.checked);
     });
 
     return {
@@ -282,7 +308,11 @@ function buildColorRow(path, codeDefault, options)
         picker.value = colorToHex(cur);
     };
 
-    picker.addEventListener('input', () => writeFromHex(picker.value));
+    picker.addEventListener('input', () =>
+    {
+        writeFromHex(picker.value);
+        persistTweakValue(path, getByPath(window, path));
+    });
 
     return {
         type: 'color',
@@ -353,6 +383,7 @@ function buildVec2Row(path, codeDefault, options)
                 const cur = getByPath(window, path);
                 cur[axis] = v;
                 num.value = String(v);
+                persistTweakValue(path, cur);
             });
         }
         num.addEventListener('input', () =>
@@ -362,6 +393,7 @@ function buildVec2Row(path, codeDefault, options)
             const cur = getByPath(window, path);
             cur[axis] = v;
             if (slider) slider.value = String(v);
+            persistTweakValue(path, cur);
         });
 
         return { wrap, slider, num, writeAxis };
@@ -389,4 +421,38 @@ function buildVec2Row(path, codeDefault, options)
         rowEl: row,
         applyValue: apply,
     };
+}
+
+function persistTweakValue(path, value)
+{
+    if (!tweakStoredValues) return;
+    let toStore;
+    if (typeof value === 'number' || typeof value === 'boolean')
+        toStore = value;
+    else if (value instanceof Color)
+        toStore = [value.r, value.g, value.b, value.a];
+    else if (value instanceof Vector2)
+        toStore = [value.x, value.y];
+    else
+        return;
+    tweakStoredValues[path] = toStore;
+    try
+    {
+        localStorage.setItem(tweakStorageKey, JSON.stringify(tweakStoredValues));
+    }
+    catch (e)
+    {
+        // localStorage full or disabled — keep in-memory only
+    }
+}
+
+function restoreStoredValue(type, stored)
+{
+    if (type === 'number' && typeof stored === 'number') return stored;
+    if (type === 'boolean' && typeof stored === 'boolean') return stored;
+    if (type === 'color' && Array.isArray(stored) && stored.length === 4)
+        return new Color(stored[0], stored[1], stored[2], stored[3]);
+    if (type === 'vec2' && Array.isArray(stored) && stored.length === 2)
+        return vec2(stored[0], stored[1]);
+    return undefined;
 }
