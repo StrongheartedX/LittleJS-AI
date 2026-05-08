@@ -47,6 +47,8 @@ function tweak(path, options = {})
     let entry;
     if (type === 'number')
         entry = buildNumberRow(path, codeDefault, options);
+    else if (type === 'boolean')
+        entry = buildBooleanRow(path, codeDefault, options);
     else
     {
         console.warn('tweak: type "' + type + '" not yet implemented');
@@ -187,6 +189,49 @@ function buildNumberRow(path, codeDefault, options)
     return {
         type: 'number',
         codeDefault,
+        options,
+        rowEl: row,
+        applyValue: apply,
+    };
+}
+
+function buildBooleanRow(path, codeDefault, options)
+{
+    const labelText = options.label || path;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'margin:4px 0;display:flex;flex-direction:row;align-items:center;gap:6px;';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!codeDefault;
+    row.appendChild(cb);
+
+    const labelEl = document.createElement('label');
+    labelEl.textContent = labelText;
+    labelEl.style.cssText = 'cursor:pointer;flex:1;';
+    labelEl.addEventListener('click', () =>
+    {
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+    });
+    row.appendChild(labelEl);
+
+    const apply = (v) =>
+    {
+        const b = !!v;
+        setByPath(window, path, b);
+        cb.checked = b;
+    };
+
+    cb.addEventListener('change', () =>
+    {
+        setByPath(window, path, cb.checked);
+    });
+
+    return {
+        type: 'boolean',
+        codeDefault: !!codeDefault,
         options,
         rowEl: row,
         applyValue: apply,
