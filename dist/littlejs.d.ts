@@ -2210,6 +2210,9 @@ declare module "littlejsengine" {
      *  @param {number} [startDelay] - delay in ms before the effect starts
      *  @memberof Input */
     export function gamepadVibrate(gamepad?: number, duration?: number, strongMagnitude?: number, weakMagnitude?: number, startDelay?: number): void;
+    /** Stop vibration on a gamepad
+     *  @memberof Input */
+    export function gamepadVibrateStop(gamepad?: number): void;
     /** Pulse the vibration hardware if it exists
      *  @param {number|Array} [pattern] - single value in ms or vibration interval array
      *  @memberof Input */

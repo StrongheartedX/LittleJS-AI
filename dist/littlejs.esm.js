@@ -5376,6 +5376,16 @@ function gamepadVibrate(gamepad=gamepadPrimary, duration=200, strongMagnitude=1,
     pad?.vibrationActuator?.playEffect?.('dual-rumble', {duration, strongMagnitude, weakMagnitude, startDelay});
 }
 
+/** Stop vibration on a gamepad
+ *  @memberof Input */
+function gamepadVibrateStop(gamepad=gamepadPrimary)
+{
+    ASSERT(isNumber(gamepad), 'gamepad must be a number');
+    if (!vibrateEnable || headlessMode) return;
+    const pad = navigator?.getGamepads?.()[gamepad];
+    pad?.vibrationActuator?.reset?.();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /** Pulse the vibration hardware if it exists
@@ -13415,6 +13425,7 @@ export
     gamepadDpad,
     gamepadConnected,
     gamepadVibrate,
+    gamepadVibrateStop,
     vibrate,
     vibrateStop,
     pointerLockRequest,
