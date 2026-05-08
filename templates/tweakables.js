@@ -125,6 +125,7 @@ function buildNumberRow(path, codeDefault, options)
 {
     const labelText = options.label || path;
     const step = options.step !== undefined ? options.step : autoStep(codeDefault);
+    const hasRange = typeof options.min === 'number' && typeof options.max === 'number';
 
     const row = document.createElement('div');
     row.style.cssText = 'margin:4px 0;display:flex;flex-direction:column;gap:2px;';
@@ -133,24 +134,54 @@ function buildNumberRow(path, codeDefault, options)
     labelEl.textContent = labelText;
     row.appendChild(labelEl);
 
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
+    let slider = null;
+    if (hasRange)
+    {
+        slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = String(options.min);
+        slider.max = String(options.max);
+        slider.step = String(step);
+        slider.value = String(codeDefault);
+        slider.style.cssText = 'flex:1;';
+        controls.appendChild(slider);
+    }
+
     const num = document.createElement('input');
     num.type = 'number';
     num.step = String(step);
     num.value = String(codeDefault);
-    num.style.cssText = 'width:90px;background:#222;color:#eee;border:1px solid #444;';
-    row.appendChild(num);
+    num.style.cssText = 'width:70px;background:#222;color:#eee;border:1px solid #444;';
+    controls.appendChild(num);
+
+    row.appendChild(controls);
 
     const apply = (v) =>
     {
         setByPath(window, path, v);
         num.value = String(v);
+        if (slider) slider.value = String(v);
     };
+
+    if (slider)
+    {
+        slider.addEventListener('input', () =>
+        {
+            const v = parseFloat(slider.value);
+            setByPath(window, path, v);
+            num.value = String(v);
+        });
+    }
 
     num.addEventListener('input', () =>
     {
         const v = parseFloat(num.value);
         if (Number.isNaN(v)) return;
         setByPath(window, path, v);
+        if (slider) slider.value = String(v);
     });
 
     return {
