@@ -333,6 +333,14 @@ declare module "littlejsengine" {
      *  @default
      *  @memberof Settings */
     export let cameraScale: number;
+    /** Scale applied to engine time, can be used for slow motion or fast forward
+     *  - 1 is normal speed, 2 is double speed, 0.5 is half speed
+     *  - 0 freezes the simulation without setting the paused flag
+     *  - Should be >= 0; stacks multiplicatively with the debug +/- shortcut
+     *  @type {number}
+     *  @default
+     *  @memberof Settings */
+    export let timeScale: number;
     /** Enable applying color to tiles when using canvas2d
      *  - This is slower but should be the same as WebGL rendering
      *  @type {boolean}
@@ -377,6 +385,12 @@ declare module "littlejsengine" {
      *  @default
      *  @memberof Settings */
     export let tilesPixelated: boolean;
+    /** Scale factor applied to the canvas backing store for native-resolution rendering.
+     *  Pass 1 for no scaling, a number for an explicit ratio, or undefined to track devicePixelRatio each frame.
+     *  @type {number|undefined}
+     *  @default
+     *  @memberof Settings */
+    export let canvasPixelRatio: number | undefined;
     /** Default font used for text rendering
      *  @type {string}
      *  @default
@@ -474,17 +488,21 @@ declare module "littlejsengine" {
     export let inputWASDEmulateDirection: boolean;
     /** True if touch gamepad should appear on mobile devices
      *  - Supports left analog stick, 4 face buttons and start button (button 9)
+     *  - setTouchGamepadButtonCount(1) to use face buttons as right analog stick
+     *  - Analog stick buttons 10 and 11 are also activated when virtual sticks are touched
+    
      *  @type {boolean}
      *  @default
      *  @memberof Settings */
     export let touchGamepadEnable: boolean;
     /** True if touch gamepad should have start button in the center
+     *  - Prevents activating if overlappng with virtual stick or buttons if they are enabled
      *  - When the game is paused, any touch will press the button
-     *  - This can function as a way to pause/unpause the game
-     *  @type {boolean}
+     *  - Set size to enable the center button
+     *  @type {number}
      *  @default
      *  @memberof Settings */
-    export let touchGamepadCenterButton: boolean;
+    export let touchGamepadCenterButtonSize: number;
     /** True if touch gamepad should be analog stick or false to use if 8 way dpad
      *  @type {boolean}
      *  @default
@@ -557,6 +575,10 @@ declare module "littlejsengine" {
      *  @param {number} scale
      *  @memberof Settings */
     export function setCameraScale(scale: number): void;
+    /** Set scale applied to engine time
+     *  @param {number} scale
+     *  @memberof Settings */
+    export function setTimeScale(scale: number): void;
     /** Set if tiles should be colorized when using canvas2d
      *  This can be slower but results should look nearly identical to WebGL rendering
      *  It can be enabled/disabled at any time
@@ -592,6 +614,11 @@ declare module "littlejsengine" {
      *  @param {boolean} pixelated
      *  @memberof Settings */
     export function setTilesPixelated(pixelated: boolean): void;
+    /** Set the canvas pixel ratio.
+     *  Pass a number for an explicit ratio, or call with no argument to track devicePixelRatio each frame.
+     *  @param {number} [pixelRatio]
+     *  @memberof Settings */
+    export function setCanvasPixelRatio(pixelRatio?: number): void;
     /** Set default font used for text rendering
      *  @param {string} font
      *  @memberof Settings */
@@ -676,11 +703,12 @@ declare module "littlejsengine" {
      *  @param {boolean} enable
      *  @memberof Settings */
     export function setTouchGamepadEnable(enable: boolean): void;
-    /** True if touch gamepad should have start button in the center
-     *  - This can function as a way to pause/unpause the game
-     *  @param {boolean} enable
+    /** Set if touch gamepad should have start button in the center
+     *  - Set size to enable the center button
+     *  - When the game is paused, any touch will press the button
+     *  @param {number} size
      *  @memberof Settings */
-    export function setTouchGamepadCenterButton(enable: boolean): void;
+    export function setTouchGamepadCenterButtonSize(size: number): void;
     /** Set number of buttons on touch gamepad (0-4), if 1 also acts as right analog stick
      *  @param {number} count
      *  @memberof Settings */
@@ -882,6 +910,16 @@ declare module "littlejsengine" {
      *  @return {number}
      *  @memberof Math */
     export function lerp(valueA: number, valueB: number, percent: number): number;
+    /** Gets percent between percentA and percentB and linearly interpolates between lerpA and lerpB
+     *  A shortcut for lerp(lerpA, lerpB, percent(value, percentA, percentB))
+     *  @param {number} value
+     *  @param {number} percentA
+     *  @param {number} percentB
+     *  @param {number} lerpA
+     *  @param {number} lerpB
+     *  @return {number}
+     *  @memberof Math */
+    export function percentLerp(value: number, percentA: number, percentB: number, lerpA: number, lerpB: number): number;
     /** Applies smoothstep function to the percentage value
      *  @param {number} percent
      *  @return {number}
@@ -909,6 +947,20 @@ declare module "littlejsengine" {
      *  @return {boolean}      - True if intersecting
      *  @memberof Math */
     export function isIntersecting(start: Vector2, end: Vector2, pos: Vector2, size: Vector2): boolean;
+    /**
+     * @callback LineTestFunction - Checks if a position is colliding
+     * @param {Vector2} pos
+     * @memberof Draw
+     */
+    /**
+     * Casts a ray and returns position of the first collision found, or undefined if none are found
+     * @param {Vector2} posStart
+     * @param {Vector2} posEnd
+     * @param {LineTestFunction} testFunction - Check if colliding
+     * @param {Vector2} [normal] - Optional vector to store the normal
+     * @return {Vector2|undefined} - Position of the collision or undefined if none found
+     * @memberof Math */
+    export function lineTest(posStart: Vector2, posEnd: Vector2, testFunction: LineTestFunction, normal?: Vector2): Vector2 | undefined;
     /** Returns an oscillating wave between 0 and amplitude with frequency of 1 Hz by default
      *  @param {number} [frequency] - Frequency of the wave in Hz
      *  @param {number} [amplitude] - Amplitude (max height) of the wave

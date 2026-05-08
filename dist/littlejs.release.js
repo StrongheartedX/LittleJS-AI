@@ -35,7 +35,7 @@ const engineName = 'LittleJS';
  *  @type {string}
  *  @default
  *  @memberof Engine */
-const engineVersion = '1.18.0';
+const engineVersion = '1.18.2';
 
 /** Frames per second to update
  *  @type {number}
@@ -200,11 +200,12 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
             averageFPS = lerp(averageFPS, 1e3/(frameTimeDeltaMS||1), .05);
         const debugSpeedUp   = debug && keyIsDown('Equal'); // +
         const debugSpeedDown = debug && keyIsDown('Minus'); // -
-        if (debug) // +/- to speed/slow time
-            frameTimeDeltaMS *= debugSpeedUp ? 10 : debugSpeedDown ? .1 : 1;
+        const debugScale = debugSpeedUp ? 10 : debugSpeedDown ? .1 : 1;
+        const combinedScale = timeScale * debugScale;
+        frameTimeDeltaMS *= combinedScale;
         timeReal += frameTimeDeltaMS / 1e3;
         frameTimeBufferMS += paused ? 0 : frameTimeDeltaMS;
-        if (!debugSpeedUp)
+        if (combinedScale <= 1)
             frameTimeBufferMS = min(frameTimeBufferMS, 50); // clamp min framerate
 
         let wasUpdated = false;
@@ -318,12 +319,17 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
         }
         else
         {
+            // apply device pixel ratio for crisp rendering
+            const dpr = canvasPixelRatio ?? (devicePixelRatio || 1);
+            const viewWidth = innerWidth * dpr | 0;
+            const viewHeight = innerHeight * dpr | 0;
+            
             // get main canvas size based on window size
-            mainCanvasSize.x = min(innerWidth,  canvasMaxSize.x);
-            mainCanvasSize.y = min(innerHeight, canvasMaxSize.y);
+            mainCanvasSize.x = min(viewWidth,  canvasMaxSize.x);
+            mainCanvasSize.y = min(viewHeight, canvasMaxSize.y);
             
             // responsive aspect ratio with native resolution
-            const innerAspect = innerWidth / innerHeight;
+            const innerAspect = viewWidth / viewHeight;
             ASSERT(canvasMinAspect <= canvasMaxAspect);
             if (canvasMaxAspect && innerAspect > canvasMaxAspect)
             {
@@ -336,6 +342,17 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
                 // full width
                 const h = mainCanvasSize.x / canvasMinAspect | 0;
                 mainCanvasSize.y = min(h, canvasMaxSize.y);
+            }
+
+            // set CSS display size so backing store renders at viewport size
+            const cssW = (mainCanvasSize.x / dpr | 0) + 'px';
+            const cssH = (mainCanvasSize.y / dpr | 0) + 'px';
+            mainCanvas.style.width  = cssW;
+            mainCanvas.style.height = cssH;
+            if (glCanvas)
+            {
+                glCanvas.style.width  = cssW;
+                glCanvas.style.height = cssH;
             }
         }
 
@@ -556,8 +573,9 @@ function drawEngineLogo(t)
 
     // LittleJS Logo and Splash Screen
     const x = mainContext;
-    const w = mainCanvas.width = innerWidth;
-    const h = mainCanvas.height = innerHeight;
+    const dpr = canvasPixelRatio ?? (devicePixelRatio || 1);
+    const w = mainCanvas.width = innerWidth * dpr;
+    const h = mainCanvas.height = innerHeight * dpr;
     {
         // background
         const p3 = percent(t, 1, .8);
@@ -1054,7 +1072,7 @@ function lineTest(posStart, posEnd, testFunction, normal)
     // get ray direction and length
     const dx = posEnd.x - posStart.x;
     const dy = posEnd.y - posStart.y;
-    const totalLength = hypot(dx, dy);
+    const totalLength = (dx*dx + dy*dy)**.5;
     if (!totalLength) return;
 
     // current integer cell we are in
@@ -2104,6 +2122,18 @@ let cameraAngle = 0;
 let cameraScale = 32;
 
 ///////////////////////////////////////////////////////////////////////////////
+// Time settings
+
+/** Scale applied to engine time, can be used for slow motion or fast forward
+ *  - 1 is normal speed, 2 is double speed, 0.5 is half speed
+ *  - 0 freezes the simulation without setting the paused flag
+ *  - Should be >= 0; stacks multiplicatively with the debug +/- shortcut
+ *  @type {number}
+ *  @default
+ *  @memberof Settings */
+let timeScale = 1;
+
+///////////////////////////////////////////////////////////////////////////////
 // Display settings
 
 /** Enable applying color to tiles when using canvas2d
@@ -2157,6 +2187,13 @@ let canvasPixelated = false;
  *  @default
  *  @memberof Settings */
 let tilesPixelated = true;
+
+/** Scale factor applied to the canvas backing store for native-resolution rendering.
+ *  Pass 1 for no scaling, a number for an explicit ratio, or undefined to track devicePixelRatio each frame.
+ *  @type {number|undefined}
+ *  @default
+ *  @memberof Settings */
+let canvasPixelRatio = 1;
 
 /** Default font used for text rendering
  *  @type {string}
@@ -2299,18 +2336,22 @@ let touchInputEnable = true;
 
 /** True if touch gamepad should appear on mobile devices
  *  - Supports left analog stick, 4 face buttons and start button (button 9)
+ *  - setTouchGamepadButtonCount(1) to use face buttons as right analog stick
+ *  - Analog stick buttons 10 and 11 are also activated when virtual sticks are touched
+
  *  @type {boolean}
  *  @default
  *  @memberof Settings */
 let touchGamepadEnable = false;
 
 /** True if touch gamepad should have start button in the center
+ *  - Prevents activating if overlappng with virtual stick or buttons if they are enabled
  *  - When the game is paused, any touch will press the button
- *  - This can function as a way to pause/unpause the game
- *  @type {boolean}
+ *  - Set size to enable the center button
+ *  @type {number}
  *  @default
  *  @memberof Settings */
-let touchGamepadCenterButton = true;
+let touchGamepadCenterButtonSize = 300;
 
 /** Number of buttons on touch gamepad (0-4), if 1 also acts as right analog stick
  *  @type {number}
@@ -2328,7 +2369,7 @@ let touchGamepadAnalog = true;
  *  @type {number}
  *  @default
  *  @memberof Settings */
-let touchGamepadSize = 99;
+let touchGamepadSize = 100;
 
 /** Transparency of touch gamepad overlay
  *  @type {number}
@@ -2420,6 +2461,11 @@ function setCameraAngle(angle) { cameraAngle = angle; }
  *  @memberof Settings */
 function setCameraScale(scale) { cameraScale = scale; }
 
+/** Set scale applied to engine time
+ *  @param {number} scale
+ *  @memberof Settings */
+function setTimeScale(scale) { timeScale = scale; }
+
 /** Set if tiles should be colorized when using canvas2d
  *  This can be slower but results should look nearly identical to WebGL rendering
  *  It can be enabled/disabled at any time
@@ -2469,6 +2515,12 @@ function setCanvasPixelated(pixelated)
  *  @param {boolean} pixelated
  *  @memberof Settings */
 function setTilesPixelated(pixelated) { tilesPixelated = pixelated; }
+
+/** Set the canvas pixel ratio.
+ *  Pass a number for an explicit ratio, or call with no argument to track devicePixelRatio each frame.
+ *  @param {number} [pixelRatio]
+ *  @memberof Settings */
+function setCanvasPixelRatio(pixelRatio) { canvasPixelRatio = pixelRatio; }
 
 /** Set default font used for text rendering
  *  @param {string} font
@@ -2590,11 +2642,12 @@ function setTouchInputEnable(enable) { touchInputEnable = enable; }
  *  @memberof Settings */
 function setTouchGamepadEnable(enable) { touchGamepadEnable = enable; }
 
-/** True if touch gamepad should have start button in the center
- *  - This can function as a way to pause/unpause the game
- *  @param {boolean} enable
+/** Set if touch gamepad should have start button in the center
+ *  - Set size to enable the center button
+ *  - When the game is paused, any touch will press the button
+ *  @param {number} size
  *  @memberof Settings */
-function setTouchGamepadCenterButton(enable) { touchGamepadCenterButton = enable; }
+function setTouchGamepadCenterButtonSize(size) { touchGamepadCenterButtonSize = size; }
 
 /** Set number of buttons on touch gamepad (0-4), if 1 also acts as right analog stick
  *  @param {number} count
@@ -2892,10 +2945,10 @@ class EngineObject
                     // if already was touching, try to push away
                     const deltaPos = oldPos.subtract(o.pos);
                     const length = deltaPos.length();
-                    const pushAwayAccel = .001; // push away if already overlapping
-                    const velocity = length < .01 ? randVec2(pushAwayAccel) : deltaPos.scale(pushAwayAccel/length);
+                    const pushAwayAccel = .001;
+                    const velocity = length < .001 ? vec2(0,1) : deltaPos.scale(pushAwayAccel/length);
                     this.velocity = this.velocity.add(velocity);
-                    if (o.mass) // push away if not fixed
+                    if (o.mass) // push away other object if not fixed
                         o.velocity = o.velocity.subtract(velocity);
 
                     debugPhysics && debugOverlap(this.pos, this.size, o.pos, o.size, '#f00');
@@ -3132,6 +3185,7 @@ class EngineObject
         child.parent = this;
         child.localPos = localPos.copy();
         child.localAngle = localAngle;
+        child.updateTransforms();
         return child;
     }
 
@@ -3324,6 +3378,7 @@ function tile(index=new Vector2, size=tileDefaultSize, texture=0, padding=tileDe
     const textureInfo = typeof texture === 'number' ?
         textureInfos[texture] : texture;
     ASSERT(textureInfo instanceof TextureInfo, 'tile texture is not loaded');
+    ASSERT(textureInfo.size.x > 0, 'tile texture is not loaded');
 
     // get the position of the tile
     const sizePaddedX = size.x + padding*2;
@@ -4686,7 +4741,7 @@ function inputInit()
     document.addEventListener('mouseup', onMouseUp);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseleave', onMouseLeave);
-    document.addEventListener('wheel', onMouseWheel);
+    document.addEventListener('wheel', onMouseWheel, { passive: false });
     document.addEventListener('contextmenu', onContextMenu);
     document.addEventListener('blur', onBlur);
 
@@ -4705,7 +4760,7 @@ function inputInit()
         }
 
         // try to prevent default browser handling of input
-        if (!inputPreventDefault || !document.hasFocus() || !e.cancelable) return;
+        if (!inputPreventDefault || !e.cancelable || !document.hasFocus()) return;
 
         // don't break browser shortcuts
         if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -4764,7 +4819,7 @@ function inputInit()
         mousePosScreen = mouseEventToScreen(vec2(e.x,e.y));
         mouseDeltaScreen = mouseDeltaScreen.add(mousePosScreen.subtract(mousePosScreenLast));
 
-        if (inputPreventDefault && document.hasFocus() && e.cancelable)
+        if (inputPreventDefault && e.cancelable && document.hasFocus())
             e.preventDefault();
     }
     function onMouseUp(e)
@@ -4786,7 +4841,12 @@ function inputInit()
         mouseDeltaScreen = mouseDeltaScreen.add(movement);
     }
     function onMouseLeave() { mouseInWindow = false; } // mouse moved off window
-    function onMouseWheel(e) { mouseWheel = e.ctrlKey ? 0 : sign(e.deltaY); }
+    function onMouseWheel(e) 
+    { 
+        mouseWheel = e.ctrlKey ? 0 : sign(e.deltaY);
+        if (inputPreventDefault && e.cancelable && document.hasFocus())
+            e.preventDefault(); // prevent page scrolling
+    }
     function onContextMenu(e) { e.preventDefault(); } // prevent right click menu
     function onBlur() { inputClear(); } // reset input when focus is lost
 
@@ -4836,7 +4896,7 @@ function inputInit()
             wasTouching = touching;
 
             // prevent default handling like copy, magnifier lens, and scrolling
-            if (inputPreventDefault && document.hasFocus() && e.cancelable)
+            if (inputPreventDefault && e.cancelable && document.hasFocus())
                 e.preventDefault();
 
             // must return true so the document will get focus
@@ -4857,7 +4917,7 @@ function inputInit()
             if (touching)
             {
                 touchGamepadTimer.set();
-                if (touchGamepadCenterButton && !wasTouching && paused)
+                if (touchGamepadCenterButtonSize && !wasTouching && paused)
                 {
                     // touch anywhere to press start when paused
                     touchGamepadButtons[9] = 1;
@@ -4882,6 +4942,7 @@ function inputInit()
                     // virtual analog stick
                     const delta = touchPos.subtract(stickCenter);
                     touchGamepadSticks[0] = delta.scale(2/touchGamepadSize).clampLength();
+                    touchGamepadButtons[10] = 1; // also press a button when touching stick
                 }
                 else if (buttonCenter.distance(touchPos) < touchGamepadSize)
                 {
@@ -4890,6 +4951,7 @@ function inputInit()
                         // virtual right analog stick
                         const delta = touchPos.subtract(buttonCenter);
                         touchGamepadSticks[1] = delta.scale(2/touchGamepadSize).clampLength();
+                        touchGamepadButtons[11] = 1; // also press a button when touching right stick
                     }
                     // virtual face buttons
                     let button = buttonCenter.subtract(touchPos).direction();
@@ -4906,8 +4968,7 @@ function inputInit()
                     if (button < touchGamepadButtonCount)
                         touchGamepadButtons[button] = 1;
                 }
-                else if (touchGamepadCenterButton && 
-                    startCenter.distance(touchPos) < touchGamepadSize)
+                else if (startCenter.distance(touchPos) < touchGamepadCenterButtonSize)
                 {
                     // virtual start button in center
                     touchGamepadButtons[9] = 1;
@@ -4956,6 +5017,18 @@ function inputUpdate()
         // update touch gamepad if enabled
         if (touchGamepadEnable && isTouchDevice)
         {
+            if (debugGamepads)
+            {
+                const stickCenter = vec2(touchGamepadSize, mainCanvasSize.y-touchGamepadSize);
+                const buttonCenter = touchGamepadButtonCenter();
+                const startCenter = mainCanvasSize.scale(.5);
+
+                debugCircle(stickCenter, 2*touchGamepadSize, 'cyan', 0, false, true);
+                debugCircle(buttonCenter, 2*touchGamepadSize, 'cyan', 0, false, true);
+                if (touchGamepadCenterButtonSize)
+                    debugCircle(startCenter, 2*touchGamepadCenterButtonSize, 'cyan', 0, false, true);
+            }
+
             if (!touchGamepadTimer.isSet()) return;
 
             // read virtual analog stick
@@ -4983,7 +5056,7 @@ function inputUpdate()
 
             // read virtual gamepad buttons
             const data = inputData[1] ?? (inputData[1] = []);
-            for (let i=10; i--;)
+            for (let i=12; i--;)
             {
                 const wasDown = gamepadIsDown(i,0);
                 data[i] = touchGamepadButtons[i] ? wasDown ? 1 : 3 : wasDown ? 4 : 0;
@@ -4994,7 +5067,13 @@ function inputUpdate()
         }
 
         // return if gamepads are disabled or not supported
-        if (!gamepadsEnable || !navigator || !navigator.getGamepads) return;
+        try {
+            // protect against getGamepads disallowed security error 
+            if (!gamepadsEnable || !navigator?.getGamepads)
+                return;
+        } catch(e) {
+            return;
+        }
 
         // only poll gamepads when focused or in debug mode
         if (!debug && !document.hasFocus()) return;
@@ -9581,7 +9660,7 @@ class UIObject
 
     /** Internal function called when object is clicked
      *  @param {boolean} [playSound] */
-    click(playSound)
+    click(playSound=true)
     {
         this.onClick(); 
         if (playSound && this.soundClick)
@@ -10554,7 +10633,8 @@ class Box2dObject extends EngineObject
     {
         this.pos = pos;
         this.angle = angle;
-        this.body.SetTransform(box2d.vec2dTo(pos), angle);
+        // box2d uses reverse angle
+        this.body.SetTransform(box2d.vec2dTo(pos), -angle);
     }
     
     /** Sets the position
@@ -10565,7 +10645,7 @@ class Box2dObject extends EngineObject
     /** Sets the angle
      *  @param {number} angle */
     setAngle(angle)
-    { this.setTransform(box2d.vec2From(this.body.GetPosition()), -angle); }
+    { this.setTransform(box2d.vec2From(this.body.GetPosition()), angle); }
 
     /** Sets the linear velocity
      *  @param {Vector2} velocity */
@@ -12110,6 +12190,7 @@ async function box2dInit()
         {
             if (o.body)
             {
+                // box2d uses reverse angle
                 o.pos = box2d.vec2From(o.body.GetPosition());
                 o.angle = -o.body.GetAngle();
             }
