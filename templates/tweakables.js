@@ -22,7 +22,7 @@ function tweak(path, options = {})
 {
     initTweakSystem();
 
-    const currentValue = getByPath(window, path);
+    const currentValue = getByPath(path);
     if (currentValue === undefined || currentValue === null)
     {
         console.warn('tweak: path "' + path + '" did not resolve, skipping');
@@ -32,7 +32,7 @@ function tweak(path, options = {})
     let codeDefault = currentValue;
     if (options.value !== undefined)
     {
-        setByPath(window, path, options.value);
+        setByPath(path, options.value);
         codeDefault = options.value;
     }
 
@@ -77,17 +77,17 @@ function tweak(path, options = {})
 
 function tweakEngineDefaults()
 {
-    if (window.gravity instanceof Vector2)
+    if (getByPath('gravity') instanceof Vector2)
         tweak('gravity', {min: -.05, max: .05});
-    if (typeof window.cameraScale === 'number')
+    if (typeof getByPath('cameraScale') === 'number')
         tweak('cameraScale', {min: 4, max: 128, step: 1});
-    if (typeof window.soundVolume === 'number')
+    if (typeof getByPath('soundVolume') === 'number')
         tweak('soundVolume', {min: 0, max: 1});
-    if (typeof window.glEnable === 'boolean')
+    if (typeof getByPath('glEnable') === 'boolean')
         tweak('glEnable');
-    if (typeof window.paused === 'boolean')
+    if (typeof getByPath('paused') === 'boolean')
         tweak('paused');
-    if (typeof window.debugOverlay === 'boolean')
+    if (typeof getByPath('debugOverlay') === 'boolean')
         tweak('debugOverlay');
 }
 
@@ -148,17 +148,31 @@ function onTweakKey(e)
     tweakPanelEl.style.display = tweakPanelVisible ? 'block' : 'none';
 }
 
-function getByPath(obj, path)
+// Resolves a dotted path against the script's top-level scope.
+// Uses indirect eval (via new Function) so script-scope `let` bindings
+// — including LittleJS engine globals like `gravity`, `cameraScale` —
+// are reachable. `window[path]` would not see them.
+const TWEAK_PATH_RE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
+
+function getByPath(path)
 {
-    return path.split('.').reduce((o, k) => o == null ? undefined : o[k], obj);
+    if (!TWEAK_PATH_RE.test(path)) return undefined;
+    try { return new Function('return ' + path)(); }
+    catch (e) { return undefined; }
 }
 
-function setByPath(obj, path, value)
+function setByPath(path, value)
 {
-    const parts = path.split('.');
-    const last = parts.pop();
-    const parent = parts.reduce((o, k) => o[k], obj);
-    parent[last] = value;
+    if (!TWEAK_PATH_RE.test(path)) return;
+    const dot = path.lastIndexOf('.');
+    if (dot < 0)
+    {
+        try { new Function('v', path + ' = v')(value); }
+        catch (e) { /* read-only or missing — ignore */ }
+        return;
+    }
+    const parent = getByPath(path.slice(0, dot));
+    if (parent != null) parent[path.slice(dot + 1)] = value;
 }
 
 function detectTweakType(value)
@@ -218,7 +232,7 @@ function buildNumberRow(path, codeDefault, options)
 
     const apply = (v) =>
     {
-        setByPath(window, path, v);
+        setByPath(path, v);
         num.value = String(v);
         if (slider) slider.value = String(v);
     };
@@ -228,7 +242,7 @@ function buildNumberRow(path, codeDefault, options)
         slider.addEventListener('input', () =>
         {
             const v = parseFloat(slider.value);
-            setByPath(window, path, v);
+            setByPath(path, v);
             num.value = String(v);
             persistTweakValue(path, v);
         });
@@ -238,7 +252,7 @@ function buildNumberRow(path, codeDefault, options)
     {
         const v = parseFloat(num.value);
         if (Number.isNaN(v)) return;
-        setByPath(window, path, v);
+        setByPath(path, v);
         if (slider) slider.value = String(v);
         persistTweakValue(path, v);
     });
@@ -277,13 +291,13 @@ function buildBooleanRow(path, codeDefault, options)
     const apply = (v) =>
     {
         const b = !!v;
-        setByPath(window, path, b);
+        setByPath(path, b);
         cb.checked = b;
     };
 
     cb.addEventListener('change', () =>
     {
-        setByPath(window, path, cb.checked);
+        setByPath(path, cb.checked);
         persistTweakValue(path, cb.checked);
     });
 
@@ -322,7 +336,7 @@ function buildColorRow(path, codeDefault, options)
 
     const writeFromHex = (hex) =>
     {
-        const cur = getByPath(window, path);
+        const cur = getByPath(path);
         cur.r = parseInt(hex.slice(1, 3), 16) / 255;
         cur.g = parseInt(hex.slice(3, 5), 16) / 255;
         cur.b = parseInt(hex.slice(5, 7), 16) / 255;
@@ -331,7 +345,7 @@ function buildColorRow(path, codeDefault, options)
 
     const apply = (c) =>
     {
-        const cur = getByPath(window, path);
+        const cur = getByPath(path);
         cur.r = c.r; cur.g = c.g; cur.b = c.b; cur.a = c.a;
         picker.value = colorToHex(cur);
     };
@@ -339,7 +353,7 @@ function buildColorRow(path, codeDefault, options)
     picker.addEventListener('input', () =>
     {
         writeFromHex(picker.value);
-        persistTweakValue(path, getByPath(window, path));
+        persistTweakValue(path, getByPath(path));
     });
 
     return {
@@ -397,7 +411,7 @@ function buildVec2Row(path, codeDefault, options)
 
         const writeAxis = (v) =>
         {
-            const cur = getByPath(window, path);
+            const cur = getByPath(path);
             cur[axis] = v;
             num.value = String(v);
             if (slider) slider.value = String(v);
@@ -408,7 +422,7 @@ function buildVec2Row(path, codeDefault, options)
             slider.addEventListener('input', () =>
             {
                 const v = parseFloat(slider.value);
-                const cur = getByPath(window, path);
+                const cur = getByPath(path);
                 cur[axis] = v;
                 num.value = String(v);
                 persistTweakValue(path, cur);
@@ -418,7 +432,7 @@ function buildVec2Row(path, codeDefault, options)
         {
             const v = parseFloat(num.value);
             if (Number.isNaN(v)) return;
-            const cur = getByPath(window, path);
+            const cur = getByPath(path);
             cur[axis] = v;
             if (slider) slider.value = String(v);
             persistTweakValue(path, cur);
@@ -434,7 +448,7 @@ function buildVec2Row(path, codeDefault, options)
 
     const apply = (v) =>
     {
-        const cur = getByPath(window, path);
+        const cur = getByPath(path);
         cur.x = v.x; cur.y = v.y;
         xCtrl.num.value = String(v.x);
         yCtrl.num.value = String(v.y);
@@ -490,7 +504,7 @@ function copyTweakLines()
     const lines = [];
     for (const [path, entry] of tweakRegistry)
     {
-        const cur = getByPath(window, path);
+        const cur = getByPath(path);
         const opts = entry.options || {};
         const fields = [];
 
