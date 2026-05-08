@@ -107,6 +107,23 @@ function initTweakSystem()
     tweakRowsEl = document.createElement('div');
     tweakPanelEl.appendChild(tweakRowsEl);
 
+    const footer = document.createElement('div');
+    footer.style.cssText = 'margin-top:8px;display:flex;gap:6px;';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy';
+    copyBtn.style.cssText = 'flex:1;padding:4px;cursor:pointer;';
+    copyBtn.onclick = copyTweakLines;
+    footer.appendChild(copyBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset';
+    resetBtn.style.cssText = 'flex:1;padding:4px;cursor:pointer;';
+    resetBtn.onclick = resetTweaks;
+    footer.appendChild(resetBtn);
+
+    tweakPanelEl.appendChild(footer);
+
     document.body.appendChild(tweakPanelEl);
     addEventListener('keydown', onTweakKey);
 }
@@ -455,4 +472,47 @@ function restoreStoredValue(type, stored)
     if (type === 'vec2' && Array.isArray(stored) && stored.length === 2)
         return vec2(stored[0], stored[1]);
     return undefined;
+}
+
+function copyTweakLines()
+{
+    const lines = [];
+    for (const [path, entry] of tweakRegistry)
+    {
+        const cur = getByPath(window, path);
+        const opts = entry.options || {};
+        const fields = [];
+
+        if (entry.type === 'number')
+            fields.push('value: ' + cur);
+        else if (entry.type === 'boolean')
+            fields.push('value: ' + cur);
+        else if (entry.type === 'color')
+        {
+            const r = cur.r.toFixed(3), g = cur.g.toFixed(3), b = cur.b.toFixed(3);
+            const tail = cur.a !== 1 ? ', ' + cur.a.toFixed(3) : '';
+            fields.push('value: rgb(' + r + ', ' + g + ', ' + b + tail + ')');
+        }
+        else if (entry.type === 'vec2')
+            fields.push('value: vec2(' + cur.x + ', ' + cur.y + ')');
+
+        if (typeof opts.min === 'number') fields.push('min: ' + opts.min);
+        if (typeof opts.max === 'number') fields.push('max: ' + opts.max);
+        if (opts.step !== undefined) fields.push('step: ' + opts.step);
+
+        lines.push("tweak('" + path + "', {" + fields.join(', ') + '});');
+    }
+    const text = lines.join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(text).catch(() => console.log(text));
+    else
+        console.log(text);
+}
+
+function resetTweaks()
+{
+    for (const [, entry] of tweakRegistry)
+        entry.applyValue(entry.codeDefault);
+    try { localStorage.removeItem(tweakStorageKey); } catch (e) {}
+    tweakStoredValues = {};
 }
