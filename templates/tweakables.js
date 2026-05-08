@@ -51,6 +51,8 @@ function tweak(path, options = {})
         entry = buildBooleanRow(path, codeDefault, options);
     else if (type === 'color')
         entry = buildColorRow(path, codeDefault, options);
+    else if (type === 'vec2')
+        entry = buildVec2Row(path, codeDefault, options);
     else
     {
         console.warn('tweak: type "' + type + '" not yet implemented');
@@ -285,6 +287,104 @@ function buildColorRow(path, codeDefault, options)
     return {
         type: 'color',
         codeDefault: new Color(codeDefault.r, codeDefault.g, codeDefault.b, codeDefault.a),
+        options,
+        rowEl: row,
+        applyValue: apply,
+    };
+}
+
+function buildVec2Row(path, codeDefault, options)
+{
+    const labelText = options.label || path;
+    const hasRange = typeof options.min === 'number' && typeof options.max === 'number';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'margin:4px 0;display:flex;flex-direction:column;gap:2px;';
+
+    const labelEl = document.createElement('div');
+    labelEl.textContent = labelText;
+    row.appendChild(labelEl);
+
+    const buildAxis = (axis, currentAxisValue) =>
+    {
+        const step = options.step !== undefined ? options.step : autoStep(currentAxisValue);
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
+        const axisLabel = document.createElement('span');
+        axisLabel.textContent = axis;
+        axisLabel.style.cssText = 'width:12px;color:#888;';
+        wrap.appendChild(axisLabel);
+
+        let slider = null;
+        if (hasRange)
+        {
+            slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = String(options.min);
+            slider.max = String(options.max);
+            slider.step = String(step);
+            slider.value = String(currentAxisValue);
+            slider.style.cssText = 'flex:1;';
+            wrap.appendChild(slider);
+        }
+
+        const num = document.createElement('input');
+        num.type = 'number';
+        num.step = String(step);
+        num.value = String(currentAxisValue);
+        num.style.cssText = 'width:60px;background:#222;color:#eee;border:1px solid #444;';
+        wrap.appendChild(num);
+
+        const writeAxis = (v) =>
+        {
+            const cur = getByPath(window, path);
+            cur[axis] = v;
+            num.value = String(v);
+            if (slider) slider.value = String(v);
+        };
+
+        if (slider)
+        {
+            slider.addEventListener('input', () =>
+            {
+                const v = parseFloat(slider.value);
+                const cur = getByPath(window, path);
+                cur[axis] = v;
+                num.value = String(v);
+            });
+        }
+        num.addEventListener('input', () =>
+        {
+            const v = parseFloat(num.value);
+            if (Number.isNaN(v)) return;
+            const cur = getByPath(window, path);
+            cur[axis] = v;
+            if (slider) slider.value = String(v);
+        });
+
+        return { wrap, slider, num, writeAxis };
+    };
+
+    const xCtrl = buildAxis('x', codeDefault.x);
+    const yCtrl = buildAxis('y', codeDefault.y);
+    row.appendChild(xCtrl.wrap);
+    row.appendChild(yCtrl.wrap);
+
+    const apply = (v) =>
+    {
+        const cur = getByPath(window, path);
+        cur.x = v.x; cur.y = v.y;
+        xCtrl.num.value = String(v.x);
+        yCtrl.num.value = String(v.y);
+        if (xCtrl.slider) xCtrl.slider.value = String(v.x);
+        if (yCtrl.slider) yCtrl.slider.value = String(v.y);
+    };
+
+    return {
+        type: 'vec2',
+        codeDefault: vec2(codeDefault.x, codeDefault.y),
         options,
         rowEl: row,
         applyValue: apply,
