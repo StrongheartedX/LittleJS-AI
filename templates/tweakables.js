@@ -10,6 +10,16 @@
 //   tweak('skyColor');                           // Color picker
 //   tweak('gravity', {min: -.05, max: .05});    // Vector2 paired
 //   tweakEngineDefaults();                       // common engine globals
+//   tweakDivider('Player');                      // visual section label
+//
+// Type is auto-detected from the global's current value (number, boolean,
+// Color, Vector2). Pass {value: ...} in options to override the initial.
+// Pass {label: '...'} to display a friendlier name than the dotted path.
+//
+// Changes persist per-page in localStorage and are restored on next load,
+// so live-tweaked values survive a refresh. Click "Copy" in the panel to
+// generate updated tweak() lines for pasting back into the source. Click
+// "Reset" to discard stored values and restore the code defaults.
 
 const tweakRegistry = new Map();
 let tweakPanelEl = null;
@@ -78,14 +88,18 @@ function tweak(path, options = {})
 function tweakEngineDefaults()
 {
     const before = tweakRegistry.size;
-    if (typeof getByPath('glEnable') === 'boolean')
-        tweak('glEnable');
+    if (getByPath('gravity') instanceof Vector2)
+        tweak('gravity', {min: -.05, max: .05});
     if (typeof getByPath('cameraScale') === 'number')
         tweak('cameraScale', {min: 4, max: 128, step: 1});
     if (typeof getByPath('soundVolume') === 'number')
         tweak('soundVolume', {min: 0, max: 1});
-    if (typeof getByPath('timeScale') === 'number')
-        tweak('timeScale', {min: 0, max: 2, step: 0.1});
+    if (typeof getByPath('glEnable') === 'boolean')
+        tweak('glEnable');
+    if (typeof getByPath('paused') === 'boolean')
+        tweak('paused');
+    if (typeof getByPath('debugOverlay') === 'boolean')
+        tweak('debugOverlay');
     if (tweakRegistry.size > before) tweakDivider();
 }
 
