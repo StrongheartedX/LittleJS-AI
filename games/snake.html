@@ -591,12 +591,26 @@ function gameRender()
         const sz = i === 0 ? .92 + headSwell : .92;
         drawRect(p, vec2(sz), col);
 
-        // little eye dot on the head pointing in dir of travel
+        // two googly eyes on the leading face of the head — both eyes on the
+        // forward side, offset perpendicular to direction of travel so the snake
+        // gets a cartoony "head-on" cute look rather than a real-snake side view.
         if (i === 0 && alive)
         {
-            const eyeOffset = vec2(dir.x, dir.y).scale(.18);
-            drawRect(p.add(eyeOffset), vec2(.18), hsl(0,0,.05));
-            drawRect(p.add(eyeOffset).add(vec2(.05,.05)), vec2(.06), hsl(0,0,1));
+            const forward = vec2(dir.x, dir.y);
+            const side    = vec2(-dir.y, dir.x);    // perpendicular to forward
+            const eyeFwd  = .15;                    // toward leading edge of head
+            const eyeSep  = .20;                    // separation between eyes
+            const eyeD    = .30;                    // eye diameter (white sclera)
+            const pupilD  = .15;                    // pupil diameter
+            const pupilLean = forward.scale(.05);   // pupils peek slightly forward
+
+            const eyeA = p.add(forward.scale(eyeFwd)).add(side.scale( eyeSep));
+            const eyeB = p.add(forward.scale(eyeFwd)).add(side.scale(-eyeSep));
+
+            drawCircle(eyeA, eyeD, hsl(0,0,1));
+            drawCircle(eyeB, eyeD, hsl(0,0,1));
+            drawCircle(eyeA.add(pupilLean), pupilD, hsl(0,0,.05));
+            drawCircle(eyeB.add(pupilLean), pupilD, hsl(0,0,.05));
         }
     }
 

@@ -46,7 +46,8 @@
  // sounds
  let sfxMove, sfxRotate, sfxLock, sfxClear, sfxLevelUp, sfxGameOver;
 
- // jewel palette (bright, arcade-y)
+ // jewel palette (bright, arcade-y) — paired with distinct shape symbols
+ // so colorblind players can match by shape as well as hue.
  const JEWEL_COLORS = [
      rgb(0.95, 0.30, 0.25), // red
      rgb(0.30, 0.80, 0.35), // green
@@ -55,6 +56,11 @@
      rgb(0.78, 0.38, 0.95), // purple
      rgb(1.00, 0.55, 0.15), // orange
  ];
+ const JEWEL_SYMBOLS = ['×', '▲', '▼', '●', '■', '◆'];
+ // Per-symbol vertical centering correction (Unicode glyphs sit at different
+ // baselines — ×, ◆ render high in their boxes). Units: fraction of jewel size.
+ // Negative = move down. Tweak if a glyph still looks off after a font change.
+ const JEWEL_SYMBOL_Y = [-.10, 0, 0, 0, 0, -.06];
 
  ///////////////////////////////////////////////////////////////////////////////
  // HELPERS
@@ -459,8 +465,9 @@
  ///////////////////////////////////////////////////////////////////////////////
  // RENDERING
 
- // Clean Tetris-style 3D beveled block.
- function drawJewel3D(pos, size, color, alpha=1)
+ // Clean Tetris-style 3D beveled block, with an optional center symbol on top
+ // so colorblind players can match by shape.
+ function drawJewel3D(pos, size, color, alpha=1, symbol, symbolYFrac=0)
  {
      const base = withAlpha(color, alpha);
      const hi   = shadeColor(base, .18);
@@ -468,29 +475,33 @@
      const sh   = shadeColor(base, -.18);
      const sh2  = shadeColor(base, -.30);
 
-     const outline = size * .10;
-     const bevel   = size * .22;
+     // thinner bevel than before so the symbol has room to breathe
+     const outline = size * .07;
+     const bevel   = size * .14;
      const inner   = size - bevel;
 
-     // outer outline
      drawRect(pos, vec2(size + outline), withAlpha(rgb(0,0,0), alpha));
-     // base
      drawRect(pos, vec2(size), base);
-     // top highlight strip
      drawRect(pos.add(vec2(0, inner/2)), vec2(size - outline*0.7, bevel), withAlpha(hi2, alpha));
-     // left highlight strip
      drawRect(pos.add(vec2(-inner/2, 0)), vec2(bevel, size - outline*0.7), withAlpha(hi, alpha));
-     // bottom shadow strip
      drawRect(pos.add(vec2(0, -inner/2)), vec2(size - outline*0.7, bevel), withAlpha(sh2, alpha));
-     // right shadow strip
      drawRect(pos.add(vec2(inner/2, 0)), vec2(bevel, size - outline*0.7), withAlpha(sh, alpha));
-     // tiny specular highlight
      drawRect(pos.add(vec2(-inner/2 + bevel*0.55, inner/2 - bevel*0.55)), vec2(bevel*0.75), withAlpha(rgb(1,1,1), .14*alpha));
+
+     if (symbol)
+     {
+         // dark glyph with a thin light outline reads on every jewel hue
+         drawText(symbol, pos.add(vec2(0, symbolYFrac * size)), size * .70,
+             withAlpha(rgb(0,0,0), .80*alpha),
+             size * .06,
+             withAlpha(rgb(1,1,1), .55*alpha));
+     }
  }
 
  function drawJewel(pos, colorIndex, alpha=1, size=.94)
  {
-     drawJewel3D(pos, size, JEWEL_COLORS[colorIndex], alpha);
+     drawJewel3D(pos, size, JEWEL_COLORS[colorIndex], alpha,
+         JEWEL_SYMBOLS[colorIndex], JEWEL_SYMBOL_Y[colorIndex]);
  }
 
  function drawBoard()
