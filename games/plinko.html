@@ -386,15 +386,15 @@ async function gameInit()
         setPlaying(true);
         hideMenu('title');
     };
-    createMenu({
-        id: 'title',
+    createTitleMenu({
         title: 'PLINKO',
         subtitle: 'Drop. Bounce. Score.',
-        dismissable: true,
-        onStart: playFromTitle,
+        onPlay: playFromTitle,
+        canReveal: () => !isPlaying,
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text:'Best: ' + bestScore},
+        ],
         items: [
-            {type:'label',  text:'Best: ' + bestScore, id:'bestLabel'},
-            {type:'button', label:'PLAY',    onClick: playFromTitle},
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
         ],
@@ -500,23 +500,14 @@ async function gameInit()
     });
 
     setPlaying(false);
-
-    // First click reveals title menu.
-    attachClickToReveal('title', () => !isPlaying);
+    // (click-to-reveal wired automatically by createTitleMenu)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
-    // Pause on Esc / Start (mirrors menuGame template pattern).
-    if (isPlaying && (keyWasPressed('Escape') || gamepadWasPressed(9)))
-    {
-        playMenuSound('activate');
-        showMenu('pause');
-        inputClearKey('Escape');
-        inputClearKey(9, 1, false, true, false);
-        return;
-    }
+    // Pause on Esc / Start
+    if (bindPauseKey({when: () => isPlaying})) return;
 
     if (!isPlaying) return;
 

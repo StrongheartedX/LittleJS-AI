@@ -482,15 +482,12 @@ function gameInit()
     });
 
     // ----- title menu -----
-    createMenu({
-        id: 'title',
+    createTitleMenu({
         title: 'SNOOD',
-        subtitle: 'Bubble Shooter',
-        dismissable: true,
-        onStart: startNewGame,
+        subtitle: 'Bubble Shooter — Match 3+ to pop. Clear the field!',
+        onPlay: startNewGame,
+        canReveal: () => !isPlaying && !gameOver,
         items: [
-            {type:'label',  text:'Match 3+ to pop. Clear the field!'},
-            {type:'button', label:'PLAY',    onClick: startNewGame},
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
         ],
@@ -580,7 +577,7 @@ function gameInit()
 
     resetGame();
     setPlaying(false);
-    attachClickToReveal('title', () => !isPlaying && !gameOver);
+    // (click-to-reveal wired automatically by createTitleMenu)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -590,14 +587,7 @@ function gameUpdate()
     // Note: gameUpdate only runs when paused=false (no menu visible).
 
     // pause shortcut — only meaningful while actually playing
-    if (isPlaying && !gameOver && (keyWasPressed('Escape') || gamepadWasPressed(9)))
-    {
-        playMenuSound('activate');
-        showMenu('pause');
-        inputClearKey('Escape');
-        inputClearKey(9, 1, false, true, false);
-        return;
-    }
+    if (bindPauseKey({when: () => isPlaying && !gameOver})) return;
 
     if (!isPlaying) return;
 

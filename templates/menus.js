@@ -49,6 +49,14 @@
 //                  Predicate gates reveal on game state (e.g.
 //                  () => onTitleScreen). Works for mouse, touch, keyboard,
 //                  AND gamepad.
+// Title shortcut:  createTitleMenu({title, subtitle, onPlay, items,
+//                  canReveal}) wraps createMenu + a PLAY button +
+//                  attachClickToReveal in one call for the standard title
+//                  pattern. Auto-wires PLAY's onClick to gamepad Start.
+// Pause hotkey:    bindPauseKey({menuId, when}) — call from gameUpdate each
+//                  frame. Surfaces 'pause' menu on Esc / gamepad Start,
+//                  plays the activate sound, clears the press. Returns true
+//                  if it triggered so callers can `if (...) return;`.
 // Per-menu hook:   `onStart` (createMenu) runs when gamepad Start is
 //                  pressed instead of the default dismiss-on-Start.
 //                  Useful for title screens where Start should launch
@@ -285,6 +293,84 @@ function createMenu(config)
     return handle;
 }
 
+// ============================================================================
+// Title-menu helper.
+// ============================================================================
+//
+// Shortcut for the "title screen with a PLAY button, gamepad Start launches
+// PLAY, first-click reveals the menu" pattern that nearly every game wants.
+// Bundles createMenu + attachClickToReveal into one call.
+//
+//   createTitleMenu({
+//       title:    'SNAKE',
+//       subtitle: 'Eat. Avoid walls. Do not die.',
+//       onPlay:   () => { resetGame(); isPlaying = true; },
+//       canReveal: () => !isPlaying,    // gates first-click reveal
+//       itemsBefore: [                  // optional, rendered ABOVE PLAY
+//           {type:'label', id:'bestLabel', text:'Best: 0'},
+//       ],
+//       items: [                        // rendered AFTER PLAY
+//           {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+//           {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+//       ],
+//   });
+//
+// The menu is created with id:'title' (override via `id`), dismissable:false
+// (clicking off shouldn't start the game), the PLAY button id:'play', and
+// `onStart` wired so gamepad Start also fires onPlay. The menu auto-hides
+// itself after onPlay runs, so consumers don't repeat hideMenu(id) inside
+// every onPlay. Item order in the menu is:
+//   subtitle → itemsBefore → PLAY → items
+//
+// `canReveal` is strongly recommended: without it, clicks during gameplay
+// would re-show the title. Set `revealOnClick: false` to opt out of the
+// click-to-reveal listener entirely — e.g. if you want to showMenu('title')
+// manually from gameInit, or have a custom intro animation.
+function createTitleMenu(config)
+{
+    const cfg = Object.assign({
+        id:            'title',
+        title:         '',
+        subtitle:      '',
+        onPlay:        null,
+        playLabel:     'PLAY',
+        itemsBefore:   [],
+        items:         [],
+        revealOnClick: true,
+        canReveal:     null,
+        onShow:        null,
+        onHide:        null,
+    }, config);
+
+    // run user onPlay first, then auto-hide so consumers don't have to call
+    // hideMenu(id) themselves in every play handler
+    const playFn = () =>
+    {
+        if (cfg.onPlay) cfg.onPlay();
+        hideMenu(cfg.id);
+    };
+
+    const menu = createMenu({
+        id:           cfg.id,
+        title:        cfg.title,
+        subtitle:     cfg.subtitle,
+        dismissable:  false,
+        onStart:      playFn,
+        onShow:       cfg.onShow,
+        onHide:       cfg.onHide,
+        items: [
+            ...cfg.itemsBefore,
+            {type:'button', id:'play', label: cfg.playLabel, onClick: playFn},
+            ...cfg.items,
+        ],
+    });
+
+    if (cfg.revealOnClick)
+        attachClickToReveal(cfg.id, cfg.canReveal);
+
+    return menu;
+}
+
 function createToolbar(config)
 {
     initMenuSystem();
@@ -437,6 +523,65 @@ function attachClickToReveal(menuId, canReveal)
         document.removeEventListener('pointerdown', onPointer);
         document.removeEventListener('keydown', onKey);
     };
+}
+
+// ============================================================================
+// Pause-key helper.
+// ============================================================================
+//
+// Replaces the "if (isPlaying && keyWasPressed('Escape')) { showMenu('pause');
+// ... }" boilerplate that every game needs in gameUpdate. Handles keyboard
+// Esc and gamepad Start, plays the 'activate' sound, and clears the press so
+// it doesn't immediately path through to the menu's own dismiss handler.
+//
+// IMPORTANT: call this every frame from gameUpdate. It's a per-frame poll,
+// not a one-time install — LittleJS input state is frame-based, and
+// gameUpdate doesn't run while a menu is up (so this naturally goes quiet
+// once a menu surfaces).
+//
+//   function gameUpdate()
+//   {
+//       if (bindPauseKey({when: () => isPlaying && alive})) return;
+//       // ... rest of update ...
+//   }
+//
+// Returns true if it surfaced the menu this frame (so the caller can early-
+// return to skip the rest of the frame's update). Returns false otherwise.
+//
+// Options (all optional):
+//   menuId       which menu to show. Default 'pause'.
+//   when         predicate gating activation, e.g. () => isPlaying && alive.
+//                Default always-true.
+//
+// Always checks isMenuVisible() before acting, so it never double-opens.
+function bindPauseKey(opts)
+{
+    const cfg = Object.assign({
+        menuId: 'pause',
+        when:   null,
+    }, opts);
+
+    if (cfg.when && !cfg.when()) return false;
+    if (isMenuVisible()) return false;
+
+    // Guard the engine-global lookups in case this helper is called before
+    // engineInit (e.g. from tests or a custom bootstrap).
+    const escPressed   = typeof keyWasPressed     === 'function' && keyWasPressed('Escape');
+    const startPressed = typeof gamepadWasPressed === 'function' && gamepadWasPressed(9);
+    if (!escPressed && !startPressed) return false;
+
+    playMenuSound('activate');
+    showMenu(cfg.menuId);
+
+    // Swallow the press so menusUpdate doesn't see the same Esc/Start on
+    // the next frame and immediately dismiss the menu we just opened.
+    if (typeof inputClearKey === 'function')
+    {
+        inputClearKey('Escape');
+        // Match the gamepad-clear signature the games are using.
+        try { inputClearKey(9, 1, false, true, false); } catch(e) {}
+    }
+    return true;
 }
 
 // ============================================================================

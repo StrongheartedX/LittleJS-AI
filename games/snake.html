@@ -335,14 +335,12 @@ function startNewRun()
 function buildMenus()
 {
     // Title screen
-    createMenu({
-        id: 'title',
+    createTitleMenu({
         title: 'SNAKE',
-        dismissable: false,
-        onStart: startNewRun,
+        subtitle: 'Eat the green dots. Avoid the walls.',
+        onPlay: startNewRun,
+        canReveal: () => !isPlaying,
         items: [
-            {type:'label',  text:'Eat the green dots. Avoid the walls.'},
-            {type:'button', label:'PLAY',    onClick: startNewRun},
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
         ],
@@ -476,14 +474,7 @@ async function gameInit()
 function gameUpdate()
 {
     // Pause shortcut — only while a run is in progress (otherwise title owns Esc)
-    if (isPlaying && alive && (keyWasPressed('Escape') || gamepadWasPressed(9)))
-    {
-        playMenuSound('activate');
-        showMenu('pause');
-        inputClearKey('Escape');
-        inputClearKey(9, 1, false, true, false);
-        return;
-    }
+    if (bindPauseKey({when: () => isPlaying && alive})) return;
 
     handleInput();
 

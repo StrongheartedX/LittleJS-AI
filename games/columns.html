@@ -635,14 +635,12 @@
          setPlaying(true);
          hideMenu('title');
      };
-     createMenu({
-         id: 'title',
+     createTitleMenu({
          title: 'COLUMNS',
          subtitle: 'Match 3+ jewels — chain combos for huge scores',
-         dismissable: false,
-         onStart: playFromTitle,
+         onPlay: playFromTitle,
+         canReveal: () => !isPlaying,
          items: [
-             {type:'button', label:'PLAY',    onClick: playFromTitle},
              {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
          ],
      });
@@ -725,21 +723,14 @@
      nextPiece = makePiece();
      piece = makePiece();
 
-     // Show the title menu on first user input (matches menuGame.html pattern).
-     attachClickToReveal('title', () => !isPlaying);
+     // (click-to-reveal wired automatically by createTitleMenu)
  }
 
  function gameUpdate()
  {
      // gameUpdate only runs when paused=false (i.e. no menu visible).
-     // Esc surfaces the pause menu when actually playing.
-     if (isPlaying && !gameOver && keyWasPressed('Escape'))
-     {
-         playMenuSound('activate');
-         showMenu('pause');
-         inputClearKey('Escape');
-         return;
-     }
+     // Esc / gamepad Start surfaces the pause menu when actually playing.
+     if (bindPauseKey({when: () => isPlaying && !gameOver})) return;
 
      // tick particle/shake/flash visuals even when not playing (so they
      // finish during the brief moment a clear pops before next frame)
