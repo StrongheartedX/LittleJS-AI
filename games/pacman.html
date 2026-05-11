@@ -20,12 +20,37 @@ showEngineVersion = false; // Hide engine version console display
 // --- tuneables
 const TILE = 1;
 const PLAYER_SPEED = .12;       // tiles per frame (60 fps fixed)
-const GHOST_SPEED  = .11;
+const GHOST_SPEED  = .115;
 const FRIGHT_SPEED = .075;
 const EYE_SPEED    = .19;       // eaten ghosts hustle home as eyes
 const POWER_FRAMES = 60*7;
 const FRIGHT_FLASH_FRAMES = 60*2; // last 2 seconds of fright blink white
 const READY_FRAMES = 60*2;        // "READY!" intro at game start and after a death
+
+// "Cruise Elroy" Blinky: once the maze is mostly cleared, Blinky stops scattering
+// and gets a small speed boost so the endgame doesn't drag.
+const ELROY_PELLET_THRESHOLD = 50;
+const ELROY_SPEED_MULT = 1.07;
+
+// Bonus fruit: appears below the ghost house after eating these pellet counts.
+// First fruit gives 100 (cherry), second 300 (strawberry).
+const FRUIT_THRESHOLDS = [70, 170];
+const FRUIT_VALUES = [100, 300];
+const FRUIT_DURATION = 60*9;          // 9 seconds on screen
+const FRUIT_FLASH_FRAMES = 60*2;      // last 2 seconds blink to warn it's about to expire
+const FRUIT_CELL_X = [13, 14];        // collected if Pac-Man's cell is either of these...
+const FRUIT_CELL_Y = 13;              // ...at this row (the open corridor below the house)
+
+// Arcade-style global scatter/chase schedule shared by all live ghosts.
+// All four reverse direction on every flip; final phase is permanent chase.
+const GHOST_MODE_SCHEDULE = [
+    {mode: 'scatter', frames: 60*5},
+    {mode: 'chase',   frames: 60*20},
+    {mode: 'scatter', frames: 60*5},
+    {mode: 'chase',   frames: 60*20},
+    {mode: 'scatter', frames: 60*5},
+    {mode: 'chase',   frames: Infinity}, // remainder of level
+];
 
 const COLLIDE_R2 = (.68)**2;
 
@@ -50,9 +75,16 @@ let gameOver = false;
 let powerTimer = 0;
 let ghostEatChain = 0;
 let readyTimer = 0;
+let slowMoUntil = 0;                // wall-clock deadline (timeReal seconds) for ghost-eat hit-stop
+let globalMode = 'scatter';        // current phase mode shared by all ghosts
+let globalModeTimer = 0;            // frames remaining in this phase
+let globalModePhase = 0;            // index into GHOST_MODE_SCHEDULE
+let pelletsEaten = 0;               // pellets+power-pellets eaten this run, drives fruit spawns
+let fruitTimer = 0;                 // frames remaining for the current bonus fruit (0 = none on screen)
+let fruitsSpawned = 0;              // how many bonus fruits have appeared so far this run
 
 // --- sounds
-let sPellet, sPower, sEatGhost, sDie, sWin;
+let sPellet, sPower, sEatGhost, sDie, sWin, sFruit;
 
 // -----------------------------------------------------------------------------
 function gameInit()
@@ -65,6 +97,7 @@ function gameInit()
     sEatGhost = new SoundGenerator({frequency: 980, release: .12, volume: .55, randomness: .02, slide: .25});
     sDie      = new SoundGenerator({frequency: 160, release: .25, volume: .7, randomness: .06, noise: .18, slide: -.35});
     sWin      = new SoundGenerator({frequency: 640, release: .22, volume: .6, randomness: .02, repeatTime: .08});
+    sFruit    = new SoundGenerator({frequency: 540, release: .22, volume: .55, randomness: .04, pitchJump: 380, pitchJumpTime: .07});
 
     buildLevel();
     resetRun(true);
@@ -92,6 +125,10 @@ function gameUpdate()
     else
         ghostEatChain = 0;
 
+    // bonus fruit lifetime
+    if (fruitTimer > 0)
+        fruitTimer--;
+
     updatePlayer();
     updateGhosts();
     checkCollisions();
@@ -116,6 +153,11 @@ function gameUpdatePost()
 // -----------------------------------------------------------------------------
 function gameRender()
 {
+    // Eat-ghost hit-stop. Managed here (not in gameUpdate) because gameUpdate doesn't
+    // run while timeScale is 0 — gameRender keeps firing every real frame, so it can
+    // both apply and release the freeze. timeReal is wall-clock and ticks regardless.
+    timeScale = (timeReal < slowMoUntil) ? 0 : 1;
+
     // pure black playfield, like the arcade
     drawRect(vec2(gridW/2, gridH/2), vec2(gridW, gridH), rgb(0,0,0));
 
@@ -158,6 +200,9 @@ function gameRender()
         }
     }
 
+    // bonus fruit (drawn under the entities so Pac-Man visually walks over it)
+    drawFruit();
+
     // entities
     for (const g of ghosts)
         drawGhost(g);
@@ -175,17 +220,13 @@ function gameRenderPost()
     // HUD strip
     drawRect(vec2(mainCanvasSize.x/2, 28), vec2(mainCanvasSize.x, 56), hsl(0,0,0,.55), 0, false, true);
 
-    drawTextScreen(`SCORE ${score.toString().padStart(6,'0')}   LIVES ${lives}   PELLETS ${pelletCount}`, vec2(20, 22), 24, hsl(.58, .2, .92), 3, hsl(0,0,0,.7), 'left');
-
-    if (powerTimer > 0)
-        drawTextScreen(`POWER ${ceil(powerTimer/60)}s`, vec2(mainCanvasSize.x-220, 22), 24, hsl(.12, .6, .95), 3, hsl(0,0,0,.7), 'left');
+    drawTextScreen(`SCORE ${score.toString().padStart(6,'0')}`, vec2(20, 22), 24, hsl(.58, .2, .92), 3, hsl(0,0,0,.7), 'left');
+    drawTextScreen(`LIVES ${lives}`, vec2(mainCanvasSize.x - 20, 22), 24, hsl(.58, .2, .92), 3, hsl(0,0,0,.7), 'right');
 
     if (win)
         drawCenterBanner('YOU WIN!', 'Press R to restart');
     else if (gameOver)
         drawCenterBanner('GAME OVER', 'Press R to restart');
-    else
-        drawTextScreen('ARROWS: move', vec2(20, mainCanvasSize.y-22), 20, hsl(0,0,1), 3, hsl(0,0,0,.75), 'left');
 }
 
 // -----------------------------------------------------------------------------
@@ -266,6 +307,9 @@ function resetRun(isFirst)
     gameOver = false;
     powerTimer = 0;
     ghostEatChain = 0;
+    pelletsEaten = 0;
+    fruitTimer = 0;
+    fruitsSpawned = 0;
 
     // rebuild pellets every run
     buildLevel();
@@ -273,6 +317,11 @@ function resetRun(isFirst)
     player = makeMover(startCell, vec2(-1,0));
     player.desiredDir = vec2(-1,0);
     player.faceDir = vec2(-1,0);
+
+    // global mode reset to the first scatter phase of the schedule
+    globalModePhase = 0;
+    globalMode = GHOST_MODE_SCHEDULE[0].mode;
+    globalModeTimer = GHOST_MODE_SCHEDULE[0].frames;
 
     // colors keyed to ghost personality: Blinky red, Pinky pink, Inky cyan, Clyde orange
     const colors = [rgb(.95,.25,.25), rgb(.95,.55,.9), rgb(.25,.85,.95), rgb(.95,.65,.2)];
@@ -285,8 +334,6 @@ function resetRun(isFirst)
         g.pendingReverse = false;
         g.eaten = false;
         g.homeCell = ghostStartCells[i].copy();
-        g.modeTimer = randInt(140, 60);
-        g.scatter = !!(i&1);
         g.inHouse = true;          // each starts inside the ghost house
         g.respawnTimer = i * 45;   // staggered exit: 0, 0.75s, 1.5s, 2.25s
         ghosts.push(g);
@@ -462,12 +509,14 @@ function updatePlayer()
 function eatAtCell(cell)
 {
     const i = cell.x + cell.y*gridW;
+    let atePellet = false;
     if (pellets[i])
     {
         pellets[i] = 0;
         pelletCount--;
         score += 10;
         sPellet.play();
+        atePellet = true;
     }
     else if (powerPellets[i])
     {
@@ -484,6 +533,28 @@ function eatAtCell(cell)
             g.pendingReverse = true; // arcade: ghosts reverse the instant fright starts
         }
         sPower.play();
+        atePellet = true;
+    }
+
+    // Bonus fruit spawn check — fires when crossing a threshold count of pellets eaten
+    if (atePellet)
+    {
+        pelletsEaten++;
+        if (fruitTimer <= 0
+            && fruitsSpawned < FRUIT_THRESHOLDS.length
+            && pelletsEaten >= FRUIT_THRESHOLDS[fruitsSpawned])
+        {
+            fruitTimer = FRUIT_DURATION;
+            fruitsSpawned++;
+        }
+    }
+
+    // Bonus fruit collection — Pac-Man passes through the fruit cells under the house
+    if (fruitTimer > 0 && cell.y === FRUIT_CELL_Y && FRUIT_CELL_X.includes(cell.x))
+    {
+        score += FRUIT_VALUES[fruitsSpawned - 1] || FRUIT_VALUES[0];
+        fruitTimer = 0;
+        sFruit.play();
     }
 }
 
@@ -496,6 +567,22 @@ function updateGhosts()
     // fright applies only to ghosts that are out and about — house residents and eyes keep their state
     for (const g of ghosts)
         g.frightened = powered && !g.inHouse && !g.eaten;
+
+    // Tick the global scatter/chase schedule. When the phase flips, all out-and-about
+    // ghosts reverse direction (arcade behavior — catches the player off guard).
+    if (!powered && globalModeTimer !== Infinity && --globalModeTimer <= 0)
+    {
+        if (globalModePhase < GHOST_MODE_SCHEDULE.length - 1)
+        {
+            globalModePhase++;
+            const next = GHOST_MODE_SCHEDULE[globalModePhase];
+            globalMode = next.mode;
+            globalModeTimer = next.frames;
+            for (const g of ghosts)
+                if (!g.inHouse && !g.eaten)
+                    g.pendingReverse = true;
+        }
+    }
 
     for (const g of ghosts)
     {
@@ -512,13 +599,6 @@ function updateGhosts()
         {
             if (!g.eaten) reverseMover(g);
             g.pendingReverse = false;
-        }
-
-        // mode flip sometimes for variety (skip while in house or returning as eyes)
-        if (!g.inHouse && !g.eaten && --g.modeTimer <= 0)
-        {
-            g.modeTimer = randInt(180, 90);
-            g.scatter = !g.scatter;
         }
 
         const onCenter = (gm) =>
@@ -557,7 +637,10 @@ function updateGhosts()
         if (atCellCenter(g))
             onCenter(g);
 
-        const spd = g.eaten ? EYE_SPEED : (g.frightened ? FRIGHT_SPEED : GHOST_SPEED);
+        // Blinky "Cruise Elroy": picks up the pace when most pellets are gone
+        const isElroy = ghosts[0] === g && pelletCount <= ELROY_PELLET_THRESHOLD && !g.inHouse && !g.eaten;
+        const chaseSpd = isElroy ? GHOST_SPEED * ELROY_SPEED_MULT : GHOST_SPEED;
+        const spd = g.eaten ? EYE_SPEED : (g.frightened ? FRIGHT_SPEED : chaseSpd);
         tickMover(g, spd, onCenter);
     }
 }
@@ -591,29 +674,35 @@ function getGhostTarget(g)
     if (g.inHouse) return HOUSE_EXIT;
 
     const idx = ghosts.indexOf(g);
-    if (g.scatter) return ghostScatterCorner(idx);
+
+    // Cruise Elroy Blinky ignores scatter — once the maze is mostly cleared he locks on.
+    const isElroy = (idx === 0) && (pelletCount <= ELROY_PELLET_THRESHOLD);
+    if (globalMode === 'scatter' && !isElroy)
+        return ghostScatterCorner(idx);
 
     const pacCell = player.cell;
     const pacDir  = (player.faceDir && (player.faceDir.x || player.faceDir.y)) ? player.faceDir : vec2(1, 0);
+
+    const dx = pacCell.x - g.cell.x;
+    const dy = pacCell.y - g.cell.y;
+    const dist2 = dx*dx + dy*dy;
 
     switch (idx)
     {
         case 0: // Blinky — chase Pac-Man's tile directly
             return pacCell;
-        case 1: // Pinky — 4 tiles ahead of Pac-Man's facing direction
+        case 1: // Pinky — ambush 4 tiles ahead, but at close range chase directly so you
+                //         can't simply walk away from him
+            if (dist2 < 16) return pacCell;
             return vec2(pacCell.x + pacDir.x*4, pacCell.y + pacDir.y*4);
-        case 2: // Inky — 2 tiles ahead of Pac, then mirrored through Blinky's tile
+        case 2: // Inky — pivot 2 ahead of Pac, then mirror through Blinky's tile
         {
             const pivot = vec2(pacCell.x + pacDir.x*2, pacCell.y + pacDir.y*2);
-            const blinky = ghosts[0] ? ghosts[0].cell : pacCell;
+            const blinky = (ghosts[0] && !ghosts[0].eaten) ? ghosts[0].cell : pacCell;
             return vec2(2*pivot.x - blinky.x, 2*pivot.y - blinky.y);
         }
-        case 3: // Clyde — chase like Blinky when far (>8 tiles), retreat to scatter corner when close
-        {
-            const dx = pacCell.x - g.cell.x;
-            const dy = pacCell.y - g.cell.y;
-            return (dx*dx + dy*dy > 64) ? pacCell : ghostScatterCorner(3);
-        }
+        case 3: // Clyde — chase like Blinky when far (>5 tiles), retreat to corner when close
+            return (dist2 > 25) ? pacCell : ghostScatterCorner(3);
     }
     return pacCell;
 }
@@ -697,6 +786,9 @@ function checkCollisions()
             g.dir = vec2(0, 0);
             g.t = 0;
             moverUpdatePos(g);
+
+            // arcade hit-stop: hard-freeze briefly so the eat lands with some oomph
+            slowMoUntil = timeReal + 0.25;
         }
         else if (!g.inHouse)
         {
@@ -837,7 +929,7 @@ function drawGhost(g)
     const flashing = frightened && powerTimer < FRIGHT_FLASH_FRAMES && (((powerTimer/15)|0) & 1);
     const bodyColor = flashing ? rgb(.95,.95,.98) : (frightened ? rgb(.13,.13,.95) : g.color);
 
-    const bob = eaten ? 0 : .025*oscillate(6, 1, time + g.cell.x*.13 + g.cell.y*.17);
+    const bob = eaten ? 0 : .045*oscillate(1.8, 1, time + g.cell.x*.13 + g.cell.y*.17);
     const center = g.pos.add(vec2(0, bob));
 
     // body as a single polygon — skipped entirely while returning home as eyes
@@ -877,6 +969,35 @@ function drawGhost(g)
         drawCircle(eL.add(look), .14, rgb(.08,.18,.65));
         drawCircle(eR.add(look), .14, rgb(.08,.18,.65));
     }
+}
+
+// Arcade-style bonus cherry, rendered with primitives. Hidden when fruitTimer is 0
+// and blinks during the final FRUIT_FLASH_FRAMES so the player knows time's running out.
+function drawFruit()
+{
+    if (fruitTimer <= 0) return;
+    if (fruitTimer < FRUIT_FLASH_FRAMES && (((fruitTimer/8)|0) & 1)) return;
+
+    const cx = gridW/2;
+    const cy = FRUIT_CELL_Y + .5;
+
+    // two cherries (slight color difference between them so they read as separate)
+    drawCircle(vec2(cx - .15, cy - .05), .42, rgb(.95, .12, .12));
+    drawCircle(vec2(cx + .15, cy - .05), .42, rgb(.82, .08, .08));
+
+    // highlights for that glossy arcade look
+    drawCircle(vec2(cx - .22, cy - .14), .12, rgb(1, .6, .6));
+    drawCircle(vec2(cx + .09, cy - .14), .12, rgb(1, .55, .55));
+
+    // stems converging up to a joining point
+    const joinX = cx + .03;
+    const joinY = cy + .35;
+    const stemColor = rgb(.45, .26, .12);
+    drawLine(vec2(cx - .14, cy + .14), vec2(joinX, joinY), .06, stemColor);
+    drawLine(vec2(cx + .19, cy + .14), vec2(joinX, joinY), .06, stemColor);
+
+    // a small tilted leaf at the stem join
+    drawEllipse(vec2(joinX + .18, joinY - .04), vec2(.22, .1), rgb(.25, .8, .25), -.6);
 }
 
 function drawCenterBanner(title, subtitle)
