@@ -39,6 +39,7 @@ LittleJS and everything in this repository is **MIT licensed!** See [LICENSE](LI
 | Connect 4 | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/connect4.html) |
 | Checkers | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/checkers.html) |
 | Orbitswarm | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/orbitswarm.html) |
+| Pac-Man | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) |
 
 ## 🕹️ Works in Progress Made With AI
 
@@ -55,7 +56,6 @@ Did you make a game you think should be included? Send a pull request!
 | Combat | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/combat.html) |
 | Frogger | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/frogger.html) |
 | Geometry Dash | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/geometryDash.html) |
-| Pac-Man | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) |
 | Pole Position | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/polePosition.html) |
 | River Raid | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/riverRaid.html) |
 | Robotron | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
