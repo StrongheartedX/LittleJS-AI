@@ -19,12 +19,13 @@ showEngineVersion = false; // Hide engine version console display
 
 // --- tuneables
 const TILE = 1;
-const PLAYER_SPEED = .085;      // tiles per frame (60 fps fixed)
-const GHOST_SPEED  = .078;
-const FRIGHT_SPEED = .064;
+const PLAYER_SPEED = .12;       // tiles per frame (60 fps fixed)
+const GHOST_SPEED  = .11;
+const FRIGHT_SPEED = .075;
 const POWER_FRAMES = 60*7;
+const FRIGHT_FLASH_FRAMES = 60*2; // last 2 seconds of fright blink white
 
-const COLLIDE_R2 = (.68)**2; // tuned for larger Pac-Man
+const COLLIDE_R2 = (.68)**2;
 
 // --- level state
 let gridW, gridH;
@@ -95,67 +96,70 @@ function gameUpdate()
 // -----------------------------------------------------------------------------
 function gameUpdatePost()
 {
-    // stationary camera centered on the maze
-    cameraScale = 34;
-    cameraPos = vec2(gridW/2, gridH/2);
+    // Fit the whole maze under the HUD strip; offset the camera so the maze sits below the HUD.
+    const hudHeight = 56;
+    cameraScale = min(mainCanvasSize.x / gridW, (mainCanvasSize.y - hudHeight) / gridH);
+    // Shift camera up in world space (= maze down on screen) by half the HUD height.
+    cameraPos = vec2(gridW/2, gridH/2 + (hudHeight/2) / cameraScale);
 }
 
 // -----------------------------------------------------------------------------
 function gameRender()
 {
-    // background
-    drawRect(vec2(gridW/2, gridH/2), vec2(gridW+10, gridH+10), rgb(.06,.06,.08));
-    drawRect(vec2(gridW/2, gridH/2), vec2(gridW, gridH), rgb(.10,.10,.12));
+    // pure black playfield, like the arcade
+    drawRect(vec2(gridW/2, gridH/2), vec2(gridW, gridH), rgb(0,0,0));
 
-    // walls
-    const wallColor = rgb(.12,.22,.6);
-    const wallInner = rgb(.06,.10,.25);
+    // walls (solid arcade blue) + ghost door (pink strip across the door cell)
+    const wallColor = rgb(.13, .22, .95);
+    const doorColor = rgb(1, .72, .82);
     for (let y=0; y<gridH; y++)
     for (let x=0; x<gridW; x++)
     {
-        if (!isWallXY(x,y)) continue;
-        const p = vec2(x+.5, y+.5);
-        drawRect(p, vec2(.98,.98), wallColor);
-        drawRect(p, vec2(.78,.78), wallInner);
+        const w = isWallXY(x, y);
+        if (w === 1)
+            drawRect(vec2(x+.5, y+.5), vec2(1, 1), wallColor);
+        else if (w === 2)
+            drawRect(vec2(x+.5, y+.5), vec2(1, .18), doorColor);
     }
 
     // pellets
+    const pelletColor = rgb(1, .72, .68); // arcade peach
     for (let y=0; y<gridH; y++)
     for (let x=0; x<gridW; x++)
     {
         const i = x + y*gridW;
         if (pellets[i])
-            drawCircle(vec2(x+.5, y+.5), .10, rgb(.95,.9,.75));
+            drawRect(vec2(x+.5, y+.5), vec2(.16, .16), pelletColor);
         else if (powerPellets[i])
         {
-            const pulse = .30 + .09*oscillate(4, 1, time + (x+y)*.07);
-            drawCircle(vec2(x+.5, y+.5), pulse, rgb(.98,.90,.15));
+            const pulse = .42 + .12*oscillate(3, 1, time);
+            drawCircle(vec2(x+.5, y+.5), pulse, pelletColor);
         }
     }
 
     // entities
-    drawPac(player);
     for (const g of ghosts)
         drawGhost(g);
+    drawPac(player);
 }
 
 // -----------------------------------------------------------------------------
 function gameRenderPost()
 {
     // HUD strip
-    drawRect(vec2(mainCanvasSize.x/2, 34), vec2(mainCanvasSize.x, 72), hsl(0,0,0,.55), 0, false, true);
+    drawRect(vec2(mainCanvasSize.x/2, 28), vec2(mainCanvasSize.x, 56), hsl(0,0,0,.55), 0, false, true);
 
-    drawTextScreen(`SCORE ${score.toString().padStart(6,'0')}   LIVES ${lives}   PELLETS ${pelletCount}`, vec2(20, 24), 28, hsl(.58, .2, .92), 4, hsl(0,0,0,.7), 'left');
+    drawTextScreen(`SCORE ${score.toString().padStart(6,'0')}   LIVES ${lives}   PELLETS ${pelletCount}`, vec2(20, 22), 24, hsl(.58, .2, .92), 3, hsl(0,0,0,.7), 'left');
 
     if (powerTimer > 0)
-        drawTextScreen(`POWER ${ceil(powerTimer/60)}s`, vec2(mainCanvasSize.x-260, 24), 28, hsl(.12, .6, .95), 4, hsl(0,0,0,.7), 'left');
+        drawTextScreen(`POWER ${ceil(powerTimer/60)}s`, vec2(mainCanvasSize.x-220, 22), 24, hsl(.12, .6, .95), 3, hsl(0,0,0,.7), 'left');
 
     if (win)
         drawCenterBanner('YOU WIN!', 'Press R to restart');
     else if (gameOver)
         drawCenterBanner('GAME OVER', 'Press R to restart');
     else
-        drawTextScreen('ARROWS: move', vec2(20, mainCanvasSize.y-26), 22, hsl(0,0,1), 3, hsl(0,0,0,.75), 'left');
+        drawTextScreen('ARROWS: move', vec2(20, mainCanvasSize.y-22), 20, hsl(0,0,1), 3, hsl(0,0,0,.75), 'left');
 }
 
 // -----------------------------------------------------------------------------
@@ -163,28 +167,41 @@ function gameRenderPost()
 
 function buildLevel()
 {
-    // Reusing the maze but turning open tiles into pellets.
-    // X = wall, . = pellet, o = power pellet, S = player spawn, E = ghost spawn
+    // Arcade-style 28x31 maze. Tile legend:
+    //   X = wall, D = ghost door, . = pellet, o = power pellet,
+    //   _ = empty walkway (no pellet), S = player spawn, E = ghost spawn
     const rows = [
-        'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-        'Xo...........XX.........o..X',
-        'X.XXXX.XXXXX.XX.XXXXX.X.XX.X',
-        'X....X.E...X....X....EX..X.X',
-        'X.XX.X.XXX.XXXXXX.XXX.XX.X.X',
-        'X......X..........X......X.X',
-        'XXXXXX.X.XXXXXXXX.X.XXXX.X.X',
-        'X......X....XX....X......X.X',
-        'X.XXXXXXXXX.XX.XXXXXXXXX.X.X',
-        'X.X..........S...........X.X',
-        'X.X.XXXXXXXX.XX.XXXXXXXX.X.X',
-        'X.X.X......X.XX.X......X.X.X',
-        'X...X.XXXX........XXXX.X...X',
-        'XXX.X....X.XXXXXX.X....X.XXX',
-        'X...XXXX.X........X.XXXX...X',
-        'X.X......XX.XXXX.XX......X.X',
-        'X.XXXXXXXXX.E..E.XXXXXXXXX.X',
-        'X..o........XXXX........o..X',
-        'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+        'XXXXXXXXXXXXXXXXXXXXXXXXXXXX', //  0
+        'X............XX............X', //  1
+        'X.XXXX.XXXXX.XX.XXXXX.XXXX.X', //  2
+        'XoXXXX.XXXXX.XX.XXXXX.XXXXoX', //  3
+        'X.XXXX.XXXXX.XX.XXXXX.XXXX.X', //  4
+        'X..........................X', //  5
+        'X.XXXX.XX.XXXXXXXX.XX.XXXX.X', //  6
+        'X.XXXX.XX.XXXXXXXX.XX.XXXX.X', //  7
+        'X......XX....XX....XX......X', //  8
+        'XXXXXX.XXXXX_XX_XXXXX.XXXXXX', //  9
+        'XXXXXX.XXXXX_XX_XXXXX.XXXXXX', // 10
+        'XXXXXX.XX___EEEE___XX.XXXXXX', // 11  ghosts spawn just above the door
+        'XXXXXX.XX_XXXDDXXX_XX.XXXXXX', // 12  ghost-house top w/ door (DD)
+        'XXXXXX.XX_X______X_XX.XXXXXX', // 13
+        '______.___X______X___.______', // 14  tunnel row (wraps left/right)
+        'XXXXXX.XX_X______X_XX.XXXXXX', // 15
+        'XXXXXX.XX_XXXXXXXX_XX.XXXXXX', // 16  ghost-house bottom wall
+        'XXXXXX.XX__________XX.XXXXXX', // 17
+        'XXXXXX.XX_XXXXXXXX_XX.XXXXXX', // 18
+        'XXXXXX.XXXXX_XX_XXXXX.XXXXXX', // 19
+        'X............XX............X', // 20
+        'X.XXXX.XXXXX.XX.XXXXX.XXXX.X', // 21
+        'X.XXXX.XXXXX.XX.XXXXX.XXXX.X', // 22
+        'Xo..XX........S.......XX..oX', // 23  player spawn (S)
+        'XXX.XX.XX.XXXXXXXX.XX.XX.XXX', // 24
+        'XXX.XX.XX.XXXXXXXX.XX.XX.XXX', // 25
+        'X......XX....XX....XX......X', // 26
+        'X.XXXXXXXXXX.XX.XXXXXXXXXX.X', // 27
+        'X.XXXXXXXXXX.XX.XXXXXXXXXX.X', // 28
+        'X..........................X', // 29
+        'XXXXXXXXXXXXXXXXXXXXXXXXXXXX', // 30
     ];
 
     gridW = rows[0].length;
@@ -203,37 +220,16 @@ function buildLevel()
         const ch = rows[r][c];
         const x = c;
         const y = gridH-1-r; // flip so y increases upward
-
-        if (ch === 'X')
-        {
-            setWallXY(x,y,1);
-            continue;
-        }
-
         const i = x + y*gridW;
 
-        // pellets by default on open cells
-        if (ch === 'o')
-        {
-            powerPellets[i] = 1;
-            pelletCount++;
-        }
-        else
-        {
-            pellets[i] = 1;
-            pelletCount++;
-        }
-
-        if (ch === 'S')
-            startCell = vec2(x,y);
-        if (ch === 'E')
-            ghostStartCells.push(vec2(x,y));
+        if (ch === 'X')           walls[i] = 1;
+        else if (ch === 'D')      walls[i] = 2;     // ghost door
+        else if (ch === '.')      { pellets[i] = 1;       pelletCount++; }
+        else if (ch === 'o')      { powerPellets[i] = 1;  pelletCount++; }
+        else if (ch === 'S')      startCell = vec2(x, y);
+        else if (ch === 'E')      ghostStartCells.push(vec2(x, y));
+        // '_' and anything else = empty walkway, nothing to set
     }
-
-    // ensure spawn cells don't have pellets
-    clearPelletAt(startCell);
-    for (const g of ghostStartCells)
-        clearPelletAt(g);
 }
 
 function resetRun(isFirst)
@@ -248,21 +244,21 @@ function resetRun(isFirst)
     // rebuild pellets every run
     buildLevel();
 
-    player = makeMover(startCell, vec2(1,0));
-    player.desiredDir = vec2(1,0);
-    player.faceDir = vec2(1,0);
+    player = makeMover(startCell, vec2(-1,0));
+    player.desiredDir = vec2(-1,0);
+    player.faceDir = vec2(-1,0);
 
     const colors = [rgb(.95,.25,.25), rgb(.95,.55,.9), rgb(.25,.85,.95), rgb(.95,.65,.2)];
     ghosts = [];
     for (let i=0; i<min(4, ghostStartCells.length); i++)
     {
-        const g = makeMover(ghostStartCells[i], vec2(-1,0));
+        const g = makeMover(ghostStartCells[i], vec2(-1,0), true);
         g.color = colors[i%colors.length];
         g.frightened = false;
+        g.pendingReverse = false;
         g.homeCell = ghostStartCells[i].copy();
         g.modeTimer = randInt(140, 60);
         g.scatter = !!(i&1);
-        g.lastTurnCellKey = '';
         ghosts.push(g);
     }
 
@@ -273,13 +269,14 @@ function resetRun(isFirst)
 // -----------------------------------------------------------------------------
 // Grid movers
 
-function makeMover(cell, dir)
+function makeMover(cell, dir, isGhost=false)
 {
     return {
         cell: vec2(cell.x, cell.y), // integer
         dir: dir.copy(),            // -1/0/1
         t: 0,                       // 0..1 progress to next cell
         pos: vec2(cell.x+.5, cell.y+.5),
+        isGhost,                    // gates whether the ghost door blocks this mover
     };
 }
 
@@ -289,7 +286,7 @@ function moverUpdatePos(m)
     m.pos = base.add(m.dir.scale(m.t));
 }
 
-function canMove(cell, dir)
+function canMove(cell, dir, asGhost=false)
 {
     if (!dir.x && !dir.y)
         return true;
@@ -301,7 +298,11 @@ function canMove(cell, dir)
     if (nx < 0) nx = gridW-1;
     else if (nx >= gridW) nx = 0;
 
-    return !isWallXY(nx, ny);
+    const w = isWallXY(nx, ny);
+    if (w === 1) return false;             // solid wall
+    if (w === 2)                            // ghost door
+        return asGhost && dir.y > 0;        // ghosts can leave upward, never re-enter from above
+    return true;
 }
 
 function stepCell(cell, dir)
@@ -327,7 +328,7 @@ function tickMover(m, speed, onArriveCenter)
             break;
 
         // if we're at a center and the next cell is blocked, stop immediately (no "bounce"/penetration)
-        if (m.t <= 1e-6 && !canMove(m.cell, m.dir))
+        if (m.t <= 1e-6 && !canMove(m.cell, m.dir, m.isGhost))
         {
             m.dir = vec2(0,0);
             m.t = 0;
@@ -346,7 +347,7 @@ function tickMover(m, speed, onArriveCenter)
         remaining -= distToCenter;
         m.t = 0;
 
-        if (!canMove(m.cell, m.dir))
+        if (!canMove(m.cell, m.dir, m.isGhost))
         {
             m.dir = vec2(0,0);
             break;
@@ -366,16 +367,38 @@ function atCellCenter(m)
     return m.t <= 1e-6;
 }
 
+function reverseMover(m)
+{
+    // Flip direction instantly mid-cell. The cell we were heading toward becomes the
+    // new "from" cell, and our remaining-distance becomes 1 - t. Position is unchanged.
+    if (!m.dir.x && !m.dir.y)
+        return;
+    m.cell = stepCell(m.cell, m.dir);
+    m.dir = m.dir.scale(-1);
+    m.t = 1 - m.t;
+    moverUpdatePos(m);
+}
+
 // -----------------------------------------------------------------------------
 // Player
 
 function updatePlayer()
 {
-    // buffer desired direction
-    if (keyIsDown('ArrowUp'))    player.desiredDir = vec2(0,1);
-    if (keyIsDown('ArrowDown'))  player.desiredDir = vec2(0,-1);
-    if (keyIsDown('ArrowLeft'))  player.desiredDir = vec2(-1,0);
-    if (keyIsDown('ArrowRight')) player.desiredDir = vec2(1,0);
+    // buffer desired direction: the most recent key press wins (arcade-style)
+    if (keyWasPressed('ArrowUp'))         player.desiredDir = vec2(0,1);
+    else if (keyWasPressed('ArrowDown'))  player.desiredDir = vec2(0,-1);
+    else if (keyWasPressed('ArrowLeft'))  player.desiredDir = vec2(-1,0);
+    else if (keyWasPressed('ArrowRight')) player.desiredDir = vec2(1,0);
+
+    // mid-cell reverse: if desiredDir is the opposite of current dir, flip instantly
+    if ((player.dir.x || player.dir.y) &&
+        player.desiredDir.x === -player.dir.x &&
+        player.desiredDir.y === -player.dir.y &&
+        !atCellCenter(player))
+    {
+        reverseMover(player);
+        player.faceDir = player.dir.copy();
+    }
 
     const onCenter = (p) =>
     {
@@ -418,16 +441,12 @@ function eatAtCell(cell)
         powerTimer = POWER_FRAMES;
         ghostEatChain = 0;
         for (const g of ghosts)
+        {
             g.frightened = true;
+            g.pendingReverse = true; // arcade: ghosts reverse the instant fright starts
+        }
         sPower.play();
     }
-}
-
-function clearPelletAt(cell)
-{
-    const i = cell.x + cell.y*gridW;
-    if (pellets[i]) { pellets[i]=0; pelletCount--; }
-    if (powerPellets[i]) { powerPellets[i]=0; pelletCount--; }
 }
 
 // -----------------------------------------------------------------------------
@@ -441,6 +460,13 @@ function updateGhosts()
 
     for (const g of ghosts)
     {
+        // honor a pending reverse (e.g. player just ate a power pellet) before moving
+        if (g.pendingReverse)
+        {
+            reverseMover(g);
+            g.pendingReverse = false;
+        }
+
         // mode flip sometimes for variety
         if (--g.modeTimer <= 0)
         {
@@ -450,7 +476,7 @@ function updateGhosts()
 
         const onCenter = (gm) =>
         {
-            const choices = getMoveChoices(gm.cell);
+            const choices = getMoveChoices(gm.cell, true);
 
             // avoid reversing unless forced
             const back = gm.dir.scale(-1);
@@ -469,10 +495,10 @@ function updateGhosts()
     }
 }
 
-function getMoveChoices(cell)
+function getMoveChoices(cell, asGhost=false)
 {
     const dirs = [vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1)];
-    return dirs.filter(d => canMove(cell, d));
+    return dirs.filter(d => canMove(cell, d, asGhost));
 }
 
 function chooseChaseDir(dirs, g)
@@ -571,8 +597,9 @@ function onPlayerDie()
 
     // reset positions only
     player.cell = startCell.copy();
-    player.dir = vec2(1,0);
-    player.desiredDir = vec2(1,0);
+    player.dir = vec2(-1,0);
+    player.desiredDir = vec2(-1,0);
+    player.faceDir = vec2(-1,0);
     player.t = 0;
     moverUpdatePos(player);
 
@@ -582,6 +609,7 @@ function onPlayerDie()
         g.cell = g.homeCell.copy();
         g.dir = vec2(-1,0);
         g.t = 0;
+        g.pendingReverse = false;
         moverUpdatePos(g);
     }
 
@@ -611,76 +639,107 @@ function setWallXY(x, y, v)
 
 function drawPac(p)
 {
-    // make Pac-Man clearly larger
-    const r = .78;
+    const diameter = .9;
+    const r = diameter / 2;
 
-    // face the last movement direction (or desired direction) so mouth looks right when stopped
+    // face the last movement direction so the mouth points the right way when stopped
     const face = (p.faceDir && (p.faceDir.x || p.faceDir.y)) ? p.faceDir : (p.desiredDir || vec2(1,0));
-    const dirAngle = face.angle();
-    const dirVec = vec2().setAngle(dirAngle, 1);
+    const faceAngle = face.angle();
 
+    // chomp animation: open/close as a fraction 0..1
     const moving = p.dir.x || p.dir.y;
-
-    // chomp: slower and readable
-    const wFast = .5 + .5*oscillate(4.2, 1, time);
-    const wIdle = .5 + .5*oscillate(2.4, 1, time);
-
-    // When moving, allow the mouth to fully close (open can hit ~0).
-    // When idle, keep it slightly open.
-    const open = moving ? wFast : (.05 + .15*wIdle); // moving 0..1, idle ~0.05..0.20
+    const phase = moving ? .5 + .5*oscillate(6, 1, time) : .25;
+    const halfMouth = phase * PI/4;            // up to 45 degree half-angle
 
     // body
-    drawCircle(p.pos, r, rgb(.98,.90,.15));
+    drawCircle(p.pos, diameter, rgb(1, .92, 0));
 
-    // mouth cut: keep it a bit closer to center, and let size get near 0 when closed
-    const mouthScale = 1.65;
-    const cutRadius = r * (0.01 + 0.52*open) * mouthScale;
-    const cutOffset = r * (0.12 + 0.42*open); // closer to center than before
-    drawCircle(p.pos.add(dirVec.scale(cutOffset)), cutRadius, rgb(.10,.10,.12));
-
-    // tiny eye
-    const eye = p.pos.add(vec2().setAngle(dirAngle + PI/2, r*.28)).add(dirVec.scale(-r*.14));
-    drawCircle(eye, r*.085, rgb(.05,.05,.07));
+    // mouth: black wedge whose apex sits at Pac-Man's center, opening in faceAngle
+    if (halfMouth > .02)
+    {
+        const reach = r * 1.08;
+        const wedge = [
+            vec2(0, 0),
+            vec2(Math.sin(-halfMouth)*reach, Math.cos(-halfMouth)*reach),
+            vec2(Math.sin(+halfMouth)*reach, Math.cos(+halfMouth)*reach),
+        ];
+        drawPoly(wedge, rgb(0,0,0), 0, rgb(0,0,0), p.pos, faceAngle);
+    }
 }
 
+
+// Build the ghost body outline once — dome on top, scalloped 3-hump bottom.
+const _ghostShape = (() =>
+{
+    const r = .42;
+    const sideY = -.32;
+    const humpDepth = .14;
+    const N = 12;
+    const pts = [];
+    // dome semicircle: (-r,0) over (0,r) to (r,0)
+    for (let i = 0; i <= N; i++)
+    {
+        const a = PI - PI * (i/N);
+        pts.push(vec2(r * Math.cos(a), r * Math.sin(a)));
+    }
+    // right side straight down
+    pts.push(vec2(r, sideY));
+    // 3 scalloped humps right -> left
+    pts.push(vec2( 2*r/3, sideY - humpDepth));
+    pts.push(vec2(   r/3, sideY));
+    pts.push(vec2(     0, sideY - humpDepth));
+    pts.push(vec2(  -r/3, sideY));
+    pts.push(vec2(-2*r/3, sideY - humpDepth));
+    // left side back up to the dome
+    pts.push(vec2(-r, sideY));
+    return pts;
+})();
 
 function drawGhost(g)
 {
     const frightened = powerTimer > 0;
-    const c = frightened ? rgb(.25,.35,.95) : g.color;
+    // last 2 seconds of fright: alternate blue/white at ~4 Hz to warn the player
+    const flashing = frightened && powerTimer < FRIGHT_FLASH_FRAMES && (((powerTimer/15)|0) & 1);
+    const bodyColor = flashing ? rgb(.95,.95,.98) : (frightened ? rgb(.13,.13,.95) : g.color);
 
-    const r = .42;
-    const bob = .03*oscillate(6, 1, time + g.cell.x*.13 + g.cell.y*.17);
+    const bob = .025*oscillate(6, 1, time + g.cell.x*.13 + g.cell.y*.17);
+    const center = g.pos.add(vec2(0, bob));
 
-    // body
-    drawCircle(g.pos.add(vec2(0,bob)), r, c);
-    drawRect(g.pos.add(vec2(0, -r*.35 + bob)), vec2(r*1.9, r*1.2), c);
-
-    // feet scallops
-    const footY = g.pos.y - r*.65 + bob;
-    for (let i=-2; i<=2; i++)
-        drawCircle(vec2(g.pos.x + i*.18, footY), .13, c);
+    // body as a single polygon
+    drawPoly(_ghostShape, bodyColor, 0, rgb(0,0,0), center, 0);
 
     // face
+    const eyeY = .1;
+    const eyeDX = .14;
     if (frightened)
     {
-        // eyes
-        drawCircle(g.pos.add(vec2(-.14, .08 + bob)), .09, rgb(1,1,1));
-        drawCircle(g.pos.add(vec2(.14, .08 + bob)), .09, rgb(1,1,1));
-        drawCircle(g.pos.add(vec2(-.14, .08 + bob)), .04, rgb(.05,.05,.07));
-        drawCircle(g.pos.add(vec2(.14, .08 + bob)), .04, rgb(.05,.05,.07));
-        // mouth
-        drawRect(g.pos.add(vec2(0, -.10 + bob)), vec2(.22, .06), rgb(.95,.95,.98));
+        // pac-style scared face: small dot eyes + a wavy mouth band
+        const faceColor = flashing ? rgb(.9,.15,.15) : rgb(.95,.95,.98);
+        drawRect(center.add(vec2(-eyeDX, eyeY)), vec2(.08, .12), faceColor);
+        drawRect(center.add(vec2(+eyeDX, eyeY)), vec2(.08, .12), faceColor);
+
+        // zigzag mouth as a single polygon
+        const mw = .17, mh = .035, by = -.1;
+        const seg = mw/3;
+        const top = [
+            vec2(-mw, by), vec2(-mw+seg*.5, by+mh), vec2(-mw+seg, by),
+            vec2(-mw+seg*1.5, by+mh), vec2(-mw+seg*2, by),
+            vec2(-mw+seg*2.5, by+mh), vec2( mw, by),
+        ];
+        const bot = top.slice().reverse().map(v => vec2(v.x, v.y - .055));
+        drawPoly(top.concat(bot), faceColor, 0, rgb(0,0,0), center, 0);
     }
     else
     {
-        const look = g.dir.x || g.dir.y ? g.dir.normalize().scale(.05) : vec2();
-        const e1 = g.pos.add(vec2(-.14, .10 + bob));
-        const e2 = g.pos.add(vec2(.14, .10 + bob));
-        drawCircle(e1, .10, rgb(1,1,1));
-        drawCircle(e2, .10, rgb(1,1,1));
-        drawCircle(e1.add(look), .05, rgb(.1,.1,.2));
-        drawCircle(e2.add(look), .05, rgb(.1,.1,.2));
+        // arcade-style eyes: large whites, dark-blue pupil that looks toward motion
+        const look = (g.dir.x || g.dir.y) ? g.dir.normalize().scale(.04) : vec2();
+        const eL = center.add(vec2(-eyeDX, eyeY));
+        const eR = center.add(vec2(+eyeDX, eyeY));
+        // whites are taller than wide, like the arcade
+        drawEllipse(eL, vec2(.13, .17), rgb(1,1,1));
+        drawEllipse(eR, vec2(.13, .17), rgb(1,1,1));
+        drawCircle(eL.add(look), .08, rgb(.08,.18,.65));
+        drawCircle(eR.add(look), .08, rgb(.08,.18,.65));
     }
 }
 
