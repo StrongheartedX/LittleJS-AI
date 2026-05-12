@@ -18,7 +18,7 @@ showEngineVersion = false;
 // world / arena
 const arenaSize = vec2(38, 20);
 const arenaHalf = arenaSize.scale(.5);
-const arenaPadding = 1.2;
+const arenaPadding = 0;  // visual wall == playable edge (no dead band)
 
 // respawn / safety
 const safeZoneRadius = 5;
@@ -29,24 +29,27 @@ const waveStartDelayFrames = 60;
 
 // electrode placement
 const electrodeKeepout = safeZoneRadius + 2.2;
-const electrodeMaxCount = 14;
+const electrodeMaxCount = 20;
 
 // humans
 const humanRescueStart = 1000;
 const humanRescueStep = 1000;
 const humanRescueMax = 5000;
 
-// scoring (matches Robotron 2084 values)
+// scoring (matches Robotron 2084 arcade values)
 const scoreGrunt    = 100;
 const scoreBrain    = 500;
-const scoreProg     = 25;
+const scoreProg     = 100;
 const scoreSpheroid = 1000;
 const scoreEnforcer = 150;
-const scoreEnemyBullet = 25;       // shooting down sparks / cruise missiles
-const scoreElectrodeKill = 25;     // any enemy walked into an electrode
+const scoreTank     = 200;
+const scoreQuark    = 1000;
+const scoreEnemyBullet = 25;       // shooting down sparks / cruise missiles / shells
+const scoreElectrodeKill = 25;     // grunt walked into electrode
 
-// starting lives
-const startingLives = 3;
+// lives and bonus
+const startingLives = 5;
+const bonusLifeInterval = 25000;
 
 // game state
 let player;
@@ -67,6 +70,7 @@ let waveTime = 0;
 let interWaveTimer = 0;
 let respawnTimer = 0;
 let humanRescueBonus = humanRescueStart;
+let nextBonusLifeAt = bonusLifeInterval;
 let playerControlLocked = true;
 
 // sfx
@@ -225,29 +229,48 @@ class Bullet extends EngineObject
     {
         const angle = this.vel.angle();
         const c = hsl(this.huePhase, 1, .65);
-        // outer glow streak
-        drawRect(this.pos, vec2(.7, .22), rgb(c.r, c.g, c.b, .35), angle);
+        // outer glow streak (tall rect — angle 0 means pointing up, vel.angle() rotates correctly)
+        drawRect(this.pos, vec2(.22, .8), rgb(c.r, c.g, c.b, .35), angle);
         // bright core streak
-        drawRect(this.pos, vec2(.5, .14), c, angle);
+        drawRect(this.pos, vec2(.14, .55), c, angle);
         // hot white center
         drawRect(this.pos, vec2(.22, .22), rgb(1,1,1));
     }
 }
 
+// Spark: spinning rainbow cross that weakly homes in on the player. Shoot it down for bonus.
 class Spark extends EngineObject
 {
     constructor(pos, vel)
     {
-        super(pos, vec2(.22));
+        super(pos, vec2(.3));
         this.vel = vel.copy();
-        this.life = 150;
+        this.life = 220;
         this.renderOrder = 5;
         this.phase = rand(0, 1);
+        this.spinAngle = rand(0, 6.28);
     }
     update()
     {
+        // weak homing on the player
+        if (player && !gameOver)
+        {
+            const toP = player.pos.subtract(this.pos);
+            const d = toP.length();
+            if (d > .01)
+            {
+                const desired = toP.scale(.11 / d);
+                this.vel = this.vel.scale(.96).add(desired.scale(.05));
+            }
+        }
+        // cap speed so it stays dodgeable
+        const sp = this.vel.length();
+        const maxSp = .14;
+        if (sp > maxSp) this.vel = this.vel.scale(maxSp / sp);
+
         this.pos = this.pos.add(this.vel);
         this.phase = (this.phase + .12) % 1;
+        this.spinAngle += .35;
         this.life--;
         if (this.life <= 0) this.destroy();
         if (abs(this.pos.x) > arenaHalf.x + 2 || abs(this.pos.y) > arenaHalf.y + 2) this.destroy();
@@ -255,9 +278,13 @@ class Spark extends EngineObject
     render()
     {
         const c = hsl(this.phase, 1, .65);
-        drawRect(this.pos, vec2(.4, .4), rgb(c.r, c.g, c.b, .35));
-        drawRect(this.pos, vec2(.22, .22), c);
-        drawRect(this.pos, vec2(.1, .1), rgb(1,1,1));
+        // glow halo
+        drawRect(this.pos, vec2(.55), rgb(c.r, c.g, c.b, .3), this.spinAngle * .5);
+        // spinning cross
+        drawRect(this.pos, vec2(.55, .15), c, this.spinAngle);
+        drawRect(this.pos, vec2(.15, .55), c, this.spinAngle);
+        // hot core
+        drawRect(this.pos, vec2(.18), rgb(1,1,1));
     }
 }
 
@@ -507,9 +534,10 @@ class Brain extends KillableEnemy
 {
     constructor(pos)
     {
-        super(pos, vec2(.9, 1.0), 1, scoreBrain, rgb(.4, 1, .4));
+        super(pos, vec2(1.1, 1.4), 1, scoreBrain, rgb(.4, 1, .4));
         this.shootTimer = randInt(120, 240);
         this.walkPhase = 0;
+        this.brainPulse = rand(0, 6.28);
     }
     findHuman()
     {
@@ -556,85 +584,436 @@ class Brain extends KillableEnemy
                 sfxMissile.play(this.pos);
             }
         }
-        this.pos = clampToArena(this.pos, .45);
+        this.pos = clampToArena(this.pos, .5);
         this.walkPhase += speed * 5;
+        this.brainPulse += .12;
         if (this.flash > 0) this.flash--;
     }
     render()
     {
-        const c = this.flash ? rgb(1,1,1) : rgb(.3, .85, .3);
-        const dark = rgb(.1, .35, .15);
-        const brain = rgb(.95, .55, .65);
+        const c = this.flash ? rgb(1,1,1) : rgb(.35, .5, 1);    // blue body (matches FAQ)
+        const dark = rgb(.1, .2, .55);
+        const brainPink = rgb(1, .55, .75);
+        const brainWrinkle = rgb(.7, .15, .35);
         const bob = Math.sin(this.walkPhase) * .04;
-        drawRect(this.pos.add(vec2(0,-.6)), vec2(.7, .12), rgb(0,0,0,.35));
-        drawRect(this.pos.add(vec2(-.15, -.45 + bob*.5)), vec2(.18, .25), dark);
-        drawRect(this.pos.add(vec2( .15, -.45 - bob*.5)), vec2(.18, .25), dark);
-        drawRect(this.pos.add(vec2(0, -.05)), vec2(.55, .5), c);
-        drawRect(this.pos.add(vec2(-.35, 0)), vec2(.16, .35), c);
-        drawRect(this.pos.add(vec2( .35, 0)), vec2(.16, .35), c);
-        // exposed brain dome
-        drawRect(this.pos.add(vec2(0, .42)), vec2(.55, .4), brain);
-        drawRect(this.pos.add(vec2(-.13, .42)), vec2(.05, .3), rgb(.5, .15, .25));
-        drawRect(this.pos.add(vec2( .13, .42)), vec2(.05, .3), rgb(.5, .15, .25));
-        drawRect(this.pos.add(vec2(0, .48)), vec2(.4, .04), rgb(.5, .15, .25));
+        const pulse = 1 + Math.sin(this.brainPulse) * .04;
+
+        // shadow
+        drawRect(this.pos.add(vec2(0,-.85)), vec2(.6, .14), rgb(0,0,0,.4));
+        // tiny legs (intentionally undersized — most of the body mass is the brain)
+        drawRect(this.pos.add(vec2(-.13, -.62 + bob*.4)), vec2(.16, .25), dark);
+        drawRect(this.pos.add(vec2( .13, -.62 - bob*.4)), vec2(.16, .25), dark);
+        // small green robot torso
+        drawRect(this.pos.add(vec2(0, -.32)), vec2(.45, .4), c);
+        // little arms
+        drawRect(this.pos.add(vec2(-.32, -.3)), vec2(.13, .32), c);
+        drawRect(this.pos.add(vec2( .32, -.3)), vec2(.13, .32), c);
+        // angry eyes (under the brain)
+        drawRect(this.pos.add(vec2(-.16, -.05)), vec2(.13, .14), rgb(0,0,0));
+        drawRect(this.pos.add(vec2( .16, -.05)), vec2(.13, .14), rgb(0,0,0));
+        drawRect(this.pos.add(vec2(-.16, -.04)), vec2(.07, .07), rgb(1, .15, .15));
+        drawRect(this.pos.add(vec2( .16, -.04)), vec2(.07, .07), rgb(1, .15, .15));
+        // GIANT exposed pink brain dome — the iconic identifying feature
+        drawRect(this.pos.add(vec2(0, .42 + bob*.5)), vec2(1.15 * pulse, .8 * pulse), brainPink);
+        // brain wrinkles (darker pink bands)
+        drawRect(this.pos.add(vec2(0, .65 + bob*.5)), vec2(.95 * pulse, .08), brainWrinkle);
+        drawRect(this.pos.add(vec2(0, .42 + bob*.5)), vec2(1.05 * pulse, .06), brainWrinkle);
+        drawRect(this.pos.add(vec2(0, .2 + bob*.5)), vec2(.85 * pulse, .06), brainWrinkle);
+        // hemisphere divide line
+        drawRect(this.pos.add(vec2(0, .42 + bob*.5)), vec2(.07, .78 * pulse), brainWrinkle);
+        // tiny highlight on brain
+        drawRect(this.pos.add(vec2(-.25, .58 + bob*.5)), vec2(.15, .15), rgb(1, .8, .9, .7));
     }
 }
 
-// Prog: reprogrammed family, chases the player; killable for small bonus
+// Prog: reprogrammed family, runs at the player in a zigzag with a magenta trail
 class Prog extends KillableEnemy
 {
     constructor(pos, humanType)
     {
-        super(pos, vec2(.55, .85), 1, scoreProg, rgb(1, .3, .9));
+        super(pos, vec2(.55, .9), 1, scoreProg, rgb(1, .2, .85));
         this.humanType = humanType;
-        this.walkPhase = 0;
+        this.walkPhase = rand(0, 6.28);
+        this.zigPhase = rand(0, 6.28);
+        this.trailTimer = 0;
+        this.eyePulse = rand(0, 6.28);
     }
     update()
     {
         if (gameOver || playerControlLocked || !player) return;
-        const speed = .06 + min(.025, gameWave * .001);
-        const dir = player.pos.subtract(this.pos).normalize(1);
-        this.pos = this.pos.add(dir.scale(speed));
+        const speed = .12 + min(.04, gameWave * .002);  // much faster than humans
+
+        // zigzag toward player — base toward, plus perpendicular sine wobble
+        const toP = player.pos.subtract(this.pos);
+        const d = toP.length();
+        const baseDir = d > .001 ? toP.scale(1/d) : vec2(0,1);
+        this.zigPhase += .28;
+        const perp = vec2(-baseDir.y, baseDir.x);
+        const zig = Math.sin(this.zigPhase) * .9;
+        const moveDir = baseDir.add(perp.scale(zig));
+        const mag = moveDir.length();
+        const finalDir = mag > .001 ? moveDir.scale(1/mag) : baseDir;
+
+        this.pos = this.pos.add(finalDir.scale(speed));
         this.pos = clampToArena(this.pos, .4);
-        this.walkPhase += speed * 12;
+        this.walkPhase += speed * 16;
+        this.eyePulse += .3;
+
+        // magenta particle trail
+        this.trailTimer++;
+        if (this.trailTimer >= 2)
+        {
+            this.trailTimer = 0;
+            const trailVel = finalDir.scale(-.02).add(vec2(rand(-.015, .015), rand(-.015, .015)));
+            particles.push(new SimpleParticle(
+                this.pos.add(vec2(rand(-.1, .1), rand(-.15, .15))),
+                trailVel,
+                randInt(12, 22),
+                rand(.12, .22),
+                rgb(1, .3 + rand()*.3, .95)
+            ));
+        }
+
         if (this.flash > 0) this.flash--;
     }
     render()
     {
-        const bob = Math.sin(this.walkPhase) * .08;
-        const c = this.flash ? rgb(1,1,1) : rgb(1, .3, .9);
-        const dark = rgb(.5, .1, .4);
-        drawRect(this.pos.add(vec2(0,-.45)), vec2(.5, .1), rgb(0,0,0,.4));
-        drawRect(this.pos.add(vec2(-.1, -.35 + bob*.5)), vec2(.13, .25), dark);
-        drawRect(this.pos.add(vec2( .1, -.35 - bob*.5)), vec2(.13, .25), dark);
-        drawRect(this.pos.add(vec2(0, -.05)), vec2(.42, .42), c);
-        // arms outstretched zombie-style
-        drawRect(this.pos.add(vec2(-.32, .1)), vec2(.14, .3), c);
-        drawRect(this.pos.add(vec2( .32, .1)), vec2(.14, .3), c);
-        drawRect(this.pos.add(vec2(0, .3)), vec2(.26, .26), rgb(.7, .35, .55));
-        drawRect(this.pos.add(vec2(-.06, .32)), vec2(.05), rgb(1, 1, .3));
-        drawRect(this.pos.add(vec2( .06, .32)), vec2(.05), rgb(1, 1, .3));
+        const bob = Math.sin(this.walkPhase) * .12;
+        const armSwing = Math.sin(this.walkPhase * .8) * .18;
+        const c = this.flash ? rgb(1,1,1) : rgb(1, .2, .85);
+        const dark = rgb(.55, .05, .45);
+        const skin = rgb(.5, .12, .55);
+        const eyeGlow = (Math.sin(this.eyePulse) * .5 + .5) * .5 + .5;
+
+        drawRect(this.pos.add(vec2(0,-.5)), vec2(.5, .1), rgb(0,0,0,.45));
+        // running legs (more dramatic swing)
+        drawRect(this.pos.add(vec2(-.13, -.35 + bob)), vec2(.15, .3), dark);
+        drawRect(this.pos.add(vec2( .13, -.35 - bob)), vec2(.15, .3), dark);
+        // body
+        drawRect(this.pos.add(vec2(0, -.02)), vec2(.46, .46), c);
+        // outstretched arms (mid-grab pose)
+        drawRect(this.pos.add(vec2(-.38, .15 + armSwing*.3)), vec2(.17, .4), c);
+        drawRect(this.pos.add(vec2( .38, .15 - armSwing*.3)), vec2(.17, .4), c);
+        // mutated head — bigger and twisted
+        drawRect(this.pos.add(vec2(0, .35)), vec2(.34, .34), skin);
+        // hair tuft (matches color of original family but darkened/wild)
+        drawRect(this.pos.add(vec2(0, .51)), vec2(.36, .1), dark);
+        // huge glowing yellow eyes (the key tell — humans have tiny black eyes, progs have glowing yellow)
+        drawRect(this.pos.add(vec2(-.09, .36)), vec2(.13, .14), rgb(0,0,0));
+        drawRect(this.pos.add(vec2( .09, .36)), vec2(.13, .14), rgb(0,0,0));
+        drawRect(this.pos.add(vec2(-.09, .37)), vec2(.10, .10), rgb(1, eyeGlow, .1));
+        drawRect(this.pos.add(vec2( .09, .37)), vec2(.10, .10), rgb(1, eyeGlow, .1));
+        // snarling mouth
+        drawRect(this.pos.add(vec2(0, .23)), vec2(.2, .05), rgb(.4, 0, .25));
     }
 }
 
-// Spheroid: drifts and bounces; periodically births an Enforcer
+// Spheroid: red pulsating orb that patrols the arena perimeter. Spawns Enforcers fast on entry.
+// Spheroids ignore electrodes (they float at the edge anyway).
 class Spheroid extends KillableEnemy
 {
     constructor(pos)
     {
-        super(pos, vec2(1.0), 1, scoreSpheroid, rgb(1, 1, .4));
-        this.vel = randVec2(.10);
-        this.spawnTimer = randInt(180, 320);
+        super(pos, vec2(1.3), 1, scoreSpheroid, rgb(1, .3, .3));
+        this.cw = rand() < .5;
+        this.snapToNearestEdge();
+        this.vel = vec2(0);
+        this.setEdgeVelocity();
+        this.spawnTimer = randInt(25, 70);   // first enforcer drops almost immediately
+        this.phase = rand(0, 6.28);
+    }
+    snapToNearestEdge()
+    {
+        const inset = .9;
+        const maxX = arenaHalf.x - arenaPadding - inset;
+        const maxY = arenaHalf.y - arenaPadding - inset;
+        const dTop = abs(this.pos.y - maxY);
+        const dBot = abs(this.pos.y + maxY);
+        const dRight = abs(this.pos.x - maxX);
+        const dLeft = abs(this.pos.x + maxX);
+        const m = min(min(dTop, dBot), min(dRight, dLeft));
+        if (m === dTop)       this.pos.y =  maxY;
+        else if (m === dBot)  this.pos.y = -maxY;
+        else if (m === dRight) this.pos.x =  maxX;
+        else                   this.pos.x = -maxX;
+        this.pos.x = clamp(this.pos.x, -maxX, maxX);
+        this.pos.y = clamp(this.pos.y, -maxY, maxY);
+    }
+    setEdgeVelocity()
+    {
+        const speed = .11;
+        const inset = .9;
+        const maxX = arenaHalf.x - arenaPadding - inset;
+        const maxY = arenaHalf.y - arenaPadding - inset;
+        const dTop = abs(this.pos.y - maxY);
+        const dBot = abs(this.pos.y + maxY);
+        const dRight = abs(this.pos.x - maxX);
+        const dLeft = abs(this.pos.x + maxX);
+        const m = min(min(dTop, dBot), min(dRight, dLeft));
+        if (m === dTop)      this.vel = vec2(this.cw ?  speed : -speed, 0);
+        else if (m === dBot) this.vel = vec2(this.cw ? -speed :  speed, 0);
+        else if (m === dRight) this.vel = vec2(0, this.cw ? -speed :  speed);
+        else                   this.vel = vec2(0, this.cw ?  speed : -speed);
+    }
+    update()
+    {
+        if (gameOver || playerControlLocked) return;
+        this.pos = this.pos.add(this.vel);
+        const inset = .9;
+        const maxX = arenaHalf.x - arenaPadding - inset;
+        const maxY = arenaHalf.y - arenaPadding - inset;
+        let hit = false;
+        if (this.pos.x >  maxX) { this.pos.x =  maxX; hit = true; }
+        if (this.pos.x < -maxX) { this.pos.x = -maxX; hit = true; }
+        if (this.pos.y >  maxY) { this.pos.y =  maxY; hit = true; }
+        if (this.pos.y < -maxY) { this.pos.y = -maxY; hit = true; }
+        if (hit) this.setEdgeVelocity();
+
+        this.spawnTimer--;
+        if (this.spawnTimer <= 0)
+        {
+            enemies.push(new Enforcer(this.pos.copy()));
+            burst(this.pos, 22, rgb(1, .4, .4));
+            sfxSpawn.play(this.pos);
+            this.spawnTimer = randInt(80, 160);
+        }
+        this.phase += .18;
+        if (this.flash > 0) this.flash--;
+    }
+    render()
+    {
+        const pulse = 1 + Math.sin(this.phase) * .25;
+        const c = this.flash ? rgb(1,1,1) : rgb(1, .25 + Math.sin(this.phase)*.15, .25);
+        const inner = rgb(1, .7, .7);
+        // pulsing red halo
+        drawRect(this.pos, vec2(1.6 * pulse), rgb(1, .2, .2, .25), this.phase * .3);
+        drawRect(this.pos, vec2(1.3 * pulse), c, this.phase * .4);
+        drawRect(this.pos, vec2(.85), inner, -this.phase * .5);
+        drawRect(this.pos, vec2(.5), rgb(1, .95, .85));
+        drawRect(this.pos, vec2(.22), rgb(1,1,1));
+    }
+}
+
+// Enforcer: fast blue/yellow Robby-the-Robot. Keeps distance from player, fires spinning sparks.
+class Enforcer extends KillableEnemy
+{
+    constructor(pos)
+    {
+        super(pos, vec2(.9, 1.1), 1, scoreEnforcer, rgb(.4, .6, 1));
+        this.vel = randVec2(.07);
+        this.shootTimer = randInt(50, 100);
+        this.walkPhase = rand(0, 6.28);
+    }
+    update()
+    {
+        if (gameOver || playerControlLocked || !player) return;
+
+        const toP = player.pos.subtract(this.pos);
+        const d = toP.length();
+        const dir = d > .01 ? toP.scale(1/d) : vec2(0, 1);
+
+        // keep ideal distance from player (~8 units)
+        const idealDist = 8;
+        const radial = clamp((d - idealDist) * .1, -.7, .7);     // toward when far, away when close
+        // tangential drift (orbit-style)
+        const perp = vec2(-dir.y, dir.x);
+        this.walkPhase += .12;
+        const tangent = Math.sin(this.walkPhase) * .7 + .3;     // bias to one orbit direction
+
+        const desire = dir.scale(radial).add(perp.scale(tangent));
+        this.vel = this.vel.scale(.9).add(desire.scale(.025));
+
+        const maxSp = .15 + min(.06, gameWave * .003);
+        const sp = this.vel.length();
+        if (sp > maxSp) this.vel = this.vel.scale(maxSp / sp);
+
+        this.pos = this.pos.add(this.vel);
+        this.pos = clampToArena(this.pos, .5);
+
+        this.shootTimer--;
+        if (this.shootTimer <= 0 && d < 22)
+        {
+            const aim = dir.scale(.08); // slow but homing
+            enemyBullets.push(new Spark(this.pos.copy(), aim));
+            this.shootTimer = randInt(70, 150);
+            sfxSpark.play(this.pos);
+        }
+
+        if (this.flash > 0) this.flash--;
+    }
+    render()
+    {
+        const c = this.flash ? rgb(1,1,1) : rgb(.4, .6, 1);
+        const dark = rgb(.1, .25, .55);
+        const yellow = rgb(1, .85, .25);
+        const trackBob = (Math.floor(this.walkPhase * 4) % 2) ? .03 : -.03;
+
+        // shadow
+        drawRect(this.pos.add(vec2(0, -.65)), vec2(.8, .12), rgb(0,0,0,.4));
+        // tank treads under it
+        drawRect(this.pos.add(vec2(0, -.45)), vec2(.95, .25), dark);
+        drawRect(this.pos.add(vec2(-.3, -.45 + trackBob)), vec2(.18, .12), rgb(.3, .4, .65));
+        drawRect(this.pos.add(vec2( .3, -.45 - trackBob)), vec2(.18, .12), rgb(.3, .4, .65));
+        // body (boxy robby torso)
+        drawRect(this.pos.add(vec2(0, -.1)), vec2(.75, .55), c);
+        // yellow chest panel
+        drawRect(this.pos.add(vec2(0, -.1)), vec2(.4, .35), yellow);
+        // arms (yellow)
+        drawRect(this.pos.add(vec2(-.45, -.05)), vec2(.18, .35), yellow);
+        drawRect(this.pos.add(vec2( .45, -.05)), vec2(.18, .35), yellow);
+        // rounded dome head
+        drawRect(this.pos.add(vec2(0, .35)), vec2(.55, .4), c);
+        // visor / eye band
+        drawRect(this.pos.add(vec2(0, .35)), vec2(.5, .1), rgb(.1, .1, .15));
+        drawRect(this.pos.add(vec2(0, .35)), vec2(.4, .06), rgb(1, .3, .3));
+        // antenna
+        drawRect(this.pos.add(vec2(0, .65)), vec2(.06, .18), dark);
+        drawRect(this.pos.add(vec2(0, .76)), vec2(.14), yellow);
+    }
+}
+
+// TankShell: bouncing projectile fired by Tank. Bounces off arena walls twice before dying.
+class TankShell extends EngineObject
+{
+    constructor(pos, vel)
+    {
+        super(pos, vec2(.4));
+        this.vel = vel.copy();
+        this.life = 360;
+        this.renderOrder = 5;
+        this.bouncesLeft = 2;
+        this.phase = 0;
+    }
+    update()
+    {
+        this.pos = this.pos.add(this.vel);
+        this.life--;
+        this.phase += .15;
+        const minX = -arenaHalf.x + arenaPadding + .2;
+        const maxX =  arenaHalf.x - arenaPadding - .2;
+        const minY = -arenaHalf.y + arenaPadding + .2;
+        const maxY =  arenaHalf.y - arenaPadding - .2;
+        let bounced = false;
+        if (this.pos.x < minX) { this.pos.x = minX; this.vel.x =  abs(this.vel.x); bounced = true; }
+        if (this.pos.x > maxX) { this.pos.x = maxX; this.vel.x = -abs(this.vel.x); bounced = true; }
+        if (this.pos.y < minY) { this.pos.y = minY; this.vel.y =  abs(this.vel.y); bounced = true; }
+        if (this.pos.y > maxY) { this.pos.y = maxY; this.vel.y = -abs(this.vel.y); bounced = true; }
+        if (bounced)
+        {
+            if (--this.bouncesLeft < 0) { this.destroy(); return; }
+            sfxHit.play(this.pos);
+            burst(this.pos, 6, rgb(1, .5, .2));
+        }
+        if (this.life <= 0) this.destroy();
+    }
+    render()
+    {
+        const glow = .85 + Math.sin(this.phase) * .15;
+        drawRect(this.pos, vec2(.6 * glow), rgb(1, .3, .1, .4));
+        drawRect(this.pos, vec2(.4), rgb(1, .5, .2));
+        drawRect(this.pos, vec2(.22), rgb(1, 1, .6));
+    }
+}
+
+// Tank: slow red+blue treaded vehicle. Aims turret at player, fires bouncing shells.
+class Tank extends KillableEnemy
+{
+    constructor(pos)
+    {
+        super(pos, vec2(1.7, 1.5), 1, scoreTank, rgb(1, .25, .3));
+        this.vel = randVec2(.04);
+        this.shootTimer = randInt(80, 160);
+        this.turnTimer = randInt(40, 100);
+        this.turretAngle = 0;
+    }
+    update()
+    {
+        if (gameOver || playerControlLocked) return;
+        this.turnTimer--;
+        if (this.turnTimer <= 0)
+        {
+            this.vel = randVec2(.045);
+            this.turnTimer = randInt(60, 140);
+        }
+        this.pos = this.pos.add(this.vel);
+        const minX = -arenaHalf.x + arenaPadding + .85;
+        const maxX =  arenaHalf.x - arenaPadding - .85;
+        const minY = -arenaHalf.y + arenaPadding + .75;
+        const maxY =  arenaHalf.y - arenaPadding - .75;
+        if (this.pos.x < minX) { this.pos.x = minX; this.vel.x =  abs(this.vel.x); }
+        if (this.pos.x > maxX) { this.pos.x = maxX; this.vel.x = -abs(this.vel.x); }
+        if (this.pos.y < minY) { this.pos.y = minY; this.vel.y =  abs(this.vel.y); }
+        if (this.pos.y > maxY) { this.pos.y = maxY; this.vel.y = -abs(this.vel.y); }
+
+        if (player)
+        {
+            const toP = player.pos.subtract(this.pos);
+            if (toP.lengthSquared() > .001) this.turretAngle = toP.angle();
+            this.shootTimer--;
+            if (this.shootTimer <= 0 && toP.length() < 24)
+            {
+                const dir = vec2(Math.sin(this.turretAngle), Math.cos(this.turretAngle));
+                enemyBullets.push(new TankShell(this.pos.add(dir.scale(.9)), dir.scale(.16)));
+                sfxMissile.play(this.pos);
+                this.shootTimer = randInt(110, 220);
+            }
+        }
+        if (this.flash > 0) this.flash--;
+    }
+    render()
+    {
+        const c = this.flash ? rgb(1,1,1) : rgb(.95, .22, .28);    // red body
+        const dark = rgb(.35, .05, .08);
+        const blue = rgb(.3, .55, 1);
+        const blueDark = rgb(.1, .25, .65);
+        const trackBob = (Math.floor((this.pos.x + this.pos.y) * 4) % 2) ? .03 : -.03;
+
+        // shadow
+        drawRect(this.pos.add(vec2(0, -.85)), vec2(1.8, .16), rgb(0,0,0,.4));
+        // treads (top + bottom strips along the body axis)
+        drawRect(this.pos.add(vec2(0,  .65)), vec2(1.7, .32), dark);
+        drawRect(this.pos.add(vec2(0, -.65)), vec2(1.7, .32), dark);
+        // tread wheels (animated bob)
+        drawRect(this.pos.add(vec2(-.5,  .65 + trackBob)), vec2(.25, .18), blueDark);
+        drawRect(this.pos.add(vec2( .5,  .65 - trackBob)), vec2(.25, .18), blueDark);
+        drawRect(this.pos.add(vec2(-.5, -.65 - trackBob)), vec2(.25, .18), blueDark);
+        drawRect(this.pos.add(vec2( .5, -.65 + trackBob)), vec2(.25, .18), blueDark);
+        // red main body
+        drawRect(this.pos, vec2(1.55, 1.0), c);
+        // blue side stripe
+        drawRect(this.pos, vec2(1.55, .2), blue);
+        // turret base (blue)
+        drawRect(this.pos, vec2(.85, .85), blueDark);
+        drawRect(this.pos, vec2(.7, .7), blue);
+        // barrel (rotated toward player)
+        const ta = this.turretAngle;
+        const tipOffset = vec2(Math.sin(ta), Math.cos(ta));
+        drawRect(this.pos.add(tipOffset.scale(.55)), vec2(.22, .9), dark, ta);
+        drawRect(this.pos.add(tipOffset.scale(.55)), vec2(.14, .8), c, ta);
+        // hatch
+        drawRect(this.pos, vec2(.3, .3), rgb(1, .9, .3));
+        drawRect(this.pos, vec2(.15, .15), rgb(0,0,0));
+    }
+}
+
+// Quark: bouncing emerald spawner — drops Tanks like spheroids drop Enforcers
+class Quark extends KillableEnemy
+{
+    constructor(pos)
+    {
+        super(pos, vec2(1.2), 1, scoreQuark, rgb(.4, .6, 1));
+        this.vel = randVec2(.13);
+        this.spawnTimer = randInt(40, 100);  // first tank drops fast so the wave feels active
         this.phase = rand(0, 6.28);
     }
     update()
     {
         if (gameOver || playerControlLocked) return;
         this.pos = this.pos.add(this.vel);
-        const minX = -arenaHalf.x + arenaPadding + .5;
-        const maxX =  arenaHalf.x - arenaPadding - .5;
-        const minY = -arenaHalf.y + arenaPadding + .5;
-        const maxY =  arenaHalf.y - arenaPadding - .5;
+        const minX = -arenaHalf.x + arenaPadding + .6;
+        const maxX =  arenaHalf.x - arenaPadding - .6;
+        const minY = -arenaHalf.y + arenaPadding + .6;
+        const maxY =  arenaHalf.y - arenaPadding - .6;
         if (this.pos.x < minX) { this.pos.x = minX; this.vel.x =  abs(this.vel.x); }
         if (this.pos.x > maxX) { this.pos.x = maxX; this.vel.x = -abs(this.vel.x); }
         if (this.pos.y < minY) { this.pos.y = minY; this.vel.y =  abs(this.vel.y); }
@@ -642,71 +1021,30 @@ class Spheroid extends KillableEnemy
         this.spawnTimer--;
         if (this.spawnTimer <= 0)
         {
-            enemies.push(new Enforcer(this.pos.copy()));
-            burst(this.pos, 16, rgb(1, 1, .4));
+            enemies.push(new Tank(this.pos.copy()));
+            burst(this.pos, 22, rgb(.4, .6, 1));
             sfxSpawn.play(this.pos);
-            this.spawnTimer = randInt(260, 460);
+            this.spawnTimer = randInt(140, 240);
         }
-        this.phase += .12;
+        this.phase += .14;
         if (this.flash > 0) this.flash--;
     }
     render()
     {
-        const c = this.flash ? rgb(1,1,1) : hsl((this.phase * .04) % 1, 1, .65);
-        const r = 1 + Math.sin(this.phase) * .08;
-        drawRect(this.pos, vec2(r*1.2), rgb(c.r, c.g, c.b, .25));
-        drawRect(this.pos, vec2(r), c, this.phase);
-        drawRect(this.pos, vec2(r*.55), rgb(1,1,.85), -this.phase * .7);
-        drawRect(this.pos, vec2(.25), rgb(1,1,1));
-    }
-}
-
-// Enforcer: flutters with wobble toward player and fires sparks
-class Enforcer extends KillableEnemy
-{
-    constructor(pos)
-    {
-        super(pos, vec2(.85, .65), 1, scoreEnforcer, rgb(.85, .55, 1));
-        this.vel = randVec2(.05);
-        this.shootTimer = randInt(60, 120);
-        this.wigglePhase = rand(0, 6.28);
-    }
-    update()
-    {
-        if (gameOver || playerControlLocked || !player) return;
-        const toP = player.pos.subtract(this.pos);
-        const d = toP.length();
-        const dir = d > .01 ? toP.scale(1/d) : vec2(0, 1);
-        this.wigglePhase += .12;
-        const wobble = Math.sin(this.wigglePhase) * .8;
-        const ca = Math.cos(wobble), sa = Math.sin(wobble);
-        const wDir = vec2(dir.x*ca - dir.y*sa, dir.x*sa + dir.y*ca);
-        this.vel = this.vel.scale(.92).add(wDir.scale(.013));
-        const maxSp = .10 + min(.04, gameWave * .002);
-        const sp = this.vel.length();
-        if (sp > maxSp) this.vel = this.vel.scale(maxSp / sp);
-        this.pos = this.pos.add(this.vel);
-        this.pos = clampToArena(this.pos, .4);
-        this.shootTimer--;
-        if (this.shootTimer <= 0 && d < 20)
-        {
-            const sparkVel = dir.scale(.32);
-            enemyBullets.push(new Spark(this.pos.copy(), sparkVel));
-            this.shootTimer = randInt(70, 160);
-            sfxSpark.play(this.pos);
-        }
-        if (this.flash > 0) this.flash--;
-    }
-    render()
-    {
-        const c = this.flash ? rgb(1,1,1) : rgb(.75, .35, 1);
-        const dark = rgb(.3, .1, .5);
-        const bright = rgb(1, .7, 1);
-        const flap = Math.sin(this.wigglePhase * 2) * .15;
-        drawRect(this.pos, vec2(.95 + flap, .25), c);
-        drawRect(this.pos, vec2(.55, .5), c);
-        drawRect(this.pos, vec2(.25, .25), bright);
-        drawRect(this.pos.add(vec2(0, -.2)), vec2(.35, .15), dark);
+        const pulse = 1 + Math.sin(this.phase) * .12;
+        const c = this.flash ? rgb(1,1,1) : rgb(1, 1, 1);
+        const xCol = rgb(.3, .5, 1);
+        const xDark = rgb(.1, .25, .65);
+        // outer glow
+        drawRect(this.pos, vec2(1.4 * pulse), rgb(.6, .7, 1, .25));
+        // white box body
+        drawRect(this.pos, vec2(1.15 * pulse), rgb(.2, .35, .8));
+        drawRect(this.pos, vec2(1.0 * pulse), c);
+        // big blue X in the middle
+        drawRect(this.pos, vec2(.2, 1.1 * pulse), xDark,  PI/4);
+        drawRect(this.pos, vec2(.2, 1.1 * pulse), xDark, -PI/4);
+        drawRect(this.pos, vec2(.12, .95 * pulse), xCol,  PI/4);
+        drawRect(this.pos, vec2(.12, .95 * pulse), xCol, -PI/4);
     }
 }
 
@@ -809,42 +1147,43 @@ class Human extends EngineObject
 
 function getWaveComposition(w)
 {
-    const isFamilyWave = (w % 5) === 0;
-    const tier = Math.floor((w - 1) / 5);
+    const tier = Math.floor((w - 1) / 10);
+    const lastDigit = w % 10;
 
-    if (isFamilyWave)
-    {
-        return {
-            grunts: 4 + tier,
-            hulks: w >= 10 ? 1 : 0,
-            brains: 0,
-            spheroids: 0,
-            electrodes: 4,
-            humans: min(15, 8 + tier * 2),
-        };
-    }
+    // Hulk wave: 14, 34, 54... (large hulk crowd in the middle)
+    if (w >= 14 && (w - 14) % 20 === 0)
+        return { grunts: 0, hulks: 10 + tier * 3, brains: 0, spheroids: 0, quarks: 0, tanks: 0,
+                 electrodes: 6, humans: 5 };
 
-    // Brain wave every 9 (extra brain-heavy variant)
-    const isBrainHeavy = (w % 9) === 0;
-    if (isBrainHeavy)
-    {
-        return {
-            grunts: 6,
-            hulks: 1,
-            brains: 4 + tier,
-            spheroids: 0,
-            electrodes: 9,
-            humans: 3,
-        };
-    }
+    // Double Trouble: 24, 44, 64... (Spheroids + Quarks dropping enforcers and tanks everywhere)
+    if (w >= 24 && (w - 24) % 20 === 0)
+        return { grunts: 0, hulks: 0, brains: 0, spheroids: 5 + tier, quarks: 4 + tier, tanks: 0,
+                 electrodes: 6, humans: 3 };
 
-    const phase = (w - 1) % 5; // 0..3 (4 is family handled above)
+    // Brain wave: every 5 — many brains hunting many humans
+    if (w % 5 === 0)
+        return { grunts: 0, hulks: w >= 10 ? 2 : 0, brains: 8 + tier * 2, spheroids: 0, quarks: 0, tanks: 0,
+                 electrodes: 4, humans: min(20, 14 + tier * 2) };
+
+    // Tank wave: ends in 2 or 7 (starting wave 7) — heavy tank presence + quarks dropping more
+    if (w >= 7 && (lastDigit === 2 || lastDigit === 7))
+        return { grunts: 0, hulks: 0, brains: 0, spheroids: 0, quarks: 5 + tier, tanks: 12 + tier * 3,
+                 electrodes: 4, humans: 3 };
+
+    // Grunt wave: ends in 9 — massive grunt swarm
+    if (w >= 9 && lastDigit === 9)
+        return { grunts: 50 + tier * 10, hulks: 0, brains: 0, spheroids: 0, quarks: 0, tanks: 0,
+                 electrodes: 4, humans: 3 };
+
+    // Standard wave
     return {
-        grunts:    18 + phase * 2 + tier * 3,
-        hulks:     w >= 2 ? min(4, 1 + Math.floor((w-2)/4)) : 0,
-        brains:    w >= 3 ? min(6, 1 + Math.floor((w-3)/4)) : 0,
-        spheroids: w >= 4 ? min(4, 1 + Math.floor((w-4)/5)) : 0,
-        electrodes: min(electrodeMaxCount, 6 + Math.floor(w/3)),
+        grunts:    21 + tier * 5,
+        hulks:     w >= 2 ? 1 + Math.floor((w-2)/3) : 0,
+        brains:    0,
+        spheroids: w >= 2 ? 1 + Math.floor((w-2)/5) : 0,
+        quarks:    w >= 28 ? 1 + Math.floor((w-28)/8) : 0,
+        tanks:     0,
+        electrodes: min(electrodeMaxCount, 6 + Math.floor(w/2)),
         humans:    3,
     };
 }
@@ -910,8 +1249,17 @@ function spawnBrain()
 }
 function spawnSpheroid()
 {
+    enemies.push(new Spheroid(randEdgeSpawn()));
+}
+function spawnQuark()
+{
     const pos = randArenaPosAvoid(8, electrodeKeepout);
-    enemies.push(new Spheroid(pos));
+    enemies.push(new Quark(pos));
+}
+function spawnTank()
+{
+    const pos = randArenaPosAvoid(8, electrodeKeepout);
+    enemies.push(new Tank(pos));
 }
 
 function startWave(w)
@@ -929,6 +1277,8 @@ function startWave(w)
     for (let i=0;i<c.hulks;i++)     spawnHulk();
     for (let i=0;i<c.brains;i++)    spawnBrain();
     for (let i=0;i<c.spheroids;i++) spawnSpheroid();
+    for (let i=0;i<c.quarks;i++)    spawnQuark();
+    for (let i=0;i<(c.tanks||0);i++) spawnTank();
 }
 
 function enterGetReadyForWave(nextWave)
@@ -1073,6 +1423,8 @@ function applyElectrodeCollisions()
     for (const en of enemies)
     {
         if (en.destroyed || !en.killable) continue;
+        // Spheroids and Quarks float around freely and ignore electrodes (matches arcade)
+        if (en instanceof Spheroid || en instanceof Quark) continue;
         for (const el of electrodes)
         {
             if (el.destroyed) continue;
@@ -1152,6 +1504,31 @@ function applyPlayerBulletHits()
                 floaters.push(new FloatText(eb.pos, `${scoreEnemyBullet}`, rgb(1,1,.5)));
             }
         }
+    // player bullets -> electrodes (destroy electrode, NO points per arcade)
+    for (const b of bullets)
+        for (const el of electrodes)
+        {
+            if (b.destroyed || el.destroyed) continue;
+            if (overlapAABB(b.pos, vec2(.35), el.pos, el.size))
+            {
+                b.destroy();
+                el.destroy();
+                burst(el.pos, 18, rgb(.6, 1, 1));
+                sfxPop.play(el.pos);
+                break;
+            }
+        }
+}
+
+function checkBonusLife()
+{
+    while (player && score >= nextBonusLifeAt)
+    {
+        player.lives++;
+        nextBonusLifeAt += bonusLifeInterval;
+        floaters.push(new FloatText(player.pos.add(vec2(0, 1.5)), 'EXTRA LIFE', rgb(.4, 1, 1)));
+        sfxRescue.play(player.pos);
+    }
 }
 
 function applyEnemyBulletPlayer()
@@ -1194,6 +1571,7 @@ function resetGame()
     gameOver = false;
     gameWave = 1;
     humanRescueBonus = humanRescueStart;
+    nextBonusLifeAt = bonusLifeInterval;
 
     player = new Player();
 
@@ -1216,11 +1594,15 @@ function runSelfTests()
 {
     console.assert(overlapAABB(vec2(0,0), vec2(1,1), vec2(.4,.4), vec2(1,1)) === true);
     console.assert(overlapAABB(vec2(0,0), vec2(1,1), vec2(10,10), vec2(1,1)) === false);
-    console.assert(getWaveComposition(1).grunts >= 18, 'wave 1 should have ~20 grunts');
-    console.assert(getWaveComposition(1).brains === 0, 'wave 1 has no brains');
-    console.assert(getWaveComposition(3).brains >= 1, 'wave 3 introduces brains');
-    console.assert(getWaveComposition(4).spheroids >= 1, 'wave 4 introduces spheroids');
-    console.assert(getWaveComposition(5).humans >= 8, 'wave 5 is a family wave');
+    console.assert(getWaveComposition(1).grunts >= 21, 'wave 1 grunts');
+    console.assert(getWaveComposition(1).brains === 0, 'wave 1 no brains');
+    console.assert(getWaveComposition(2).spheroids >= 1, 'spheroids appear wave 2');
+    console.assert(getWaveComposition(5).brains >= 8 && getWaveComposition(5).humans >= 14, 'brain wave at 5');
+    console.assert(getWaveComposition(7).tanks >= 12, 'tank wave at 7');
+    console.assert(getWaveComposition(9).grunts >= 50, 'grunt wave at 9');
+    console.assert(getWaveComposition(14).hulks >= 10, 'hulk wave at 14');
+    console.assert(getWaveComposition(24).quarks >= 4 && getWaveComposition(24).spheroids >= 5, 'double trouble at 24');
+    console.assert(scoreProg === 100, 'prog score is 100');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1280,6 +1662,7 @@ function gameUpdatePost()
     applyElectrodeCollisions();
     applyHumanCollisions();
     applyEnemyBulletPlayer();
+    checkBonusLife();
 
     if (player && !gameOver && player.invuln <= 0)
         for (const e of enemies)
@@ -1298,8 +1681,21 @@ function gameRender()
         drawRect(vec2(x,0), vec2(.02, arenaSize.y), rgb(.06,.06,.08));
     for (let y=-arenaHalf.y; y<=arenaHalf.y; y+=1)
         drawRect(vec2(0,y), vec2(arenaSize.x, .02), rgb(.06,.06,.08));
-    drawRect(vec2(0), arenaSize.add(vec2(.15)), rgb(.2,.2,.25));
-    drawRect(vec2(0), arenaSize, rgb(.02,.02,.03));
+    // bright cyan frame at exactly the playable edge
+    drawRect(vec2(0), arenaSize.add(vec2(.6)),  rgb(.1, .35, .45));
+    drawRect(vec2(0), arenaSize.add(vec2(.35)), rgb(.35, .9, 1));
+    drawRect(vec2(0), arenaSize.add(vec2(.08)), rgb(.05, .25, .35));
+    drawRect(vec2(0), arenaSize, rgb(.02,.02,.04));
+
+    // corner brackets for arcade clarity
+    const cl = 1.4, ct = .25;
+    const cx = arenaHalf.x, cy = arenaHalf.y;
+    const corner = rgb(.6, 1, 1);
+    drawRect(vec2( cx - cl/2,  cy), vec2(cl, ct), corner); drawRect(vec2( cx,  cy - cl/2), vec2(ct, cl), corner);
+    drawRect(vec2(-cx + cl/2,  cy), vec2(cl, ct), corner); drawRect(vec2(-cx,  cy - cl/2), vec2(ct, cl), corner);
+    drawRect(vec2( cx - cl/2, -cy), vec2(cl, ct), corner); drawRect(vec2( cx, -cy + cl/2), vec2(ct, cl), corner);
+    drawRect(vec2(-cx + cl/2, -cy), vec2(cl, ct), corner); drawRect(vec2(-cx, -cy + cl/2), vec2(ct, cl), corner);
+
     for (const p of particles) p.render();
     drawRect(vec2(0), vec2(safeZoneRadius*2), rgb(0,0,0,.08));
 }
@@ -1323,19 +1719,22 @@ function gameRenderPost()
     drawTextScreen(`WAVE  ${gameWave}`, vec2(W - 16, 26), 24, rgb(1,.8,.3), 4, hsl(0,0,0), 'right');
     drawTextScreen(`WASD + Mouse`,      vec2(W - 16, 54), 16, rgb(.7,.7,.7), 3, hsl(0,0,0), 'right');
 
-    // BOTTOM-LEFT — lives
+    // BOTTOM-LEFT — lives + next extra-life threshold
     if (player)
     {
         drawTextScreen('LIVES', vec2(16, H - 22), 18, rgb(.7,1,1), 3, hsl(0,0,0), 'left');
+        const visibleLives = min(player.lives, 9);
         let x = 86;
-        for (let i=0;i<startingLives;i++)
+        for (let i=0;i<visibleLives;i++)
         {
-            const filled = i < player.lives;
-            const c = filled ? rgb(.2,.95,.9) : rgb(.1,.18,.2);
-            drawRectScreen(vec2(x, H - 22), vec2(18, 18), c);
-            if (filled) drawRectScreen(vec2(x+10, H - 22), vec2(10, 5), rgb(.05,.15,.2));
-            x += 24;
+            drawRectScreen(vec2(x, H - 22), vec2(16, 16), rgb(.2,.95,.9));
+            drawRectScreen(vec2(x+9, H - 22), vec2(9, 4), rgb(.05,.15,.2));
+            x += 20;
         }
+        if (player.lives > 9)
+            drawTextScreen(`+${player.lives - 9}`, vec2(x + 2, H - 22), 18, rgb(.7,1,1), 3, hsl(0,0,0), 'left');
+        // next extra-life threshold (small)
+        drawTextScreen(`NEXT LIFE ${nextBonusLifeAt}`, vec2(16, H - 48), 14, rgb(.6, .85, .85), 2, hsl(0,0,0), 'left');
     }
 
     // BOTTOM-RIGHT — wave status
@@ -1354,13 +1753,23 @@ function gameRenderPost()
     {
         drawTextScreen(`WAVE  ${gameWave}`, vec2(W/2, H/2 - 30), 90, rgb(1,.8,.3), 6, rgb(0,0,0));
         const comp = getWaveComposition(gameWave);
-        const isFamily = (gameWave % 5) === 0;
-        const subtitle = isFamily ? 'FAMILY WAVE — SAVE THEM ALL'
-                       : (comp.brains > 0 && comp.spheroids > 0) ? 'BRAINS AND SPHEROIDS'
-                       : comp.brains > 0 ? 'BRAINS APPEAR'
-                       : comp.spheroids > 0 ? 'SPHEROIDS APPEAR'
-                       : comp.hulks > 0 ? 'HULKS APPEAR'
-                       : 'GET READY';
+        const w = gameWave;
+        const lastDigit = w % 10;
+        const isHulkWave = w >= 14 && (w - 14) % 20 === 0;
+        const isDoubleTrouble = w >= 24 && (w - 24) % 20 === 0;
+        const isBrainWave = w % 5 === 0;
+        const isTankWave = w >= 7 && (lastDigit === 2 || lastDigit === 7);
+        const isGruntWave = w >= 9 && lastDigit === 9;
+        const subtitle =
+              isHulkWave      ? 'HULK WAVE - GET OUT OF THE CROWD'
+            : isDoubleTrouble ? 'DOUBLE TROUBLE - SPHEROIDS AND QUARKS'
+            : isBrainWave     ? 'BRAIN WAVE - SAVE THE FAMILY'
+            : isTankWave      ? 'TANK ATTACK'
+            : isGruntWave     ? 'GRUNT WAVE - SURROUNDED'
+            : (w === 2 && comp.spheroids > 0) ? 'SPHEROIDS APPEAR'
+            : (w === 2 && comp.hulks > 0)     ? 'HULKS APPEAR'
+            : comp.quarks > 0                 ? 'QUARKS APPEAR'
+            : 'GET READY';
         drawTextScreen(subtitle, vec2(W/2, H/2 + 50), 30, rgb(.9,.9,1), 4, rgb(0,0,0));
     }
 
