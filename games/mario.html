@@ -938,6 +938,7 @@ class Player extends EngineObject
         this.facing = 1;
         this.won = false;
         this.winTimer = 0;
+        this.winStartY = 0; // captured at pole-touch; the height Mario slides from
         this.dead = false;
         this.deadTimer = 0;
 
@@ -1009,6 +1010,12 @@ class Player extends EngineObject
             this.vel.y -= .025;
             this.pos = this.pos.add(this.vel);
             if (this.deadTimer > 60) respawn();
+            return;
+        }
+
+        if (this.won)
+        {
+            this.runWinSequence();
             return;
         }
 
@@ -1094,23 +1101,16 @@ class Player extends EngineObject
 
         this.moveAndCollide();
 
-        // goal: touching the pole
-        if (!this.won)
+        // goal: touching the pole (right edge of player overlaps pole column)
+        if (this.pos.x >= 191.5)
         {
-            if (this.pos.x > 191 && this.pos.x < 193)
-            {
-                this.won = true;
-                this.winTimer = 0;
-                sfxWin.play(this.pos);
-            }
-        }
-
-        if (this.won)
-        {
-            this.winTimer++;
-            // walk to the right after a moment
-            if (this.winTimer > 40)
-                this.vel.x = .12;
+            this.won = true;
+            this.winTimer = 0;
+            this.winStartY = this.pos.y;
+            this.pos.x = 192;        // snap so Mario's right side is on the pole
+            this.vel = vec2(0, 0);
+            this.facing = 1;
+            sfxWin.play(this.pos);
         }
 
         this.prevJumpDown = jumpDown;
@@ -1129,6 +1129,63 @@ class Player extends EngineObject
     {
         // bounce. held-jump = bigger bounce.
         this.vel.y = this.jumpHolding ? Player.STOMP_BOUNCE_HELD : Player.STOMP_BOUNCE;
+    }
+
+    runWinSequence()
+    {
+        this.winTimer++;
+        const t = this.winTimer;
+        const big = this.powerState === 'big';
+        const baseY = big ? 2.9 : 2.5; // feet on top of the base block at the pole
+        const hasSlide = this.winStartY > baseY + .1;
+
+        if (hasSlide)
+        {
+            if (t <= 36)
+            {
+                this.pos.y = lerp(t / 36, this.winStartY, baseY);
+                this.vel = vec2(0, 0);
+                this.facing = 1;
+                return;
+            }
+            if (t < 70)
+            {
+                this.pos.y = baseY;
+                this.vel = vec2(0, 0);
+                this.facing = 1;
+                return;
+            }
+            if (t === 70)
+            {
+                // hop off the pole to the right
+                this.pos.x = 193;
+                this.vel = vec2(.18, .26);
+            }
+        }
+        else
+        {
+            // walked into the pole at ground level: skip the slide, short pause
+            if (t < 28)
+            {
+                this.pos.y = baseY;
+                this.vel = vec2(0, 0);
+                this.facing = 1;
+                return;
+            }
+            if (t === 28)
+            {
+                this.pos.x = 193;
+                this.vel = vec2(.18, .26);
+            }
+        }
+
+        // walking phase: simple gravity + walk right, no controls
+        this.vel.y -= Player.GRAVITY_FALL;
+        this.vel.y = max(this.vel.y, Player.TERMINAL_VEL);
+        this.moveAndCollide();
+        if (this.onGround) this.vel.x = .14;
+        if (this.pos.x > 210) this.vel.x = 0; // stop before the level edge
+        this.facing = 1;
     }
 
     hurt()
@@ -1470,16 +1527,22 @@ function drawPipeCap(x, y)
     drawRect(center.add(vec2(0, -.13)), vec2(2.05, .08), rgb(.06, .35, .14));
 }
 
-// Flag that slides down with the player (rendered separately so it tracks player.pos)
+// Flag: sits at the top of the pole until Mario grabs it, then slides down with him.
 function drawFlagSlide()
 {
     if (!player) return;
     const poleX = 192;
-    // attach a small triangle/flag near player's height while at or past the pole
-    if (player.pos.x < poleX - .5 || player.pos.x > poleX + 1.5) return;
-    const fy = clamp(player.pos.y, 2.5, 10.5);
-    drawRect(vec2(poleX + .5, fy), vec2(.9, .5), rgb(.95, .25, .15));
-    drawRect(vec2(poleX + .35, fy), vec2(.1, .5), rgb(.95, .25, .15));
+    let fy;
+    if (!player.won)
+        fy = 10.4;              // resting at the top of the pole
+    else if (player.winTimer < 36)
+        fy = lerp(player.winTimer / 36, 10.4, 2.8); // drop in sync with Mario's slide
+    else
+        fy = 2.8;               // settled at the base
+
+    // banner with darker mast strip
+    drawRect(vec2(poleX + .5, fy), vec2(.9, .55), rgb(.95, .25, .15));
+    drawRect(vec2(poleX + .15, fy), vec2(.18, .55), rgb(.75, .12, .08));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
