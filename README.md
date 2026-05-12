@@ -67,7 +67,7 @@ Did you make a game you think should be included? Send a pull request!
 | River Raid | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/riverRaid.html) |
 | Robotron | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
 | Plinko | 🎯 | ✅ | ✅ | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/plinko.html) |
-| Micro Racer | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) |
+| Micro Racer | 🏎️ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) |
 | Spy Hunter | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/spyhunter.html) |
 | Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
 
