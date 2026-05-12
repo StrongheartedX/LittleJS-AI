@@ -3,6 +3,7 @@
 <meta charset=utf-8>
 </head><body>
 <script src="../dist/littlejs.js?1.18.0"></script>
+<script src="../dist/box2d.wasm.js?1.18.0"></script>
 <script src="../templates/soundGenerator.js"></script>
 <script>
 'use strict';
@@ -53,6 +54,8 @@ const COL_WALL_W   = hsl(0, 0, .92);
 
 // state
 let tileLayer;
+let wallLayer;                 // Box2dTileLayer wrapping tileLayer — static wall fixtures
+let groundAnchor;              // static body used as the friction-joint partner for every car
 let terrain;                   // Uint8Array flat [x + y * GRID_W]
 let trackPoints = [];          // centerline samples
 let trackTangents = [];        // unit tangent at each sample
@@ -270,12 +273,11 @@ function buildTileLayer()
     const dummyTex = new TextureInfo(dummyCanvas, true);
     const info = new TileInfo(vec2(0, 0), vec2(TILE_PX, TILE_PX), dummyTex, 0, 0);
 
-    // use WebGL so the layer and the cars (which also use WebGL) share
-    // the same render canvas; the Canvas2D layer ends up above WebGL in the DOM
-    // and would otherwise hide any WebGL-drawn objects underneath it.
-    tileLayer = new TileLayer(LAYER_POS, vec2(GRID_W, GRID_H), info, -100, true);
+    // TileCollisionLayer extends TileLayer — same rendering, plus a collision grid
+    // for Box2dTileLayer to read. WebGL so it composites correctly with cars.
+    tileLayer = new TileCollisionLayer(LAYER_POS, vec2(GRID_W, GRID_H), info, -100, true);
 
-    // paint all tiles onto the offscreen canvas
+    // paint all tiles onto the offscreen canvas AND record wall cells
     tileLayer.redrawStart(true);
     for (let x = 0; x < GRID_W; x++)
     for (let y = 0; y < GRID_H; y++)
@@ -285,7 +287,11 @@ function buildTileLayer()
         if (t === TERRAIN_ROAD)        col = COL_ROAD;
         else if (t === TERRAIN_ROAD_EDGE) col = COL_ROAD_EDGE;
         else if (t === TERRAIN_SAND)   col = COL_SAND;
-        else if (t === TERRAIN_WALL)   col = ((x + y) & 1) ? COL_WALL_R : COL_WALL_W;
+        else if (t === TERRAIN_WALL)
+        {
+            col = ((x + y) & 1) ? COL_WALL_R : COL_WALL_W;
+            tileLayer.setCollisionData(vec2(x, y), 1);   // mark this cell solid
+        }
         else
         {
             // grass variation: 3-tone hash for texture
@@ -314,19 +320,17 @@ function ordinalSuffix(n)
     return ['th','st','nd','rd','th','th','th','th','th','th'][n%10];
 }
 
-class Car
+class Car extends Box2dObject
 {
     constructor(startPos, startAngle, color, isPlayer, progressIdx)
     {
+        // size: long along its facing axis (y) and narrow across (x)
+        super(startPos, vec2(0.95, 1.9), undefined, startAngle, color);
+        this.addBox(this.size);
+
         this.startPos = startPos.copy();
         this.startAngle = startAngle;
-        this.pos = startPos.copy();
         this.prevPos = startPos.copy();
-        this.velocity = vec2(0, 0);
-        this.angle = startAngle;
-        // car is long along its facing axis (y) and narrow across (x)
-        this.size = vec2(0.95, 1.9);
-        this.color = color;
         this.isPlayer = !!isPlayer;
         this.lap = 0;
         this.finished = false;
@@ -336,12 +340,15 @@ class Car
         this.aiLaneOffset = 0;
         this.bumpCooldown = 0;
         this.steerInput = 0;   // smoothed steering input for front-wheel rendering
+        this.lastSpeed = 0;    // captured pre-step speed, used by beginContact for bump SFX
     }
 
     forward() { return vec2().setAngle(this.angle, 1); }
 
     update()
     {
+        // NOTE: super.update() (Box2dObject sync from body) is deliberately NOT called
+        // in Task 1 — manual physics is still authoritative. Task 2 will rewrite this.
         if (this.finished || !raceStarted) return;
         this.prevPos = this.pos.copy();
 
@@ -489,6 +496,13 @@ class Car
 
         // finish line crossing
         this.checkLap();
+
+        // sync our manual physics back into the Box2D body, otherwise the
+        // engine's box2d plugin (runs before engineObjectsUpdate every frame)
+        // overwrites this.pos with body.GetPosition() and we snap to the start.
+        this.setTransform(this.pos, this.angle);
+        this.setLinearVelocity(vec2());
+        this.setAngularVelocity(0);
     }
 
     aiSteer()
@@ -544,7 +558,9 @@ class Car
         return this.lap + this.progressIdx / trackPoints.length;
     }
 
-    render()
+    render() {}   // overridden so engine auto-render is a no-op; drawing happens via draw()
+
+    draw()
     {
         const fwd = this.forward();
         const sideUnit = vec2().setAngle(this.angle + Math.PI/2, 1);
@@ -616,8 +632,17 @@ function findNearestIdx(pos, prevIdx)
 ///////////////////////////////////////////////////////////////////////////////
 function setupRace()
 {
+    // dispose previous physics objects
+    if (wallLayer) wallLayer.destroy();
+    for (const c of cars) c.destroy();
+
     generateTrack(trackSeed);
     buildTileLayer();
+
+    // Box2dTileLayer reads tileLayer.getCollisionData() > 0 and merges runs of
+    // solid cells into static box fixtures. Call once per track.
+    wallLayer = new Box2dTileLayer(tileLayer);
+    wallLayer.buildCollision(0.4, 0);
 
     // build starting grid: 4 cars behind the finish line along the track
     const N = trackPoints.length;
@@ -665,6 +690,12 @@ function setupRace()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    // setup box2d before any physics objects (top-down — engine's gravity already vec2(0,0))
+    await box2dInit();
+
+    // friction-joint partner — a fixtureless static body at the origin
+    groundAnchor = new Box2dStaticObject(vec2(0, 0));
+
     sndCount = new SoundGenerator({ frequency: 500, attack: .01, release: .2, volume: .5 });
     sndGo    = new SoundGenerator({ frequency: 900, attack: .01, release: .4, volume: .7, pitchJump: 300, pitchJumpTime: .05 });
     sndLap   = new SoundGenerator({ frequency: 700, attack: .01, release: .25, volume: .5, pitchJump: 200, pitchJumpTime: .1 });
@@ -717,8 +748,6 @@ function gameUpdate()
             countdownTimer -= 1/60;
     }
 
-    for (const c of cars) c.update();
-
     // pickup cooldown tick
     for (const pu of pickups) if (pu.cooldown > 0) pu.cooldown -= 1/60;
 
@@ -737,6 +766,9 @@ function gameUpdate()
             b.pos = b.pos.add(push);
             a.velocity = a.velocity.scale(0.85);
             b.velocity = b.velocity.scale(0.85);
+            // also push positions to the bodies — see note in Car.update()
+            a.setTransform(a.pos, a.angle);
+            b.setTransform(b.pos, b.angle);
             if ((a === player || b === player) && !player.finished)
                 sndBump.play(player.pos);
         }
@@ -822,7 +854,7 @@ function gameRenderPost()
     // dynamic world objects above the tile layer
     drawStartLine();
     drawPickups();
-    for (const c of cars) c.render();
+    for (const c of cars) c.draw();
 
     // ---- HUD (screen space) ----
     const w = mainCanvasSize.x, h = mainCanvasSize.y;
