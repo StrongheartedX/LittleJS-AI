@@ -33,6 +33,7 @@ The most polished prototypes — playable end-to-end with menus, sound, and a co
 |------|-------|-------|---------|-------|------|
 | Tetris | 🧩 | ✅ | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/tetris.html) |
 | Pac-Man | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) |
+| Frogger | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/frogger.html) |
 | Space Invaders | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/spaceInvaders.html) |
 | Mini Golf | 🎯 | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/miniGolf.html) |
 | Missile Command | 🎯 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/missileCommand.html) |
@@ -61,7 +62,6 @@ Did you make a game you think should be included? Send a pull request!
 | Snood | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snood.html) |
 | Breakout | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/breakout.html) |
 | Combat | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/combat.html) |
-| Frogger | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/frogger.html) |
 | Geometry Dash | 🏃 | | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/geometryDash.html) |
 | Pole Position | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/polePosition.html) |
 | River Raid | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/riverRaid.html) |
@@ -70,6 +70,7 @@ Did you make a game you think should be included? Send a pull request!
 | Plinko | 🎯 | ✅ | ✅ | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/plinko.html) |
 | Micro Racer | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) |
 | Spy Hunter | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/spyhunter.html) |
+| Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
 
 ## 🧪 Prototypes & Experiments
 
@@ -84,7 +85,6 @@ Rough early experiments — playable concepts that haven't been curated yet. Exp
 | Gradius | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/gradius.html) |
 | Kaboom | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/kaboom.html) |
 | Limbo | 🏃 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/limbo.html) |
-| Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
 | Moon Patrol | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/moonPatrol.html) |
 | Mr. Driller | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mrDriller.html) |
 | Peggle | 🎯 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/peggle.html) |
