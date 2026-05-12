@@ -365,14 +365,8 @@
       // notch
       drawRect(p.add(vec2(0,-.05)), vec2(.18, .8), hsl(205/360,.55,.27));
       if (reached[i]) {
-        // resting frog icon
-        drawEllipse(p, vec2(.8, .55), hsl(105/360,.7,.35));
-        drawCircle(p.add(vec2(-.18,.18)), .14, hsl(105/360,.7,.35));
-        drawCircle(p.add(vec2( .18,.18)), .14, hsl(105/360,.7,.35));
-        drawCircle(p.add(vec2(-.18,.20)), .08, hsl(0,0,1));
-        drawCircle(p.add(vec2( .18,.20)), .08, hsl(0,0,1));
-        drawCircle(p.add(vec2(-.18,.21)), .045, hsl(0,0,0));
-        drawCircle(p.add(vec2( .18,.21)), .045, hsl(0,0,0));
+        // same renderer as the player frog, just facing up with no hop
+        drawFrog(p, vec2(0, 1), 0);
       }
     }
   }
@@ -493,20 +487,19 @@
     drawCircle(vec2(x + kox, y + .05), .07, hsl(28/360,.5,.30));
   }
 
-  function drawFrog() {
-    const t = frog.hopAnim;
-    const hopArc = Math.sin(t * Math.PI);  // 0..1..0
-    const p = frog.pos.add(vec2(0, hopArc * .25));
+  function drawFrog(basePos = frog.pos, facing = frog.facing, hopAnimT = frog.hopAnim) {
+    const hopArc = Math.sin(hopAnimT * Math.PI);  // 0..1..0
+    const p = basePos.add(vec2(0, hopArc * .25));
 
-    const f = frog.facing;
+    const f = facing;
     const perp = vec2(-f.y, f.x);
 
     const green     = hsl(105/360,.75,.42);
     const greenDark = hsl(105/360,.80,.27);
 
     // shadow — always visible, sits on the ground below the body.
-    // Stays at frog.pos (doesn't rise with the hop) so it grounds the frog.
-    drawEllipse(frog.pos.add(vec2(0,-.42)), vec2(1.10, .34),
+    // Anchored to basePos so it doesn't rise with the hop, grounding the frog.
+    drawEllipse(basePos.add(vec2(0,-.42)), vec2(1.10, .34),
       hsl(0,0,0, .42 - hopArc*.12));
 
     // back legs (sticking out behind, splayed)
