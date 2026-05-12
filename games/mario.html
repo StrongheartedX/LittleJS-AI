@@ -29,7 +29,10 @@ const TT = {
     POLE:   7, // flag pole (non-solid)
 };
 
-const tileMap = new Map();
+// LittleJS TileCollisionLayer is the source of truth for tile data + collision.
+// Cells store the tile *type* (TT.*); 0 = EMPTY. Solid filtering is per-entity via
+// collideWithTile (so POLE can be in the grid but non-solid).
+let collisionLayer = null;
 const tileKey = (x, y) => `${x|0},${y|0}`;
 
 // per ? block: 'mushroom' | 'star' | (anything else / missing => coin)
@@ -37,12 +40,16 @@ const qBlockContents = new Map();
 
 function setTile(x, y, t)
 {
+    if (!collisionLayer) return;
     if (x < 0 || y < 0 || x >= LEVEL_W || y >= LEVEL_H) return;
-    if (t === TT.EMPTY) tileMap.delete(tileKey(x,y));
-    else tileMap.set(tileKey(x,y), t);
+    collisionLayer.setCollisionData(vec2(x, y), t | 0);
 }
 
-function getTile(x, y) { return tileMap.get(tileKey(x,y)) || TT.EMPTY; }
+function getTile(x, y)
+{
+    if (!collisionLayer) return TT.EMPTY;
+    return collisionLayer.getCollisionData(vec2(x, y)) | 0;
+}
 
 function isSolidType(t)
 { return t === TT.GROUND || t === TT.BRICK || t === TT.QBLOCK || t === TT.USED || t === TT.PIPE || t === TT.FLAG; }
@@ -79,7 +86,10 @@ const coinSpawns  = [];
 
 function buildLevel()
 {
-    tileMap.clear();
+    // (re)create the collision layer fresh so debug physics can see it
+    if (collisionLayer) collisionLayer.destroy();
+    collisionLayer = new TileCollisionLayer(vec2(0, 0), vec2(LEVEL_W, LEVEL_H), null, 0, false);
+
     tileBumps.clear();
     qBlockContents.clear();
     enemySpawns.length = 0;
@@ -279,16 +289,15 @@ class PopCoin extends EngineObject
     constructor(pos)
     {
         super(pos, vec2(.5));
-        this.vel = vec2(0, .38);
+        this.velocity = vec2(0, .38);
+        this.damping = 1;
+        this.gravityScale = 0; // we apply our own gravity
         this.life = 0;
-        this.setCollision(false, false, false, false);
     }
-    updatePhysics() {}
     update()
     {
         this.life++;
-        this.pos = this.pos.add(this.vel);
-        this.vel.y -= .024;
+        this.velocity.y -= .024;
         if (this.life > 28) this.destroy();
     }
     render()
@@ -308,24 +317,21 @@ class BrickChunk extends EngineObject
     constructor(pos, vel)
     {
         super(pos, vec2(.35));
-        this.vel = vel;
+        this.velocity = vel;
+        this.angleVelocity = (Math.random() - .5) * .4;
+        this.angleDamping = 1;
+        this.damping = 1;
+        this.gravityScale = 0;
         this.life = 0;
-        this.angle = 0;
-        this.spin = (Math.random() - .5) * .4;
-        this.setCollision(false, false, false, false);
     }
-    updatePhysics() {}
     update()
     {
         this.life++;
-        this.pos = this.pos.add(this.vel);
-        this.vel.y -= .026;
-        this.angle += this.spin;
+        this.velocity.y -= .026;
         if (this.life > 70) this.destroy();
     }
     render()
     {
-        // a small brick fragment (rough rotation via offsets)
         drawRect(this.pos, vec2(.35), rgb(.78, .35, .14), this.angle);
         drawRect(this.pos, vec2(.30, .08), rgb(.4, .15, .05), this.angle);
     }
@@ -342,17 +348,22 @@ class Mushroom extends EngineObject
     constructor(pos)
     {
         super(pos, vec2(.9, .9));
-        this.vel = vec2(0, 0);
         this.facing = 1;
-        this.onGround = false;
         // emerge: slowly rise out of the block before behaving as a walker
         this.emerging = true;
         this.emergeStartY = pos.y;
         this.emergeTargetY = pos.y + 1;
         this.emergeTimer = 36;
-        this.setCollision(false, false, false, false);
+        this.prevVelX = 0;
+
+        this.setCollision(false, false, true, false);
+        this.damping = 1;
+        this.friction = 1;
+        this.restitution = 0;
+        this.gravityScale = 0;
     }
-    updatePhysics() {}
+
+    collideWithTile(tileData, pos) { return isSolidType(tileData); }
 
     update()
     {
@@ -360,19 +371,31 @@ class Mushroom extends EngineObject
         {
             const t = 1 - this.emergeTimer / 36;
             this.pos.y = lerp(this.emergeStartY, this.emergeTargetY, t);
+            this.velocity = vec2(0, 0);
             this.emergeTimer--;
             if (this.emergeTimer <= 0)
             {
                 this.emerging = false;
-                this.vel.x = MUSHROOM_SPEED;
+                this.velocity.x = MUSHROOM_SPEED;
             }
             this.checkPickup();
             return;
         }
 
-        // simple tile collision (walks off ledges, turns at walls)
-        Enemy.prototype.moveAndCollideTiles.call(this, false);
+        // gravity (engine doesn't apply with gravityScale=0)
+        this.velocity.y -= ENEMY_GRAVITY;
+        this.velocity.y = max(this.velocity.y, ENEMY_TERMINAL);
+
+        // engine zeroed vel.x last frame → we ran into a wall, flip direction
+        if (this.prevVelX !== 0 && this.velocity.x === 0)
+        {
+            this.velocity.x = -this.prevVelX;
+            this.facing = -this.facing;
+        }
+
         this.checkPickup();
+        if (this.pos.y < -10) this.destroy();
+        this.prevVelX = this.velocity.x;
     }
 
     checkPickup()
@@ -415,16 +438,21 @@ class Star extends EngineObject
     constructor(pos)
     {
         super(pos, vec2(.85, .85));
-        this.vel = vec2(0, 0);
         this.facing = 1;
-        this.onGround = false;
         this.emerging = true;
         this.emergeStartY = pos.y;
         this.emergeTargetY = pos.y + 1;
         this.emergeTimer = 28;
-        this.setCollision(false, false, false, false);
+        this.prevVelX = 0;
+
+        this.setCollision(false, false, true, false);
+        this.damping = 1;
+        this.friction = 1;
+        this.restitution = 0;
+        this.gravityScale = 0;
     }
-    updatePhysics() {}
+
+    collideWithTile(tileData, pos) { return isSolidType(tileData); }
 
     update()
     {
@@ -432,21 +460,34 @@ class Star extends EngineObject
         {
             const t = 1 - this.emergeTimer / 28;
             this.pos.y = lerp(this.emergeStartY, this.emergeTargetY, t);
+            this.velocity = vec2(0, 0);
             this.emergeTimer--;
             if (this.emergeTimer <= 0)
             {
                 this.emerging = false;
-                this.vel = vec2(.14, .35);
+                this.velocity = vec2(.14, .35);
             }
             this.checkPickup();
             return;
         }
 
-        Enemy.prototype.moveAndCollideTiles.call(this, false);
-        // continuous bounce
-        if (this.onGround) this.vel.y = .42;
+        // gravity
+        this.velocity.y -= ENEMY_GRAVITY;
+        this.velocity.y = max(this.velocity.y, ENEMY_TERMINAL);
+
+        // bounce on landing
+        if (this.groundObject) this.velocity.y = .42;
+
+        // bounce off walls
+        if (this.prevVelX !== 0 && this.velocity.x === 0)
+        {
+            this.velocity.x = -this.prevVelX;
+            this.facing = -this.facing;
+        }
 
         this.checkPickup();
+        if (this.pos.y < -10) this.destroy();
+        this.prevVelX = this.velocity.x;
     }
 
     checkPickup()
@@ -490,109 +531,56 @@ class Enemy extends EngineObject
     constructor(pos, size)
     {
         super(pos, size);
-        this.vel = vec2(0, 0);
         this.facing = -1;
-        this.onGround = false;
         this.dead = false;
         this.deadTimer = 0;
-        this.setCollision(false, false, false, false);
+        this.prevVelX = 0;
+
+        // Engine handles tile collision; no inter-object collision (we do AABB ourselves).
+        this.setCollision(false, false, true, false);
+        this.damping = 1;
+        this.friction = 1;
+        this.restitution = 0;
+        this.gravityScale = 0;
     }
 
-    updatePhysics() {}
+    collideWithTile(tileData, pos) { return isSolidType(tileData); }
 
-    // Returns true if collided horizontally this frame.
-    moveAndCollideTiles(turnAtEdges = false)
+    // Apply gravity + react to engine collision. Returns true if direction flipped.
+    // turnAtEdges=true makes the enemy turn around at ledges (Koopa behavior).
+    applyEnemyPhysics(turnAtEdges = false)
     {
-        const half = this.size.scale(.5);
-        let bumpedWall = false;
-
         // gravity
-        this.vel.y -= ENEMY_GRAVITY;
-        this.vel.y = max(this.vel.y, ENEMY_TERMINAL);
+        this.velocity.y -= ENEMY_GRAVITY;
+        this.velocity.y = max(this.velocity.y, ENEMY_TERMINAL);
 
-        // ---- X ----
-        this.pos.x += this.vel.x;
-        if (this.vel.x)
+        let flipped = false;
+
+        // wall hit: engine zeroed our X velocity on collision
+        if (this.prevVelX !== 0 && this.velocity.x === 0)
         {
-            const y0 = floor(this.pos.y - half.y + .001);
-            const y1 = floor(this.pos.y + half.y - .001);
-            if (this.vel.x > 0)
-            {
-                const xSide = floor(this.pos.x + half.x);
-                for (let y = y0; y <= y1; y++)
-                if (isSolidAt(xSide, y))
-                {
-                    this.pos.x = xSide - half.x;
-                    this.vel.x = -Math.abs(this.vel.x);
-                    this.facing = -1;
-                    bumpedWall = true;
-                    break;
-                }
-            }
-            else
-            {
-                const xSide = floor(this.pos.x - half.x);
-                for (let y = y0; y <= y1; y++)
-                if (isSolidAt(xSide, y))
-                {
-                    this.pos.x = xSide + 1 + half.x;
-                    this.vel.x = Math.abs(this.vel.x);
-                    this.facing = 1;
-                    bumpedWall = true;
-                    break;
-                }
-            }
+            this.velocity.x = -this.prevVelX;
+            this.facing = this.velocity.x > 0 ? 1 : -1;
+            flipped = true;
         }
 
-        // ---- Y ----
-        const wasOnGround = this.onGround;
-        this.onGround = false;
-        this.pos.y += this.vel.y;
-        if (this.vel.y)
+        // ledge avoidance
+        if (turnAtEdges && !flipped && this.groundObject && this.velocity.x !== 0)
         {
-            const x0 = floor(this.pos.x - half.x + .001);
-            const x1 = floor(this.pos.x + half.x - .001);
-            if (this.vel.y > 0)
-            {
-                const ySide = floor(this.pos.y + half.y);
-                for (let x = x0; x <= x1; x++)
-                if (isSolidAt(x, ySide))
-                {
-                    this.pos.y = ySide - half.y;
-                    this.vel.y = 0;
-                    break;
-                }
-            }
-            else
-            {
-                const ySide = floor(this.pos.y - half.y);
-                for (let x = x0; x <= x1; x++)
-                if (isSolidAt(x, ySide))
-                {
-                    this.pos.y = ySide + 1 + half.y;
-                    this.vel.y = 0;
-                    this.onGround = true;
-                    break;
-                }
-            }
-        }
-
-        // turn at ledges (Koopa)
-        if (turnAtEdges && this.onGround && this.vel.x !== 0)
-        {
+            const half = this.size.scale(.5);
             const aheadX = floor(this.pos.x + this.facing * (half.x + .1));
             const belowY = floor(this.pos.y - half.y - .1);
             if (!isSolidAt(aheadX, belowY))
             {
-                this.vel.x = -this.vel.x;
+                this.velocity.x = -this.velocity.x;
                 this.facing = -this.facing;
+                flipped = true;
             }
         }
 
-        // fell off the world
         if (this.pos.y < -10) this.destroy();
-
-        return bumpedWall;
+        this.prevVelX = this.velocity.x;
+        return flipped;
     }
 
     // AABB overlap helper
@@ -606,9 +594,16 @@ class Enemy extends EngineObject
     deathFall()
     {
         this.deadTimer++;
-        this.vel.y -= .03;
-        this.pos = this.pos.add(this.vel);
+        this.velocity.y -= .03;
         if (this.deadTimer > 50) this.destroy();
+    }
+
+    // Subclasses call this on death; we disable tile collision so the corpse flies offscreen.
+    onKilled(dir)
+    {
+        this.dead = true;
+        this.collideTiles = false;
+        this.velocity = vec2(.1 * (dir || 1), .35);
     }
 }
 
@@ -623,7 +618,7 @@ class Goomba extends Enemy
     constructor(pos)
     {
         super(pos, vec2(.9, .9));
-        this.vel.x = -GOOMBA_SPEED;
+        this.velocity.x = -GOOMBA_SPEED;
         this.squished = false;
         this.squishTimer = 0;
     }
@@ -635,31 +630,30 @@ class Goomba extends Enemy
         if (this.squished)
         {
             this.squishTimer++;
+            this.velocity.x = 0;
             if (this.squishTimer > 30) this.destroy();
             return;
         }
 
-        // walk + fall off edges
-        this.moveAndCollideTiles(false);
+        this.applyEnemyPhysics(false); // walks off ledges
 
-        // collide with other enemies (turn around)
+        // collide with other enemies (turn around or get killed by a sliding shell)
         for (const e of engineObjects)
         {
             if (e === this || !(e instanceof Enemy) || e.dead || e.squished) continue;
             if (this.overlaps(e))
             {
-                // shell kicks kill goombas (handled by shell), but goomba-vs-goomba just swap
                 if (e instanceof Koopa && e.state === 'kicked')
                 {
-                    this.kill(Math.sign(e.vel.x));
+                    this.kill(Math.sign(e.velocity.x));
                     sfxKick.play(this.pos);
                     return;
                 }
                 if (e instanceof Goomba)
                 {
-                    if (Math.sign(this.pos.x - e.pos.x) !== Math.sign(this.vel.x))
+                    if (Math.sign(this.pos.x - e.pos.x) !== Math.sign(this.velocity.x))
                     {
-                        this.vel.x = -this.vel.x;
+                        this.velocity.x = -this.velocity.x;
                         this.facing = -this.facing;
                     }
                 }
@@ -678,11 +672,10 @@ class Goomba extends Enemy
         }
 
         const dy = player.pos.y - this.pos.y;
-        if (player.vel.y < -.05 && dy > .2)
+        if (player.velocity.y < -.05 && dy > .2)
         {
-            // stomped
             this.squished = true;
-            this.vel.x = 0;
+            this.velocity.x = 0;
             player.onStomp();
             sfxStomp.play(this.pos);
         }
@@ -692,11 +685,7 @@ class Goomba extends Enemy
         }
     }
 
-    kill(dir)
-    {
-        this.dead = true;
-        this.vel = vec2(.1 * (dir || 1), .35);
-    }
+    kill(dir) { this.onKilled(dir); }
 
     render()
     {
@@ -744,7 +733,7 @@ class Koopa extends Enemy
     constructor(pos)
     {
         super(pos, vec2(.85, 1.0));
-        this.vel.x = -KOOPA_SPEED;
+        this.velocity.x = -KOOPA_SPEED;
         this.state = 'walk';     // 'walk' | 'shell' | 'kicked'
         this.stateTimer = 0;
         this.kickCooldown = 0;   // prevents re-kick on same touch
@@ -759,17 +748,16 @@ class Koopa extends Enemy
 
         if (this.state === 'walk')
         {
-            this.moveAndCollideTiles(true); // turn at edges
+            this.applyEnemyPhysics(true); // turn at edges
         }
         else if (this.state === 'shell')
         {
-            this.vel.x = 0;
-            this.moveAndCollideTiles(false);
-            // shells stay shelled forever (no auto-revive — simpler)
+            this.velocity.x = 0;
+            this.applyEnemyPhysics(false);
         }
         else // kicked
         {
-            const wallHit = this.moveAndCollideTiles(false);
+            const wallHit = this.applyEnemyPhysics(false);
             if (wallHit) sfxBump.play(this.pos);
 
             // kicked shell vs other enemies
@@ -781,19 +769,19 @@ class Koopa extends Enemy
                 {
                     if (e instanceof Goomba && !e.squished)
                     {
-                        e.kill(Math.sign(this.vel.x));
+                        e.kill(Math.sign(this.velocity.x));
                         sfxKick.play(this.pos);
                     }
                     else if (e instanceof Koopa)
                     {
-                        if (e.state === 'walk') {
-                            e.kill(Math.sign(this.vel.x));
+                        if (e.state === 'walk')
+                        {
+                            e.kill(Math.sign(this.velocity.x));
                             sfxKick.play(this.pos);
                         }
                         else if (e.state === 'shell')
                         {
-                            // bounce off shelled koopa, also kicks it
-                            e.kickInDir(Math.sign(this.vel.x));
+                            e.kickInDir(Math.sign(this.velocity.x));
                         }
                     }
                 }
@@ -812,7 +800,7 @@ class Koopa extends Enemy
         }
 
         const dy = player.pos.y - this.pos.y;
-        const stomp = player.vel.y < -.05 && dy > .15;
+        const stomp = player.velocity.y < -.05 && dy > .15;
 
         if (this.state === 'walk')
         {
@@ -820,7 +808,7 @@ class Koopa extends Enemy
             {
                 this.state = 'shell';
                 this.size = vec2(.95, .55);
-                this.vel.x = 0;
+                this.velocity.x = 0;
                 this.stateTimer = 0;
                 player.onStomp();
                 sfxStomp.play(this.pos);
@@ -831,7 +819,6 @@ class Koopa extends Enemy
         {
             if (stomp)
             {
-                // re-stomp on still shell does nothing extra
                 player.onStomp();
                 sfxStomp.play(this.pos);
             }
@@ -844,9 +831,8 @@ class Koopa extends Enemy
         {
             if (stomp)
             {
-                // stop it
                 this.state = 'shell';
-                this.vel.x = 0;
+                this.velocity.x = 0;
                 this.kickCooldown = 8;
                 player.onStomp();
                 sfxStomp.play(this.pos);
@@ -858,18 +844,14 @@ class Koopa extends Enemy
     kickInDir(dir)
     {
         this.state = 'kicked';
-        this.vel.x = SHELL_SPEED * dir;
+        this.velocity.x = SHELL_SPEED * dir;
         this.facing = dir;
         this.kickCooldown = 12;
         this.stateTimer = 0;
         sfxKick.play(this.pos);
     }
 
-    kill(dir)
-    {
-        this.dead = true;
-        this.vel = vec2(.1 * (dir || 1), .35);
-    }
+    kill(dir) { this.onKilled(dir); }
 
     render()
     {
@@ -923,12 +905,10 @@ class Player extends EngineObject
     constructor(pos)
     {
         super(pos, vec2(.9, 1));
-        this.vel = vec2();
-        this.onGround = false;
         this.facing = 1;
         this.won = false;
         this.winTimer = 0;
-        this.winStartY = 0; // captured at pole-touch; the height Mario slides from
+        this.winStartY = 0;
         this.atCastle = false;
         this.dead = false;
         this.deadTimer = 0;
@@ -940,10 +920,105 @@ class Player extends EngineObject
 
         // power-up state
         this.powerState = 'small';   // 'small' | 'big'
-        this.starTimer = 0;          // frames of star invincibility
-        this.damageFlash = 0;        // frames of post-shrink invulnerability (flicker)
+        this.starTimer = 0;
+        this.damageFlash = 0;
 
-        this.setCollision(false, false, false, false);
+        // engine queries the same tile multiple times per physics step (newPos, oldPos,
+        // axis-only checks) — track tiles we've already reacted to this frame to avoid
+        // multi-firing brick break / coin pop / bump sfx.
+        this._tilesProcessed = new Set();
+
+        // Engine handles tile collision; no inter-object collision.
+        // We keep variable gravity, friction, and bounce ourselves.
+        this.setCollision(false, false, true, false);
+        this.damping = 1;
+        this.friction = 1;
+        this.restitution = 0;
+        this.gravityScale = 0;
+    }
+
+    // Called by the engine for every solid tile in our AABB during physics resolution.
+    // Returning false makes the tile non-solid (and effectively destroyed for this hit).
+    // We do head-bump effects here: pop ? blocks, break bricks (Big Mario), bump sfx.
+    collideWithTile(tileData, pos)
+    {
+        if (!tileData) return false;
+        if (!isSolidType(tileData)) return false; // POLE / EMPTY pass through
+
+        // tile pos from the engine is the tile's index corner; player center is this.pos.
+        // d > 0 ⇒ tile is above us (head bump); d < 0 ⇒ tile is below us (landing).
+        const d = pos.y - this.pos.y;
+        const rising = this.velocity.y > .05;
+
+        if (rising && d > 0)
+        {
+            const x = pos.x | 0;
+            const y = pos.y | 0;
+            const key = x + ',' + y;
+            if (!this._tilesProcessed.has(key))
+            {
+                this._tilesProcessed.add(key);
+                if (this.processBlockBump(x, y, tileData))
+                {
+                    // tile is gone — stop upward motion and let the player pass through.
+                    this.velocity.y = 0;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Returns true if the tile was destroyed (player should pass through).
+    processBlockBump(x, y, tileData)
+    {
+        const blockCenter = vec2(x + .5, y + .5);
+
+        if (tileData === TT.QBLOCK)
+        {
+            setTile(x, y, TT.USED);
+            bumpTile(x, y);
+            const content = qBlockContents.get(tileKey(x, y)) || 'coin';
+            if (content === 'mushroom')
+            {
+                new Mushroom(blockCenter);
+                sfxBump.play(blockCenter);
+            }
+            else if (content === 'star')
+            {
+                new Star(blockCenter);
+                sfxBump.play(blockCenter);
+            }
+            else
+            {
+                new PopCoin(vec2(x + .5, y + 1.2));
+                coinsCollected++;
+                sfxCoin.play(blockCenter);
+            }
+            return false; // USED is still solid; player bounces off
+        }
+
+        if (tileData === TT.BRICK)
+        {
+            if (this.powerState === 'big')
+            {
+                setTile(x, y, TT.EMPTY);
+                for (let i = 0; i < 4; i++)
+                {
+                    const vx = (i < 2 ? -1 : 1) * (.08 + rand(0, .06));
+                    const vy = .28 + rand(0, .12) + (i % 2) * .12;
+                    new BrickChunk(blockCenter, vec2(vx, vy));
+                }
+                sfxBreak.play(blockCenter);
+                return true; // destroyed
+            }
+            bumpTile(x, y);
+            sfxBump.play(blockCenter);
+            return false;
+        }
+
+        sfxBump.play(this.pos);
+        return false;
     }
 
     isStarPowered() { return this.starTimer > 0; }
@@ -968,8 +1043,6 @@ class Player extends EngineObject
         this.starTimer = 600; // ~10s
         sfxStar.play(this.pos);
     }
-
-    updatePhysics() {}
 
     // SMB-style tuning. Held jump = floaty ascent; release/fall = snappy.
     // Jump velocity scales with horizontal speed (Mario jumps higher when running).
@@ -997,9 +1070,8 @@ class Player extends EngineObject
         if (this.dead)
         {
             this.deadTimer++;
-            // hop + fall
-            this.vel.y -= .025;
-            this.pos = this.pos.add(this.vel);
+            // gravity during the death hop; engine moves us via velocity each frame.
+            this.velocity.y -= .025;
             if (this.deadTimer > 60) respawn();
             return;
         }
@@ -1011,6 +1083,10 @@ class Player extends EngineObject
         }
 
         const P = Player;
+        const onGround = !!this.groundObject;
+
+        // clear the per-frame guard set used by collideWithTile to debounce sfx
+        this._tilesProcessed.clear();
 
         if (this.starTimer > 0) this.starTimer--;
         if (this.damageFlash > 0) this.damageFlash--;
@@ -1025,101 +1101,94 @@ class Player extends EngineObject
         const accel = run ? P.RUN_ACCEL : P.WALK_ACCEL;
         const maxSpeed = run ? P.RUN_MAX : P.WALK_MAX;
 
-        if (this.onGround) this.coyoteTimer = P.COYOTE_FRAMES;
+        if (onGround) this.coyoteTimer = P.COYOTE_FRAMES;
         else if (this.coyoteTimer > 0) this.coyoteTimer--;
 
         if (jumpPressed) this.bufferTimer = P.BUFFER_FRAMES;
         else if (this.bufferTimer > 0) this.bufferTimer--;
 
-        if (!this.won)
+        // skid first
+        if (onGround && left && this.velocity.x > 0)
         {
-            // skid first
-            if (this.onGround && left && this.vel.x > 0)
-            {
-                this.vel.x = max(0, this.vel.x - P.SKID_DECEL);
-                this.facing = -1;
-            }
-            else if (this.onGround && right && this.vel.x < 0)
-            {
-                this.vel.x = min(0, this.vel.x + P.SKID_DECEL);
-                this.facing = 1;
-            }
-            else if (left)
-            {
-                this.vel.x -= accel * (this.onGround ? 1 : P.AIR_ACCEL_MUL);
-                this.facing = -1;
-            }
-            else if (right)
-            {
-                this.vel.x += accel * (this.onGround ? 1 : P.AIR_ACCEL_MUL);
-                this.facing = 1;
-            }
-            else if (this.onGround)
-                this.vel.x *= P.IDLE_FRICTION;
+            this.velocity.x = max(0, this.velocity.x - P.SKID_DECEL);
+            this.facing = -1;
+        }
+        else if (onGround && right && this.velocity.x < 0)
+        {
+            this.velocity.x = min(0, this.velocity.x + P.SKID_DECEL);
+            this.facing = 1;
+        }
+        else if (left)
+        {
+            this.velocity.x -= accel * (onGround ? 1 : P.AIR_ACCEL_MUL);
+            this.facing = -1;
+        }
+        else if (right)
+        {
+            this.velocity.x += accel * (onGround ? 1 : P.AIR_ACCEL_MUL);
+            this.facing = 1;
+        }
+        else if (onGround)
+            this.velocity.x *= P.IDLE_FRICTION;
 
-            this.vel.x = this.onGround
-                ? clamp(this.vel.x, -maxSpeed, maxSpeed)
-                : clamp(this.vel.x, -P.RUN_MAX, P.RUN_MAX);
+        this.velocity.x = onGround
+            ? clamp(this.velocity.x, -maxSpeed, maxSpeed)
+            : clamp(this.velocity.x, -P.RUN_MAX, P.RUN_MAX);
 
-            // jump: scale velocity with horizontal speed (SMB-style)
-            if (this.bufferTimer > 0 && this.coyoteTimer > 0)
-            {
-                const speedFrac = Math.abs(this.vel.x) / P.RUN_MAX;
-                this.vel.y = P.JUMP_VEL_BASE + P.JUMP_VEL_RUN_BONUS * speedFrac;
-                this.coyoteTimer = 0;
-                this.bufferTimer = 0;
-                this.onGround = false;
-                this.jumpHolding = true;
-                sfxJump.play(this.pos);
-            }
-
-            // short hop
-            const jumpReleased = !jumpDown && this.prevJumpDown;
-            if (jumpReleased && this.vel.y > 0)
-            {
-                this.vel.y *= P.JUMP_CUT;
-                this.jumpHolding = false;
-            }
-            if (!jumpDown) this.jumpHolding = false;
+        // jump (engine clears groundObject on collision; we don't need to)
+        if (this.bufferTimer > 0 && this.coyoteTimer > 0)
+        {
+            const speedFrac = Math.abs(this.velocity.x) / P.RUN_MAX;
+            this.velocity.y = P.JUMP_VEL_BASE + P.JUMP_VEL_RUN_BONUS * speedFrac;
+            this.coyoteTimer = 0;
+            this.bufferTimer = 0;
+            this.jumpHolding = true;
+            sfxJump.play(this.pos);
         }
 
-        // gravity
+        // short hop
+        const jumpReleased = !jumpDown && this.prevJumpDown;
+        if (jumpReleased && this.velocity.y > 0)
+        {
+            this.velocity.y *= P.JUMP_CUT;
+            this.jumpHolding = false;
+        }
+        if (!jumpDown) this.jumpHolding = false;
+
+        // variable gravity
         let g;
-        if (this.vel.y > 0) g = this.jumpHolding ? P.GRAVITY_RISE_HOLD : P.GRAVITY_RISE_FREE;
-        else                g = P.GRAVITY_FALL;
-        this.vel.y -= g;
-        this.vel.y = max(this.vel.y, P.TERMINAL_VEL);
+        if (this.velocity.y > 0) g = this.jumpHolding ? P.GRAVITY_RISE_HOLD : P.GRAVITY_RISE_FREE;
+        else                     g = P.GRAVITY_FALL;
+        this.velocity.y -= g;
+        this.velocity.y = max(this.velocity.y, P.TERMINAL_VEL);
 
-        this.moveAndCollide();
-
-        // goal: touching the pole (right edge of player overlaps pole column)
+        // pole touch
         if (this.pos.x >= 191.5)
         {
             this.won = true;
             this.winTimer = 0;
             this.winStartY = this.pos.y;
-            this.pos.x = 192;        // snap so Mario's right side is on the pole
-            this.vel = vec2(0, 0);
+            this.pos.x = 191.55;        // touching pole, not overlapping the base block
+            this.velocity = vec2(0, 0);
             this.facing = 1;
             sfxWin.play(this.pos);
         }
 
-        this.prevJumpDown = jumpDown;
-
-        // fell off — always lethal regardless of Big/Star state
+        // fell off — always lethal
         if (this.pos.y < -10 && !this.dead)
         {
             this.dead = true;
             this.deadTimer = 0;
-            this.vel = vec2(0, .45);
+            this.velocity = vec2(0, .45);
             sfxHurt.play(this.pos);
         }
+
+        this.prevJumpDown = jumpDown;
     }
 
     onStomp()
     {
-        // bounce. held-jump = bigger bounce.
-        this.vel.y = this.jumpHolding ? Player.STOMP_BOUNCE_HELD : Player.STOMP_BOUNCE;
+        this.velocity.y = this.jumpHolding ? Player.STOMP_BOUNCE_HELD : Player.STOMP_BOUNCE;
     }
 
     runWinSequence()
@@ -1127,7 +1196,7 @@ class Player extends EngineObject
         this.winTimer++;
         const t = this.winTimer;
         const big = this.powerState === 'big';
-        const baseY = big ? 2.9 : 2.5; // feet on top of the base block at the pole
+        const baseY = big ? 2.9 : 2.5;
         const hasSlide = this.winStartY > baseY + .1;
 
         if (hasSlide)
@@ -1135,52 +1204,48 @@ class Player extends EngineObject
             if (t <= 36)
             {
                 this.pos.y = lerp(this.winStartY, baseY, t / 36);
-                this.vel = vec2(0, 0);
+                this.velocity = vec2(0, 0);
                 this.facing = 1;
                 return;
             }
             if (t < 70)
             {
                 this.pos.y = baseY;
-                this.vel = vec2(0, 0);
+                this.velocity = vec2(0, 0);
                 this.facing = 1;
                 return;
             }
             if (t === 70)
             {
-                // hop off the pole to the right
-                this.pos.x = 193;
-                this.vel = vec2(.18, .26);
+                this.pos.x = 193.5;     // clear of the pole's base block
+                this.velocity = vec2(.18, .26);
             }
         }
         else
         {
-            // walked into the pole at ground level: skip the slide, short pause
             if (t < 28)
             {
                 this.pos.y = baseY;
-                this.vel = vec2(0, 0);
+                this.velocity = vec2(0, 0);
                 this.facing = 1;
                 return;
             }
             if (t === 28)
             {
-                this.pos.x = 193;
-                this.vel = vec2(.18, .26);
+                this.pos.x = 193.5;
+                this.velocity = vec2(.18, .26);
             }
         }
 
-        // walking phase: simple gravity + walk right, no controls
-        this.vel.y -= Player.GRAVITY_FALL;
-        this.vel.y = max(this.vel.y, Player.TERMINAL_VEL);
-        this.moveAndCollide();
-        if (this.onGround) this.vel.x = .14;
+        // walking phase: gravity + walk right; engine resolves tile collision
+        this.velocity.y -= Player.GRAVITY_FALL;
+        this.velocity.y = max(this.velocity.y, Player.TERMINAL_VEL);
+        if (this.groundObject) this.velocity.x = .14;
 
-        // walk into the castle door
         if (this.pos.x >= 206)
         {
             this.pos.x = 206;
-            this.vel.x = 0;
+            this.velocity = vec2(0, 0);
             this.atCastle = true;
         }
         this.facing = 1;
@@ -1193,7 +1258,6 @@ class Player extends EngineObject
 
         if (this.powerState === 'big')
         {
-            // shrink + brief i-frames
             this.powerState = 'small';
             this.size = vec2(.9, 1);
             this.pos = this.pos.add(vec2(0, -.4));
@@ -1204,127 +1268,8 @@ class Player extends EngineObject
 
         this.dead = true;
         this.deadTimer = 0;
-        this.vel = vec2(0, .45);
+        this.velocity = vec2(0, .45);
         sfxHurt.play(this.pos);
-    }
-
-    moveAndCollide()
-    {
-        const half = this.size.scale(.5);
-
-        // ---- X ----
-        this.pos.x += this.vel.x;
-        if (this.vel.x)
-        {
-            const y0 = floor(this.pos.y - half.y + .001);
-            const y1 = floor(this.pos.y + half.y - .001);
-            if (this.vel.x > 0)
-            {
-                const xSide = floor(this.pos.x + half.x);
-                for (let y = y0; y <= y1; y++)
-                if (isSolidAt(xSide, y))
-                {
-                    this.pos.x = xSide - half.x;
-                    this.vel.x = 0;
-                    break;
-                }
-            }
-            else
-            {
-                const xSide = floor(this.pos.x - half.x);
-                for (let y = y0; y <= y1; y++)
-                if (isSolidAt(xSide, y))
-                {
-                    this.pos.x = xSide + 1 + half.x;
-                    this.vel.x = 0;
-                    break;
-                }
-            }
-        }
-
-        // ---- Y ----
-        this.onGround = false;
-        this.pos.y += this.vel.y;
-        if (this.vel.y)
-        {
-            const x0 = floor(this.pos.x - half.x + .001);
-            const x1 = floor(this.pos.x + half.x - .001);
-
-            if (this.vel.y > 0)
-            {
-                const ySide = floor(this.pos.y + half.y);
-                let hitX = -1;
-                for (let x = x0; x <= x1; x++)
-                if (isSolidAt(x, ySide))
-                {
-                    hitX = x;
-                    this.pos.y = ySide - half.y;
-                    this.vel.y = 0;
-                    break;
-                }
-                if (hitX >= 0)
-                {
-                    const t = getTile(hitX, ySide);
-                    const blockCenter = vec2(hitX + .5, ySide + .5);
-                    if (t === TT.QBLOCK)
-                    {
-                        setTile(hitX, ySide, TT.USED);
-                        bumpTile(hitX, ySide);
-                        const content = qBlockContents.get(tileKey(hitX, ySide)) || 'coin';
-                        if (content === 'mushroom')
-                        {
-                            new Mushroom(blockCenter);
-                            sfxBump.play(blockCenter);
-                        }
-                        else if (content === 'star')
-                        {
-                            new Star(blockCenter);
-                            sfxBump.play(blockCenter);
-                        }
-                        else
-                        {
-                            new PopCoin(vec2(hitX + .5, ySide + 1.2));
-                            coinsCollected++;
-                            sfxCoin.play(blockCenter);
-                        }
-                    }
-                    else if (t === TT.BRICK)
-                    {
-                        if (this.powerState === 'big')
-                        {
-                            // shatter the brick
-                            setTile(hitX, ySide, TT.EMPTY);
-                            for (let i = 0; i < 4; i++)
-                            {
-                                const vx = (i < 2 ? -1 : 1) * (.08 + rand(0, .06));
-                                const vy = .28 + rand(0, .12) + (i % 2) * .12;
-                                new BrickChunk(blockCenter, vec2(vx, vy));
-                            }
-                            sfxBreak.play(blockCenter);
-                        }
-                        else
-                        {
-                            bumpTile(hitX, ySide);
-                            sfxBump.play(blockCenter);
-                        }
-                    }
-                    else
-                        sfxBump.play(this.pos);
-                }
-            }
-            else
-            {
-                const ySide = floor(this.pos.y - half.y);
-                for (let x = x0; x <= x1; x++)
-                if (isSolidAt(x, ySide))
-                {
-                    this.pos.y = ySide + 1 + half.y;
-                    this.vel.y = 0;
-                    this.onGround = true;
-                    break;
-                }
-            }
-        }
     }
 
     render()
@@ -1336,7 +1281,7 @@ class Player extends EngineObject
         if (this.damageFlash > 0 && Math.floor(time * 30) % 2 === 0) return;
 
         const big = this.powerState === 'big';
-        const lean = this.facing * Math.min(.12, Math.abs(this.vel.x) * .4);
+        const lean = this.facing * Math.min(.12, Math.abs(this.velocity.x) * .4);
 
         // star power cycles palette
         let bodyC, shirtC, hatC, skinC;
@@ -1356,7 +1301,7 @@ class Player extends EngineObject
             skinC  = rgb(.95, .80, .60);
         }
 
-        const walking = this.onGround && Math.abs(this.vel.x) > .02;
+        const walking = !!this.groundObject && Math.abs(this.velocity.x) > .02;
         const wp = walking ? Math.sin(time * 14) * .06 : 0;
 
         if (big)
@@ -1425,6 +1370,12 @@ function gameInit()
     cameraScale = 60;
     inputWASDEmulateDirection = true;
     touchGamepadEnable = true;
+
+    // Tiny non-zero gravity so the engine's `wasFalling` check picks the right axis
+    // when resolving collisions. Each entity disables auto-gravity (gravityScale=0) and
+    // applies its own per-frame, so the absolute value doesn't matter — only the sign.
+    gravity = vec2(0, -.001);
+
     respawn();
 }
 
@@ -1448,6 +1399,19 @@ function gameUpdatePost()
     const maxCamX = LEVEL_W - camSize.x/2;
     if (cameraPos.x > maxCamX)
         setCameraPos(vec2(maxCamX, camY));
+
+    // SMB-style left clamp: the player can't walk off the left edge of the screen.
+    // The camera only scrolls right, so this also locks players out of areas already passed.
+    if (!player.won && !player.dead)
+    {
+        const halfW = player.size.x/2;
+        const leftLimit = max(cameraPos.x - camSize.x/2 + halfW, halfW);
+        if (player.pos.x < leftLimit)
+        {
+            player.pos.x = leftLimit;
+            if (player.velocity.x < 0) player.velocity.x = 0;
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
