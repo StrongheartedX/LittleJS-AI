@@ -615,12 +615,17 @@
     for (const l of logs) drawLog(l);
     for (const c of cars) drawCar(c);
 
-    const visible = !flashTimer.active() || (Math.floor(time*16) % 2 === 0);
-    if (visible) {
-      // While riding a log, the frog tracks the log's vertical bounce
-      // so it stays glued to the surface rather than floating off it.
+    // Alive player frog — disappears entirely on death; particles play instead.
+    if (!respawnTimer.active()) {
       const logBump = frog.onLog ? logBumpY(frog.onLog) : 0;
       drawFrog(frog.pos.add(vec2(0, logBump)), frog.facing, frog.hopAnim);
+    }
+
+    // Death particles on top of everything so they read clearly.
+    for (const p of particles) {
+      const t = p.life / p.maxLife;
+      const alpha = Math.max(0, 1 - t);
+      drawCircle(p.pos, p.size * (1 - t*.4), hsl(p.h, p.s, p.l, alpha));
     }
   }
 
@@ -630,8 +635,8 @@
       vec2(mainCanvasSize.x/2, 30), 26,
       hsl(105/360,.55,.85), 4, hsl(0,0,0));
 
-    if (respawnTimer.active()) {
-      drawTextScreen(lives < 0 ? 'GAME OVER' : 'SPLASH!',
+    if (respawnTimer.active() && lives < 0) {
+      drawTextScreen('GAME OVER',
         vec2(mainCanvasSize.x/2, mainCanvasSize.y/2), 90,
         hsl(0, .8, .55), 8, hsl(0,0,0));
     }
