@@ -482,9 +482,29 @@ function gameUpdatePost()
 
 function drawField()
 {
-    // fair-territory grass wedge: large green triangle (approximated as 3 rects)
-    // Easier: draw a large green disk and then chop foul areas with dark wedges.
-    drawCircle(platePos, fenceRadius*2 + 6, hsl(.32, .55, .32));
+    // build the fair-territory polygon: home plate at apex, arc along the fence
+    const fairArcSegs = 32;
+    const a0 = PI/2 - foulAngleHalf;
+    const a1 = PI/2 + foulAngleHalf;
+    const fairPoly = [platePos];
+    for (let i = 0; i <= fairArcSegs; i++)
+    {
+        const t = a0 + (a1-a0)*i/fairArcSegs;
+        fairPoly.push(vec2(cos(t)*fenceRadius, sin(t)*fenceRadius));
+    }
+    drawPoly(fairPoly, hsl(.32, .55, .32));
+
+    // warning track: dirt-colored thick line along the inside of the fence
+    for (let i = 0; i < fairArcSegs; i++)
+    {
+        const t0 = a0 + (a1-a0)*i/fairArcSegs;
+        const t1 = a0 + (a1-a0)*(i+1)/fairArcSegs;
+        const r = fenceRadius - .9;
+        drawLine(
+            vec2(cos(t0)*r, sin(t0)*r),
+            vec2(cos(t1)*r, sin(t1)*r),
+            1.6, hsl(.08, .35, .38));
+    }
 
     // dirt infield diamond (square rotated 45° around mound area)
     drawRect(moundCenter.add(vec2(0, -9)), vec2(20, 20), hsl(.08, .45, .35), PI/4);
@@ -492,35 +512,15 @@ function drawField()
     // dirt cutout around home plate
     drawCircle(platePos.add(vec2(0, .5)), 5, hsl(.08, .45, .35));
 
-    // dark "out of play" wedges over foul territory
-    // Left foul wedge: from home plate to NW (135° to 180°)
-    drawRect(vec2(-fenceRadius*.6 - 2, fenceRadius*.6 - 2), vec2(fenceRadius*2, fenceRadius*2), hsl(.25, .35, .18), -PI/4);
-    drawRect(vec2( fenceRadius*.6 + 2, fenceRadius*.6 - 2), vec2(fenceRadius*2, fenceRadius*2), hsl(.25, .35, .18),  PI/4);
-    // South of plate too
-    drawRect(vec2(0, -fenceRadius - 4), vec2(fenceRadius*3, fenceRadius*2), hsl(.25, .35, .18));
-
-    // outfield fence (arc, drawn as small line segments)
-    const segs = 28;
-    const a0 = PI/2 - foulAngleHalf;
-    const a1 = PI/2 + foulAngleHalf;
-    for (let i = 0; i < segs; i++)
+    // outfield fence (white line along the arc)
+    for (let i = 0; i < fairArcSegs; i++)
     {
-        const t0 = a0 + (a1-a0)*i/segs;
-        const t1 = a0 + (a1-a0)*(i+1)/segs;
+        const t0 = a0 + (a1-a0)*i/fairArcSegs;
+        const t1 = a0 + (a1-a0)*(i+1)/fairArcSegs;
         drawLine(
             vec2(cos(t0)*fenceRadius, sin(t0)*fenceRadius),
             vec2(cos(t1)*fenceRadius, sin(t1)*fenceRadius),
-            .35, hsl(0, 0, .92));
-    }
-    // warning track (thin dirt band just inside the fence)
-    for (let i = 0; i < segs; i++)
-    {
-        const t0 = a0 + (a1-a0)*i/segs;
-        const t1 = a0 + (a1-a0)*(i+1)/segs;
-        drawLine(
-            vec2(cos(t0)*(fenceRadius-1.3), sin(t0)*(fenceRadius-1.3)),
-            vec2(cos(t1)*(fenceRadius-1.3), sin(t1)*(fenceRadius-1.3)),
-            1.8, hsl(.08, .35, .35, .55));
+            .3, hsl(0, 0, .92));
     }
 
     // foul lines from home plate to fence
