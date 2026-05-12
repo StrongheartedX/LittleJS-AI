@@ -503,12 +503,11 @@
 
     const green     = hsl(105/360,.75,.42);
     const greenDark = hsl(105/360,.80,.27);
-    const greenLite = hsl(105/360,.55,.58);
-    const belly     = hsl(60/360, .55,.78);
 
-    // shadow on ground (fixed under frog, doesn't rise)
-    drawEllipse(frog.pos.add(vec2(0,-.32)), vec2(.55, .18),
-      hsl(0,0,0, .35 - hopArc*.20));
+    // shadow — always visible, sits on the ground below the body.
+    // Stays at frog.pos (doesn't rise with the hop) so it grounds the frog.
+    drawEllipse(frog.pos.add(vec2(0,-.42)), vec2(1.10, .34),
+      hsl(0,0,0, .42 - hopArc*.12));
 
     // back legs (sticking out behind, splayed)
     const back = vec2(-f.x*.30, -f.y*.30);
@@ -526,30 +525,27 @@
     const bw = (horiz ? stretch : squish) * .8;
     const bh = (horiz ? squish  : stretch) * .8;
     drawEllipse(p, vec2(bw, bh), green);
-    // belly highlight (front-lower)
-    drawEllipse(p.add(vec2(-f.x*.05, -f.y*.10 - .05)), vec2(bw*.6, bh*.45), belly);
 
-    // spots
-    drawCircle(p.add(perp.scale( .15)).add(vec2(f.x* .05, f.y* .05)), .07, greenDark);
-    drawCircle(p.add(perp.scale(-.15)).add(vec2(f.x*-.05, f.y*-.05)), .06, greenDark);
-    drawCircle(p.add(vec2(f.x*.15, f.y*.15)), .055, greenDark);
+    // two small symmetric back spots
+    drawCircle(p.add(perp.scale( .18)), .07, greenDark);
+    drawCircle(p.add(perp.scale(-.18)), .07, greenDark);
 
-    // eyes — two bumps on the front-top of the head
-    const eyeFwd = p.add(vec2(f.x*.18, f.y*.18));
-    const eyeL2  = eyeFwd.add(perp.scale( .20));
-    const eyeR2  = eyeFwd.add(perp.scale(-.20));
+    // eyes — big cartoony bumps on the front-top of the head (~2x)
+    const eyeFwd = p.add(vec2(f.x*.20, f.y*.20));
+    const eyeL2  = eyeFwd.add(perp.scale( .24));
+    const eyeR2  = eyeFwd.add(perp.scale(-.24));
     // green eye bumps
-    drawCircle(eyeL2, .22, green);
-    drawCircle(eyeR2, .22, green);
+    drawCircle(eyeL2, .42, green);
+    drawCircle(eyeR2, .42, green);
     // whites
-    drawCircle(eyeL2.add(vec2(0,.03)), .15, hsl(0,0,1));
-    drawCircle(eyeR2.add(vec2(0,.03)), .15, hsl(0,0,1));
+    drawCircle(eyeL2.add(vec2(0,.04)), .30, hsl(0,0,1));
+    drawCircle(eyeR2.add(vec2(0,.04)), .30, hsl(0,0,1));
     // pupils — look forward
-    drawCircle(eyeL2.add(vec2(f.x*.04, f.y*.04 + .03)), .07, hsl(0,0,0));
-    drawCircle(eyeR2.add(vec2(f.x*.04, f.y*.04 + .03)), .07, hsl(0,0,0));
-    // tiny highlight
-    drawCircle(eyeL2.add(vec2(f.x*.04 - .025, f.y*.04 + .055)), .025, hsl(0,0,1));
-    drawCircle(eyeR2.add(vec2(f.x*.04 - .025, f.y*.04 + .055)), .025, hsl(0,0,1));
+    drawCircle(eyeL2.add(vec2(f.x*.06, f.y*.06 + .04)), .14, hsl(0,0,0));
+    drawCircle(eyeR2.add(vec2(f.x*.06, f.y*.06 + .04)), .14, hsl(0,0,0));
+    // shiny highlights
+    drawCircle(eyeL2.add(vec2(f.x*.06 - .05, f.y*.06 + .11)), .05, hsl(0,0,1));
+    drawCircle(eyeR2.add(vec2(f.x*.06 - .05, f.y*.06 + .11)), .05, hsl(0,0,1));
   }
 
   function gameRender() {
