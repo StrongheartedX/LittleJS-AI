@@ -486,12 +486,14 @@ function gameInit()
 {
     // called once after the engine starts up
     setCanvasMaxSize(vec2(1280, 720));
-    setCanvasClearColor(hsl(0,0,0));
+    // Canvas clear matches the panel tint so any area outside the play rectangle
+    // (above the wall, beside the panel, etc.) blends in instead of reading as a black bar.
+    setCanvasClearColor(hsl(.6, .18, .14));
     setShowSplashScreen(false);
 
     // sound
-    sShoot = new SoundGenerator({volume:.35, frequency:850, attack:.001, sustain:.01, release:.08, shape:3, slide:-.2});
-    sPop   = new SoundGenerator({volume:.45, frequency:520, attack:.001, sustain:.01, release:.10, shape:2, randomness:.05, bitCrush:.2});
+    sShoot = new Sound([,,30,.01,,.01,1,1.4,94,-12,,,,,,,,.47,.01]);
+    sPop   = new Sound([.9,,84,.01,,.01,,2.7,-50,,-400,.01,,,25,,,.8,.01,,-1e3]);
     sDrop  = new SoundGenerator({volume:.25, frequency:180, attack:.001, sustain:.02, release:.18, shape:1, slide:-.15});
     sLose  = new SoundGenerator({volume:.5,  frequency:120, attack:.01,  sustain:.08, release:.35, shape:3, slide:-.25, noise:.06});
     sWin   = new SoundGenerator({volume:.45, frequency:640, attack:.01,  sustain:.05, release:.25, shape:0, slide:.15, repeatTime:.08});
@@ -661,8 +663,8 @@ function gameUpdatePost()
     // setup camera and prepare for render
 
     // frame the whole field — tight around the play area, shooter, and preview
-    const visibleTop = TOP_Y + .15;
-    const visibleBot = SHOOT_Y - 1.1;
+    const visibleTop = TOP_Y - .5;
+    const visibleBot = SHOOT_Y - .7;
     const worldW = FIELD_W + 1.2;
     const worldH = visibleTop - visibleBot;
     cameraScale = min(mainCanvasSize.x/worldW, mainCanvasSize.y/worldH);
@@ -713,10 +715,9 @@ function gameRenderPost()
         drawCircle(p.add(vec2(-.12,.12)), .22, hsl(0,0,1,.18));
     }
 
-    // ceiling mask — covers down past TOP_Y by a full BUBBLE_R so the new row is
-    // completely hidden at the moment of rollover; tucks the topmost visible row's
-    // very top under the ceiling as a stylistic touch instead of a pop-in
-    drawRect(vec2(0, TOP_Y + 5 - .5), vec2(60, 10), hsl(0,0,0));
+    // ceiling mask — same color as panel/canvas so the hidden strip reads as a
+    // continuation of the play surface instead of a black bar above the wall
+    drawRect(vec2(0, TOP_Y + 5 - .5), vec2(60, 10), hsl(.6, .18, .14));
 
     // projectile
     if (projectile)
