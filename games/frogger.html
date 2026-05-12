@@ -68,6 +68,7 @@
     frog.carryVx = 0;
     frog.facing = vec2(0, 1);
     frog.hopAnim = 0;
+    frog.onLog = null;
     if (full) {
       reached.fill(false);
       lives = 3;
@@ -217,6 +218,7 @@
       for (const l of logs) {
         if (overlapAABB(frog.pos, frogSize, l.pos, l.size)) { onLog = l; break; }
       }
+      frog.onLog = onLog;
       if (!onLog) { killFrog(); return; }
 
       frog.carryVx = onLog.vx;
@@ -227,6 +229,8 @@
         return;
       }
       frog.grid = clampFrogGrid(worldToGridPos(frog.pos));
+    } else {
+      frog.onLog = null;
     }
 
     if (frog.grid.y === HOME_Y) {
@@ -254,6 +258,7 @@
       carryVx: 0,
       facing: vec2(0, 1),
       hopAnim: 0,
+      onLog: null,
     };
 
     respawnTimer = new Timer(); respawnTimer.unset();
@@ -365,64 +370,85 @@
       // notch
       drawRect(p.add(vec2(0,-.05)), vec2(.18, .8), hsl(205/360,.55,.27));
       if (reached[i]) {
-        // same renderer as the player frog, just facing up with no hop
-        drawFrog(p, vec2(0, 1), 0);
+        // same renderer as the player frog, just facing up with no hop.
+        // Per-pad breathing phase so they don't all inhale in lockstep.
+        drawFrog(p, vec2(0, 1), 0, i * 1.7);
       }
     }
   }
 
+  // ------------------------------------------------------------
+  // Per-obstacle vertical bounce helpers. The base y stored on the
+  // obstacle is the MINIMUM position; bounce only ever adds upward.
+
+  function carBumpY(c) {
+    // small fast bumps, less than half a wheel
+    const a = Math.sin(time*14 + c.seed*.7)*.5 + .5;
+    const b = Math.sin(time*9  + c.seed   )*.5 + .5;
+    return a*.045 + b*.025;
+  }
+
+  function logBumpY(l) {
+    // slow gentle float on the water
+    const a = Math.sin(time*1.4 + l.seed*.4)*.5 + .5;
+    return a*.09;
+  }
+
   function drawCar(c) {
+    const bumpY = carBumpY(c);
     const w = c.size.x, h = c.size.y;
-    const x = c.pos.x, y = c.pos.y;
+    const x = c.pos.x, y0 = c.pos.y;
+    const y = y0 + bumpY;
+    const pos = vec2(x, y);
     const dir = c.dir; // 1 right, -1 left
 
-    // shadow
-    drawRect(vec2(x, y - .42), vec2(w*.95, .12), hsl(0,0,0,.35));
+    // shadow stays on the road as the ground reference
+    drawRect(vec2(x, y0 - .42), vec2(w*.95, .12), hsl(0,0,0,.35));
 
     if (c.kind === 'bus') {
-      drawRect(c.pos, vec2(w, h*.92), c.color);
-      drawRect(c.pos.add(vec2(0, h*.18)), vec2(w*.88, h*.38), hsl(200/360,.5,.8,.85));
+      drawRect(pos, vec2(w, h*.92), c.color);
+      drawRect(pos.add(vec2(0, h*.18)), vec2(w*.88, h*.38), hsl(200/360,.5,.8,.85));
       // window dividers
       for (let i=-2; i<=2; i++)
-        drawRect(c.pos.add(vec2(i*w*.16, h*.18)), vec2(.05, h*.38), hsl(0,0,.1));
+        drawRect(pos.add(vec2(i*w*.16, h*.18)), vec2(.05, h*.38), hsl(0,0,.1));
       // door at back
-      drawRect(c.pos.add(vec2(-dir*w*.32, -.04)), vec2(.12, h*.55), hsl(0,0,.08));
+      drawRect(pos.add(vec2(-dir*w*.32, -.04)), vec2(.12, h*.55), hsl(0,0,.08));
       // stripe
-      drawRect(c.pos.add(vec2(0, -h*.18)), vec2(w*.94, .06), hsl(0,0,1,.4));
+      drawRect(pos.add(vec2(0, -h*.18)), vec2(w*.94, .06), hsl(0,0,1,.4));
     }
     else if (c.kind === 'truck') {
       // cargo box (back)
-      drawRect(c.pos.add(vec2(-dir*w*.22, 0)), vec2(w*.55, h*.95), hsl(0,0,.85));
-      drawRect(c.pos.add(vec2(-dir*w*.22, 0)), vec2(w*.55, h*.95), hsl(0,0,.85), .04, hsl(0,0,.3));
+      drawRect(pos.add(vec2(-dir*w*.22, 0)), vec2(w*.55, h*.95), hsl(0,0,.85));
+      drawRect(pos.add(vec2(-dir*w*.22, 0)), vec2(w*.55, h*.95), hsl(0,0,.85), .04, hsl(0,0,.3));
       // panel lines on cargo
-      drawRect(c.pos.add(vec2(-dir*w*.22, 0)), vec2(.05, h*.85), hsl(0,0,.35));
+      drawRect(pos.add(vec2(-dir*w*.22, 0)), vec2(.05, h*.85), hsl(0,0,.35));
       // cab
-      drawRect(c.pos.add(vec2(dir*w*.30, 0)), vec2(w*.4, h*.95), c.color);
-      drawRect(c.pos.add(vec2(dir*w*.32, h*.18)), vec2(w*.28, h*.32), hsl(200/360,.5,.85,.9));
+      drawRect(pos.add(vec2(dir*w*.30, 0)), vec2(w*.4, h*.95), c.color);
+      drawRect(pos.add(vec2(dir*w*.32, h*.18)), vec2(w*.28, h*.32), hsl(200/360,.5,.85,.9));
     }
     else if (c.kind === 'sports') {
       // sleek low car: lower body wider, cabin smaller
-      drawRect(c.pos, vec2(w, h*.55), c.color);
-      drawRect(c.pos.add(vec2(-dir*w*.05, h*.18)), vec2(w*.55, h*.32), hsl(0,0,.05));
+      drawRect(pos, vec2(w, h*.55), c.color);
+      drawRect(pos.add(vec2(-dir*w*.05, h*.18)), vec2(w*.55, h*.32), hsl(0,0,.05));
       // racing stripe
-      drawRect(c.pos, vec2(w, .08), hsl(0,0,1,.6));
+      drawRect(pos, vec2(w, .08), hsl(0,0,1,.6));
     }
     else if (c.kind === 'wagon') {
-      drawRect(c.pos, vec2(w, h*.92), c.color);
-      drawRect(c.pos.add(vec2(0, h*.18)), vec2(w*.78, h*.32), hsl(200/360,.5,.85,.9));
+      drawRect(pos, vec2(w, h*.92), c.color);
+      drawRect(pos.add(vec2(0, h*.18)), vec2(w*.78, h*.32), hsl(200/360,.5,.85,.9));
       // pillar between front/back windows
-      drawRect(c.pos.add(vec2(0, h*.18)), vec2(.06, h*.32), c.color);
+      drawRect(pos.add(vec2(0, h*.18)), vec2(.06, h*.32), c.color);
       // side trim
-      drawRect(c.pos.add(vec2(0, -h*.18)), vec2(w*.88, .05), hsl(0,0,.1));
+      drawRect(pos.add(vec2(0, -h*.18)), vec2(w*.88, .05), hsl(0,0,.1));
     }
     else {
       // sedan
-      drawRect(c.pos, vec2(w, h*.85), c.color);
-      drawRect(c.pos.add(vec2(0, h*.18)), vec2(w*.65, h*.3), hsl(200/360,.5,.85,.9));
-      drawRect(c.pos.add(vec2(-dir*.05, h*.18)), vec2(.05, h*.3), c.color);
+      drawRect(pos, vec2(w, h*.85), c.color);
+      drawRect(pos.add(vec2(0, h*.18)), vec2(w*.65, h*.3), hsl(200/360,.5,.85,.9));
+      drawRect(pos.add(vec2(-dir*.05, h*.18)), vec2(.05, h*.3), c.color);
     }
 
-    // wheels (front + back)
+    // wheels (front + back) — bump along with the body
     const wy = y - h*.42;
     drawCircle(vec2(x - w*.32, wy), .30, hsl(0,0,.08));
     drawCircle(vec2(x + w*.32, wy), .30, hsl(0,0,.08));
@@ -445,14 +471,16 @@
   }
 
   function drawLog(l) {
+    const bumpY = logBumpY(l);
     const w = l.size.x, h = l.size.y;
-    const x = l.pos.x, y = l.pos.y;
+    const x = l.pos.x, y0 = l.pos.y;
+    const y = y0 + bumpY;
 
-    // soft water shadow under log
-    drawEllipse(vec2(x, y - .35), vec2(w*.95, .25), hsl(0,0,0,.30));
+    // soft water shadow stays at the water surface
+    drawEllipse(vec2(x, y0 - .35), vec2(w*.95, .25), hsl(0,0,0,.30));
 
-    // base log body
-    drawRect(l.pos, vec2(w, h), l.color);
+    // base log body (floats)
+    drawRect(vec2(x, y), vec2(w, h), l.color);
     // top highlight band
     drawRect(vec2(x, y + h*.22), vec2(w*.96, h*.18), hsl(28/360,.55,.46));
     // bottom shadow band
@@ -487,9 +515,14 @@
     drawCircle(vec2(x + kox, y + .05), .07, hsl(28/360,.5,.30));
   }
 
-  function drawFrog(basePos = frog.pos, facing = frog.facing, hopAnimT = frog.hopAnim) {
+  function drawFrog(basePos = frog.pos, facing = frog.facing, hopAnimT = frog.hopAnim, breathPhase = 0) {
     const hopArc = Math.sin(hopAnimT * Math.PI);  // 0..1..0
     const p = basePos.add(vec2(0, hopArc * .25));
+
+    // Breathing — body scales ±5% around its normal size on a slow cycle.
+    // Eye sizes stay constant; their positions move outward as the body grows.
+    const breath = Math.sin(time * 1.8 + breathPhase) * .05;
+    const bs = 1 + breath;
 
     const f = facing;
     const perp = vec2(-f.y, f.x);
@@ -502,31 +535,32 @@
     drawEllipse(basePos.add(vec2(0,-.42)), vec2(1.10, .34),
       hsl(0,0,0, .42 - hopArc*.12));
 
-    // back legs (sticking out behind, splayed)
-    const back = vec2(-f.x*.30, -f.y*.30);
-    const legL = p.add(back).add(perp.scale( .22));
-    const legR = p.add(back).add(perp.scale(-.22));
+    // back legs (sticking out behind, splayed) — scale with breath
+    const back = vec2(-f.x*.30*bs, -f.y*.30*bs);
+    const legL = p.add(back).add(perp.scale( .22*bs));
+    const legR = p.add(back).add(perp.scale(-.22*bs));
     drawCircle(legL, .26, greenDark);
     drawCircle(legR, .26, greenDark);
     drawCircle(legL, .18, green);
     drawCircle(legR, .18, green);
 
-    // body — slight stretch in direction of motion when hopping
+    // body — slight stretch in direction of motion when hopping, plus breath
     const stretch = 1 + hopArc * .15;
     const squish  = 1 - hopArc * .10;
     const horiz   = Math.abs(f.x) > 0;
-    const bw = (horiz ? stretch : squish) * .8;
-    const bh = (horiz ? squish  : stretch) * .8;
+    const bw = (horiz ? stretch : squish) * .8 * bs;
+    const bh = (horiz ? squish  : stretch) * .8 * bs;
     drawEllipse(p, vec2(bw, bh), green);
 
-    // two small symmetric back spots
-    drawCircle(p.add(perp.scale( .18)), .07, greenDark);
-    drawCircle(p.add(perp.scale(-.18)), .07, greenDark);
+    // two small symmetric back spots — scale outward with breath
+    drawCircle(p.add(perp.scale( .18*bs)), .07, greenDark);
+    drawCircle(p.add(perp.scale(-.18*bs)), .07, greenDark);
 
-    // eyes — big cartoony bumps on the front-top of the head (~2x)
-    const eyeFwd = p.add(vec2(f.x*.20, f.y*.20));
-    const eyeL2  = eyeFwd.add(perp.scale( .24));
-    const eyeR2  = eyeFwd.add(perp.scale(-.24));
+    // eyes — big cartoony bumps on the front-top of the head (~2x).
+    // Size stays constant; position adjusts outward as the body breathes.
+    const eyeFwd = p.add(vec2(f.x*.20*bs, f.y*.20*bs));
+    const eyeL2  = eyeFwd.add(perp.scale( .24*bs));
+    const eyeR2  = eyeFwd.add(perp.scale(-.24*bs));
     // green eye bumps
     drawCircle(eyeL2, .42, green);
     drawCircle(eyeR2, .42, green);
@@ -547,7 +581,12 @@
     for (const c of cars) drawCar(c);
 
     const visible = !flashTimer.active() || (Math.floor(time*16) % 2 === 0);
-    if (visible) drawFrog();
+    if (visible) {
+      // While riding a log, the frog tracks the log's vertical bounce
+      // so it stays glued to the surface rather than floating off it.
+      const logBump = frog.onLog ? logBumpY(frog.onLog) : 0;
+      drawFrog(frog.pos.add(vec2(0, logBump)), frog.facing, frog.hopAnim);
+    }
   }
 
   function gameRenderPost() {
