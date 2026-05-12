@@ -28,7 +28,8 @@ const ROWS_VISIBLE = 16;        // camera framing + lose line
 const START_ROWS   = 7;
 
 const ADD_ROW_EVERY_SHOTS = 6;
-const ADD_ROW_EVERY_SECONDS = 12;             // auto-descend cadence (real time)
+const DESCEND_SECONDS_PER_ROW = 14;            // continuous descent rate
+const DESCEND_SPEED = ROW_STEP_Y / DESCEND_SECONDS_PER_ROW;
 const MIN_SHOT_ANGLE = 10 * PI/180;            // radians from +X
 const MAX_SHOT_ANGLE = 170 * PI/180;
 
@@ -63,11 +64,10 @@ let aimAngle;
 let projectile; // {pos, vel, colorIndex}
 let currentColorIndex, nextColorIndex;
 let score, shots, gameOver, gameWin;
-let descendTimer;     // Timer that fires the auto-descend
+let descendOffset;    // continuous descent offset (rolls over into addRow at ROW_STEP_Y)
+let incomingRow;      // next row that's queued to become row 0 at the next rollover
+let gridParity;       // toggles every addRow so existing bubbles keep their hex xOff after a row shift
 let isPlaying = false; // gameplay vs. title-screen state
-
-// Camera framing
-let fieldH;
 
 function resetGame()
 {
@@ -95,15 +95,19 @@ function resetGame()
     // setup shooter
     aimAngle = PI/2;
 
+    descendOffset = 0;
+    gridParity = 0;
+    genIncomingRow();
+
     // set initial queue
     currentColorIndex = pickShootColor();
     nextColorIndex    = pickShootColor();
+}
 
-    fieldH = (ROWS_VISIBLE-1)*ROW_STEP_Y + (TOP_Y - SHOOT_Y) + 2;
-
-    // start the auto-descend timer (game time, so it pauses with the engine)
-    if (!descendTimer) descendTimer = new Timer();
-    descendTimer.set(ADD_ROW_EVERY_SECONDS);
+function genIncomingRow()
+{
+    incomingRow = Array.from({length: COLS},
+        ()=> rand() < .12 ? null : randInt(COLORS.length));
 }
 
 function pickShootColor()
@@ -116,6 +120,12 @@ function pickShootColor()
         const v = grid[r][c];
         if (v !== null) present.add(v);
     }
+    if (incomingRow)
+        for (let c=0; c<COLS; ++c)
+        {
+            const v = incomingRow[c];
+            if (v !== null) present.add(v);
+        }
     if (!present.size)
         return randInt(COLORS.length);
 
@@ -125,19 +135,22 @@ function pickShootColor()
 
 function gridToWorld(r, c)
 {
-    const xOff = (r&1) ? BUBBLE_R : 0;
+    // xOff alternates by row for the hex packing. gridParity flips on every addRow,
+    // which inverts the alternation — so an existing bubble whose data shifted from
+    // row r-1 to row r keeps the same x. Only the new top row gets the "new" offset.
+    const xOff = ((r ^ gridParity) & 1) ? BUBBLE_R : 0;
     const x = FIELD_LEFT + BUBBLE_R + xOff + c*BUBBLE_DIAM;
-    const y = TOP_Y - r*ROW_STEP_Y;
+    const y = TOP_Y - r*ROW_STEP_Y - descendOffset;
     return vec2(x, y);
 }
 
 function worldToGrid(pos)
 {
-    // estimate row
-    let r = Math.round((TOP_Y - pos.y)/ROW_STEP_Y);
+    // estimate row (account for continuous descent offset)
+    let r = Math.round((TOP_Y - descendOffset - pos.y)/ROW_STEP_Y);
     r = clamp(r, 0, ROWS_MAX-1);
 
-    const xOff = (r&1) ? BUBBLE_R : 0;
+    const xOff = ((r ^ gridParity) & 1) ? BUBBLE_R : 0;
     let c = Math.round((pos.x - (FIELD_LEFT + BUBBLE_R + xOff))/BUBBLE_DIAM);
     c = clamp(c, 0, COLS-1);
 
@@ -151,8 +164,8 @@ function inBounds(r,c)
 
 function neighbors(r,c)
 {
-    // 6-neighbors on offset hex grid
-    const odd = r&1;
+    // 6-neighbors on offset hex grid — parity-adjusted so the relation flips with gridParity
+    const odd = (r ^ gridParity) & 1;
     const list = [
         [r, c-1],
         [r, c+1],
@@ -309,20 +322,33 @@ function addRow()
         for (let c=0; c<COLS; ++c)
             grid[r][c] = grid[r-1][c];
 
-    // new top row (use colors present + allow full palette)
+    // promote the previewed incoming row to the top, then queue a new one
     for (let c=0; c<COLS; ++c)
-        grid[0][c] = rand() < .12 ? null : randInt(COLORS.length);
+        grid[0][c] = incomingRow[c];
+    genIncomingRow();
 
-    // reset the auto-descend cadence whenever a row is added (from any path)
-    descendTimer.set(ADD_ROW_EVERY_SECONDS);
+    // flip parity so every existing bubble keeps the xOff it already had — only the
+    // brand-new top row gets the alternate offset (which is the correct hex continuation).
+    gridParity ^= 1;
 
     sTick && sTick.play();
 
-    // lose check (too low)
-    const loseRow = ROWS_VISIBLE-1;
+    // lose check — any bubble at or past the lose line
+    if (anyBubblePastLoseLine())
+        triggerLose();
+}
+
+function anyBubblePastLoseLine()
+{
+    const loseY = TOP_Y - (ROWS_VISIBLE-1)*ROW_STEP_Y;
+    for (let r=0; r<ROWS_MAX; ++r)
     for (let c=0; c<COLS; ++c)
-        if (grid[loseRow]?.[c] !== null)
-            return triggerLose();
+    {
+        if (grid[r][c] === null) continue;
+        if (TOP_Y - r*ROW_STEP_Y - descendOffset <= loseY)
+            return true;
+    }
+    return false;
 }
 
 function triggerLose()
@@ -378,8 +404,8 @@ function integrateProjectile()
         projectile.vel.x = -Math.abs(projectile.vel.x);
     }
 
-    // hit top
-    if (projectile.pos.y > TOP_Y)
+    // hit top — cap at the current visual row-0 level (descends with the grid)
+    if (projectile.pos.y > TOP_Y - descendOffset)
     {
         placeProjectile(projectile.pos);
         return;
@@ -416,8 +442,8 @@ function placeProjectile(worldPos)
     grid[r][c] = projectile.colorIndex;
     projectile = null;
 
-    // if bubble placed too low, lose
-    if (r >= ROWS_VISIBLE-1)
+    // if any bubble has crossed the lose line, lose
+    if (anyBubblePastLoseLine())
         return triggerLose();
 
     resolveAfterPlacement(r,c);
@@ -517,8 +543,8 @@ function gameInit()
             {type:'text', text:'Aim with the mouse and click to shoot.\n\n' +
                 'Match 3 or more bubbles of the same color to pop them. ' +
                 'Disconnected clusters fall away for bonus points.\n\n' +
-                'A new row of bubbles drops in every ' + ADD_ROW_EVERY_SECONDS +
-                ' seconds, or every ' + ADD_ROW_EVERY_SHOTS + ' shots. ' +
+                'The bubble grid slowly descends over time, and a forced row drops every ' +
+                ADD_ROW_EVERY_SHOTS + ' shots. ' +
                 'Don\'t let bubbles cross the danger line!'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
@@ -600,9 +626,13 @@ function gameUpdate()
 
     if (!gameOver)
     {
-        // auto-descend on timer
-        if (descendTimer.elapsed())
+        // continuous descent — when offset reaches a full row, snap the grid down
+        descendOffset += DESCEND_SPEED * timeDelta;
+        if (descendOffset >= ROW_STEP_Y)
+        {
+            descendOffset -= ROW_STEP_Y;
             addRow();
+        }
 
         // mouse aim (updates every frame)
         const shooterPos = vec2(0, SHOOT_Y);
@@ -630,12 +660,13 @@ function gameUpdatePost()
     // called after physics and objects are updated
     // setup camera and prepare for render
 
-    // frame the whole field nicely
-    const pad = 2.5;
-    const worldW = FIELD_W + pad;
-    const worldH = (TOP_Y - SHOOT_Y) + pad + ROW_STEP_Y*(ROWS_VISIBLE-1);
+    // frame the whole field — top of the play area down past the shooter + preview
+    const visibleTop = TOP_Y + .5;
+    const visibleBot = SHOOT_Y - 1.4;
+    const worldW = FIELD_W + 1.5;
+    const worldH = visibleTop - visibleBot;
     cameraScale = min(mainCanvasSize.x/worldW, mainCanvasSize.y/worldH);
-    cameraPos = vec2(0, (TOP_Y + SHOOT_Y)/2 + 1.2);
+    cameraPos = vec2(0, (visibleTop + visibleBot)/2);
     cameraAngle = 0;
 }
 
@@ -644,37 +675,23 @@ function gameRender()
 {
     // called before objects are rendered
 
-    // background panel
-    const panelPos = vec2(0, (TOP_Y + SHOOT_Y)/2 + 1.2);
-    const panelSize = vec2(FIELD_W + 1.2, (TOP_Y - SHOOT_Y) + ROW_STEP_Y*(ROWS_VISIBLE-1) + 1.2);
+    // background panel — capped at TOP_Y; anything above is covered by the ceiling mask later
+    const panelTop = TOP_Y;
+    const panelBot = SHOOT_Y - .3;
+    const panelPos = vec2(0, (panelTop + panelBot)/2);
+    const panelSize = vec2(FIELD_W + 1.2, panelTop - panelBot);
     drawRect(panelPos, panelSize, hsl(0,0,.08));
 
     // walls
-    const wallTop = TOP_Y + 1;
+    const wallTop = TOP_Y;
     const wallBot = SHOOT_Y - 1;
     drawLine(vec2(FIELD_LEFT, wallBot), vec2(FIELD_LEFT, wallTop), .08, hsl(0,0,.18));
     drawLine(vec2(FIELD_RIGHT, wallBot), vec2(FIELD_RIGHT, wallTop), .08, hsl(0,0,.18));
-    drawLine(vec2(FIELD_LEFT, TOP_Y), vec2(FIELD_RIGHT, TOP_Y), .08, hsl(0,0,.18));
+    drawLine(vec2(FIELD_LEFT, wallTop), vec2(FIELD_RIGHT, wallTop), .08, hsl(0,0,.18));
 
     // lose line indicator
     const loseY = TOP_Y - (ROWS_VISIBLE-1)*ROW_STEP_Y;
     drawLine(vec2(FIELD_LEFT, loseY), vec2(FIELD_RIGHT, loseY), .06, hsl(0,1,.45,.4));
-
-    // descend timer progress bar (sits just above the top wall)
-    if (isPlaying && !gameOver && descendTimer && descendTimer.isSet())
-    {
-        const pct = clamp(descendTimer.getPercent(), 0, 1);
-        const barY = TOP_Y + 0.6;
-        const barW = FIELD_W;
-        const barH = .25;
-        // background
-        drawRect(vec2(0, barY), vec2(barW, barH), hsl(0,0,.15));
-        // fill — color shifts from green to red as time runs out
-        const fillW = barW * pct;
-        const fillX = -barW/2 + fillW/2;
-        const hue = (1 - pct) * 0.33;  // 0.33 (green) -> 0 (red)
-        drawRect(vec2(fillX, barY), vec2(fillW, barH), hsl(hue, 1, .5));
-    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -691,6 +708,10 @@ function gameRenderPost()
         // tiny highlight
         drawCircle(p.add(vec2(-.12,.12)), .22, hsl(0,0,1,.18));
     }
+
+    // ceiling mask — hides anything that pokes above TOP_Y, so the row that pops in
+    // after a rollover emerges gradually from behind the ceiling instead of appearing all at once
+    drawRect(vec2(0, TOP_Y + 5), vec2(60, 10), hsl(0,0,0));
 
     // projectile
     if (projectile)
