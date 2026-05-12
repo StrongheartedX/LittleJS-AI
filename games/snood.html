@@ -27,7 +27,6 @@ const ROWS_MAX     = 20;        // total grid storage
 const ROWS_VISIBLE = 16;        // camera framing + lose line
 const START_ROWS   = 7;
 
-const ADD_ROW_EVERY_SHOTS = 6;
 const DESCEND_SECONDS_PER_ROW = 14;            // continuous descent rate
 const DESCEND_SPEED = ROW_STEP_Y / DESCEND_SECONDS_PER_ROW;
 const MIN_SHOT_ANGLE = 10 * PI/180;            // radians from +X
@@ -379,8 +378,9 @@ function shoot()
     nextColorIndex = pickShootColor();
 
     shots++;
-    if (shots % ADD_ROW_EVERY_SHOTS === 0)
-        addRow();
+
+    // Shot-based addRow removed — it shifted the grid down by ROW_STEP_Y instantly,
+    // which read as the entire playfield popping down. Continuous descent handles row addition.
 
     sShoot.play();
 }
@@ -404,8 +404,9 @@ function integrateProjectile()
         projectile.vel.x = -Math.abs(projectile.vel.x);
     }
 
-    // hit top — cap at the current visual row-0 level (descends with the grid)
-    if (projectile.pos.y > TOP_Y - descendOffset)
+    // hit top — cap at row 0's visual level, but never above the mask edge so the
+    // projectile doesn't sail into the hidden ceiling area before placement
+    if (projectile.pos.y > TOP_Y - max(.5, descendOffset))
     {
         placeProjectile(projectile.pos);
         return;
@@ -543,8 +544,7 @@ function gameInit()
             {type:'text', text:'Aim with the mouse and click to shoot.\n\n' +
                 'Match 3 or more bubbles of the same color to pop them. ' +
                 'Disconnected clusters fall away for bonus points.\n\n' +
-                'The bubble grid slowly descends over time, and a forced row drops every ' +
-                ADD_ROW_EVERY_SHOTS + ' shots. ' +
+                'The bubble grid slowly descends over time. ' +
                 'Don\'t let bubbles cross the danger line!'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
@@ -660,10 +660,10 @@ function gameUpdatePost()
     // called after physics and objects are updated
     // setup camera and prepare for render
 
-    // frame the whole field — top of the play area down past the shooter + preview
-    const visibleTop = TOP_Y + .5;
-    const visibleBot = SHOOT_Y - 1.4;
-    const worldW = FIELD_W + 1.5;
+    // frame the whole field — tight around the play area, shooter, and preview
+    const visibleTop = TOP_Y + .15;
+    const visibleBot = SHOOT_Y - 1.1;
+    const worldW = FIELD_W + 1.2;
     const worldH = visibleTop - visibleBot;
     cameraScale = min(mainCanvasSize.x/worldW, mainCanvasSize.y/worldH);
     cameraPos = vec2(0, (visibleTop + visibleBot)/2);
@@ -675,23 +675,27 @@ function gameRender()
 {
     // called before objects are rendered
 
-    // background panel — capped at TOP_Y; anything above is covered by the ceiling mask later
+    // background panel — slight cool tint so the bubbles read brighter against it
     const panelTop = TOP_Y;
-    const panelBot = SHOOT_Y - .3;
+    const panelBot = SHOOT_Y - 1;
     const panelPos = vec2(0, (panelTop + panelBot)/2);
     const panelSize = vec2(FIELD_W + 1.2, panelTop - panelBot);
-    drawRect(panelPos, panelSize, hsl(0,0,.08));
+    drawRect(panelPos, panelSize, hsl(.6, .18, .14));
 
-    // walls
+    // walls — lighter and slightly tinted to read against the panel
     const wallTop = TOP_Y;
     const wallBot = SHOOT_Y - 1;
-    drawLine(vec2(FIELD_LEFT, wallBot), vec2(FIELD_LEFT, wallTop), .08, hsl(0,0,.18));
-    drawLine(vec2(FIELD_RIGHT, wallBot), vec2(FIELD_RIGHT, wallTop), .08, hsl(0,0,.18));
-    drawLine(vec2(FIELD_LEFT, wallTop), vec2(FIELD_RIGHT, wallTop), .08, hsl(0,0,.18));
+    drawLine(vec2(FIELD_LEFT, wallBot), vec2(FIELD_LEFT, wallTop), .1, hsl(.6, .25, .38));
+    drawLine(vec2(FIELD_RIGHT, wallBot), vec2(FIELD_RIGHT, wallTop), .1, hsl(.6, .25, .38));
+    drawLine(vec2(FIELD_LEFT, wallTop), vec2(FIELD_RIGHT, wallTop), .1, hsl(.6, .25, .38));
 
-    // lose line indicator
+    // ceiling highlight — thin accent line just under the mask edge
+    const accentY = TOP_Y - .55;
+    drawLine(vec2(FIELD_LEFT, accentY), vec2(FIELD_RIGHT, accentY), .03, hsl(.6, .4, .55, .5));
+
+    // lose line indicator — warning red
     const loseY = TOP_Y - (ROWS_VISIBLE-1)*ROW_STEP_Y;
-    drawLine(vec2(FIELD_LEFT, loseY), vec2(FIELD_RIGHT, loseY), .06, hsl(0,1,.45,.4));
+    drawLine(vec2(FIELD_LEFT, loseY), vec2(FIELD_RIGHT, loseY), .08, hsl(.02, .9, .55, .55));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -709,9 +713,10 @@ function gameRenderPost()
         drawCircle(p.add(vec2(-.12,.12)), .22, hsl(0,0,1,.18));
     }
 
-    // ceiling mask — hides anything that pokes above TOP_Y, so the row that pops in
-    // after a rollover emerges gradually from behind the ceiling instead of appearing all at once
-    drawRect(vec2(0, TOP_Y + 5), vec2(60, 10), hsl(0,0,0));
+    // ceiling mask — covers down past TOP_Y by a full BUBBLE_R so the new row is
+    // completely hidden at the moment of rollover; tucks the topmost visible row's
+    // very top under the ceiling as a stylistic touch instead of a pop-in
+    drawRect(vec2(0, TOP_Y + 5 - .5), vec2(60, 10), hsl(0,0,0));
 
     // projectile
     if (projectile)
@@ -727,21 +732,23 @@ function gameRenderPost()
     drawLine(shooterPos, aimEnd, .08, hsl(0,0,1,.25));
     drawCircle(shooterPos, BUBBLE_DIAM, COLORS[currentColorIndex], .06, OUTLINE);
 
-    // next bubble preview
-    const nextPos = shooterPos.add(vec2(2.1, -0.2));
-    drawCircle(nextPos, .7, COLORS[nextColorIndex], .05, OUTLINE);
+    // next bubble preview + NEXT label
+    const nextPos = shooterPos.add(vec2(2.8, -0.2));
+    drawText('NEXT', nextPos.add(vec2(-1.05, 0)), .5, hsl(0,0,1), .08, hsl(0,0,0));
+    drawCircle(nextPos, .65, COLORS[nextColorIndex], .05, OUTLINE);
+    drawCircle(nextPos.add(vec2(-.08, .08)), .2, hsl(0,0,1,.18));
 
-    // UI (screen space) — only while actually playing
+    // score / shots — world space, right-aligned just left of the shooter to mirror NEXT
     if (isPlaying)
     {
-        drawTextScreen(
-            `Score ${score}   Shots ${shots}
-Aim: Mouse   Shoot: Click   Pause: Esc`,
-            vec2(mainCanvasSize.x/2, 34),
-            28,
+        drawText(
+            `SCORE ${score}    SHOTS ${shots}`,
+            vec2(-1.0, SHOOT_Y - .2),
+            .5,
             hsl(0,0,1),
-            4,
-            hsl(0,0,0)
+            .08,
+            hsl(0,0,0),
+            'right'
         );
     }
     else if (!isMenuVisible())
