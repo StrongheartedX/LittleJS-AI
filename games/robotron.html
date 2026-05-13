@@ -47,8 +47,8 @@ const scoreQuark    = 1000;
 const scoreEnemyBullet = 25;       // shooting down sparks / cruise missiles / shells
 const scoreElectrodeKill = 25;     // grunt walked into electrode
 
-// lives and bonus
-const startingLives = 5;
+// lives and bonus (arcade default)
+const startingLives = 3;
 const bonusLifeInterval = 25000;
 
 // game state
@@ -1369,8 +1369,14 @@ class Player extends EngineObject
         this.pos = this.pos.add(move.scale(.22));
         this.pos = clampToArena(this.pos, .5);
 
+        // Snap aim to nearest 8-way (matches Robotron's twin-joystick fire — 8 fixed directions)
         const aim = getMouseWorld().subtract(this.pos);
-        if (aim.lengthSquared() > .0001) this.facing = aim.normalize(1);
+        if (aim.lengthSquared() > .0001)
+        {
+            const a = aim.angle();                          // LittleJS angle: atan2(x, y), 0 = up
+            const snapped = Math.round(a / (PI/4)) * (PI/4);
+            this.facing = vec2(Math.sin(snapped), Math.cos(snapped));
+        }
 
         if (this.cooldown > 0) this.cooldown--;
         if (mouseIsDown(0) && this.cooldown <= 0)
@@ -1686,15 +1692,6 @@ function gameRender()
     drawRect(vec2(0), arenaSize.add(vec2(.35)), rgb(.35, .9, 1));
     drawRect(vec2(0), arenaSize.add(vec2(.08)), rgb(.05, .25, .35));
     drawRect(vec2(0), arenaSize, rgb(.02,.02,.04));
-
-    // corner brackets for arcade clarity
-    const cl = 1.4, ct = .25;
-    const cx = arenaHalf.x, cy = arenaHalf.y;
-    const corner = rgb(.6, 1, 1);
-    drawRect(vec2( cx - cl/2,  cy), vec2(cl, ct), corner); drawRect(vec2( cx,  cy - cl/2), vec2(ct, cl), corner);
-    drawRect(vec2(-cx + cl/2,  cy), vec2(cl, ct), corner); drawRect(vec2(-cx,  cy - cl/2), vec2(ct, cl), corner);
-    drawRect(vec2( cx - cl/2, -cy), vec2(cl, ct), corner); drawRect(vec2( cx, -cy + cl/2), vec2(ct, cl), corner);
-    drawRect(vec2(-cx + cl/2, -cy), vec2(cl, ct), corner); drawRect(vec2(-cx, -cy + cl/2), vec2(ct, cl), corner);
 
     for (const p of particles) p.render();
     drawRect(vec2(0), vec2(safeZoneRadius*2), rgb(0,0,0,.08));
