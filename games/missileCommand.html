@@ -1128,11 +1128,6 @@ function gameRenderPost()
   if (gameOver)
   {
     drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2-20), 80, hsl(.06,1,.65), 10, hsl(0,0,0,.75));
-    drawTextScreen('Click or press R to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2+55), 28, hsl(.12,.05,.95), 5, hsl(0,0,0,.7));
-  }
-  else
-  {
-    drawTextScreen('Click to fire · R to restart', vec2(mainCanvasSize.x - pad, pad+14), 18, hsl(.12,.05,.9), 3, hsl(0,0,0,.6), 'right');
   }
 }
 
