@@ -11,6 +11,11 @@
 debugWatermark = false;
 showEngineVersion = false;
 
+// on-screen touch gamepad (analog left stick + fire button) for mobile
+touchGamepadEnable = true;
+touchGamepadAnalog = true;
+touchGamepadAlpha = .35;
+
 ///////////////////////////////////////////////////////////////////////////////
 // Robotron 2084-style twin stick
 // Save the last family! WASD move, mouse aim + hold to fire.
@@ -23,7 +28,8 @@ const arenaPadding = 0;  // visual wall == playable edge (no dead band)
 // respawn / safety
 const safeZoneRadius = 5;
 const respawnInvulnFrames = 120;
-const respawnPauseFrames = 60;     // mid-wave death pause (enemies persist)
+const respawnPauseFrames = 120;    // mid-wave death pause — 1 sec gone, 1 sec materializing
+const respawnHiddenFrames = 60;    // first half: player invisible
 const interWaveDelayFrames = 120;
 const waveStartDelayFrames = 60;
 
@@ -69,6 +75,7 @@ let waveActive = false;
 let waveTime = 0;
 let interWaveTimer = 0;
 let respawnTimer = 0;
+let lastAimSource = 'mouse';   // mouse / gamepad / stick — used to hide crosshair on gamepad
 let humanRescueBonus = humanRescueStart;
 let nextBonusLifeAt = bonusLifeInterval;
 let playerControlLocked = true;
@@ -85,6 +92,7 @@ const sfxSpark     = new SoundGenerator({volume:.30, frequency:880, randomness:.
 const sfxMissile   = new SoundGenerator({volume:.35, frequency:330, randomness:.15, attack:0, release:.15, shapeCurve:.7, slide:.2, noise:.15});
 const sfxReprogram = new SoundGenerator({volume:.55, frequency:200, randomness:.25, attack:0, release:.40, shapeCurve:.5, slide:-.8, noise:.5, pitchJump:-180, pitchJumpTime:.1});
 const sfxSpawn     = new SoundGenerator({volume:.45, frequency:140, randomness:.10, attack:0, release:.20, shapeCurve:.6, pitchJump:300, pitchJumpTime:.08});
+const sfxWaveStart = new SoundGenerator({volume:.35, frequency:520, randomness:.08, attack:0, release:.18, shapeCurve:.9, noise:.06});
 
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
@@ -185,6 +193,19 @@ function burst(pos, count, baseColor)
         const size = rand(.06, .18);
         const c = baseColor.mutate?.(.2) || baseColor;
         particles.push(new SimpleParticle(pos, v, life, size, c));
+    }
+}
+
+// Tight expanding ring — used for materialization at wave start
+function ringBurst(pos, color, count = 14)
+{
+    for (let i=0;i<count;i++)
+    {
+        const ang = (i / count) * Math.PI * 2 + rand(-.05, .05);
+        const speed = rand(.18, .28);
+        const vel = vec2(Math.cos(ang), Math.sin(ang)).scale(speed);
+        const life = randInt(16, 26);
+        particles.push(new SimpleParticle(pos, vel, life, rand(.1, .18), color));
     }
 }
 
@@ -1183,7 +1204,7 @@ function getWaveComposition(w)
         spheroids: w >= 2 ? 1 + Math.floor((w-2)/5) : 0,
         quarks:    w >= 28 ? 1 + Math.floor((w-28)/8) : 0,
         tanks:     0,
-        electrodes: min(electrodeMaxCount, 6 + Math.floor(w/2)),
+        electrodes: min(electrodeMaxCount, 9 + Math.floor(w/2)),
         humans:    3,
     };
 }
@@ -1279,6 +1300,14 @@ function startWave(w)
     for (let i=0;i<c.spheroids;i++) spawnSpheroid();
     for (let i=0;i<c.quarks;i++)    spawnQuark();
     for (let i=0;i<(c.tanks||0);i++) spawnTank();
+
+    // wave-start fanfare: tight expanding rings at each spawn + short blip
+    sfxWaveStart.play(vec2(0));
+    for (const e of enemies)
+    {
+        if (e.destroyed) continue;
+        ringBurst(e.pos, e.hitColor || rgb(.9,.9,1), 14);
+    }
 }
 
 function enterGetReadyForWave(nextWave)
@@ -1308,35 +1337,54 @@ function endWave()
 ///////////////////////////////////////////////////////////////////////////////
 // player + mid-wave respawn
 
-function pushEnemiesFromCenter()
+function respawnMidWave()
 {
+    // Count surviving enemies by type so we can respawn the same count at fresh positions.
+    let nG=0, nH=0, nB=0, nS=0, nQ=0, nT=0;
+    const survivingProgs = [];
     for (const e of enemies)
     {
         if (e.destroyed) continue;
-        const d = e.pos.length();
-        if (d < safeZoneRadius)
-        {
-            const dir = d > .01 ? e.pos.scale(1/d) : vec2(1, 0);
-            e.pos = dir.scale(safeZoneRadius + 1);
-            e.pos = clampToArena(e.pos, e.size.x * .5);
-        }
+        if      (e instanceof Grunt)    nG++;
+        else if (e instanceof Hulk)     nH++;
+        else if (e instanceof Brain)    nB++;
+        else if (e instanceof Spheroid) nS++;
+        else if (e instanceof Quark)    nQ++;
+        else if (e instanceof Tank)     nT++;
+        else if (e instanceof Prog)     survivingProgs.push(e.humanType);
     }
-}
-
-function respawnMidWave()
-{
+    clearAllEnemies();
     clearAllBullets();
-    pushEnemiesFromCenter();
+    for (let i=0;i<nG;i++) spawnGrunt();
+    for (let i=0;i<nH;i++) spawnHulk();
+    for (let i=0;i<nB;i++) spawnBrain();
+    for (let i=0;i<nS;i++) spawnSpheroid();
+    for (let i=0;i<nQ;i++) spawnQuark();
+    for (let i=0;i<nT;i++) spawnTank();
+    for (const t of survivingProgs)
+        enemies.push(new Prog(randEdgeSpawn(), t));
+
+    // Grunt speed ramp restarts (matches arcade — speed climb resets on each death)
+    waveTime = 0;
+    // Rescue bonus resets to 1000 on death (per FAQ)
+    humanRescueBonus = humanRescueStart;
+
     if (player)
     {
         player.pos = vec2(0);
         player.facing = vec2(0,1);
         player.cooldown = 10;
         player.invuln = respawnInvulnFrames;
-        burst(player.pos, 28, rgb(.3,.9,1));
+        // dramatic death burst (much bigger than a kill poof)
+        burst(player.pos, 90, rgb(.3,.9,1));
+        ringBurst(player.pos, rgb(.4,1,1), 18);
     }
     respawnTimer = respawnPauseFrames;
     playerControlLocked = true;
+
+    // ring poofs on the fresh enemy spawns so respawn feels like a wave-start mini-event
+    for (const e of enemies)
+        ringBurst(e.pos, e.hitColor || rgb(.9,.9,1), 10);
 }
 
 class Player extends EngineObject
@@ -1357,29 +1405,45 @@ class Player extends EngineObject
         {
             this.pos = vec2(0);
             if (this.cooldown > 0) this.cooldown--;
-            if (this.invuln > 0) this.invuln--;
+            // Freeze invuln during the mid-wave respawn pause so the player still has
+            // a real invulnerability window when they regain control.
+            if (this.invuln > 0 && respawnTimer === 0) this.invuln--;
             return;
         }
+        // MOVEMENT: keyboard WASD + gamepad/touch left stick
         let move = vec2(0);
         if (keyIsDown('KeyW')) move.y += 1;
         if (keyIsDown('KeyS')) move.y -= 1;
         if (keyIsDown('KeyD')) move.x += 1;
         if (keyIsDown('KeyA')) move.x -= 1;
+        const leftStick = (typeof gamepadStick === 'function') ? gamepadStick(0) : vec2(0);
+        if (leftStick.lengthSquared() > .04) move = move.add(leftStick);
         if (move.lengthSquared() > 0) move = move.normalize(1);
-        this.pos = this.pos.add(move.scale(.22));
+        this.pos = this.pos.add(move.scale(.17));
         this.pos = clampToArena(this.pos, .5);
 
-        // Snap aim to nearest 8-way (matches Robotron's twin-joystick fire — 8 fixed directions)
-        const aim = getMouseWorld().subtract(this.pos);
-        if (aim.lengthSquared() > .0001)
+        // AIM: right stick (twin-stick) > left stick + fire button (touch / single-stick) > mouse
+        const rightStick = (typeof gamepadStick === 'function') ? gamepadStick(1) : vec2(0);
+        const rightStickActive = rightStick.lengthSquared() > .04;
+        const fireButtonHeld = (typeof gamepadIsDown === 'function') && gamepadIsDown(0);
+        const leftStickActive = leftStick.lengthSquared() > .04;
+
+        let aimDir = null;
+        if (rightStickActive)               { aimDir = rightStick; lastAimSource = 'stick'; }
+        else if (fireButtonHeld && leftStickActive) { aimDir = leftStick; lastAimSource = 'stick'; }
+        else                                { aimDir = getMouseWorld().subtract(this.pos); lastAimSource = 'mouse'; }
+
+        if (aimDir.lengthSquared() > .0001)
         {
-            const a = aim.angle();                          // LittleJS angle: atan2(x, y), 0 = up
+            const a = aimDir.angle();
             const snapped = Math.round(a / (PI/4)) * (PI/4);
             this.facing = vec2(Math.sin(snapped), Math.cos(snapped));
         }
 
+        // FIRE: mouse left button, right stick pushed (twin-stick auto-fire), or gamepad A button
+        const shootInput = mouseIsDown(0) || rightStickActive || fireButtonHeld;
         if (this.cooldown > 0) this.cooldown--;
-        if (mouseIsDown(0) && this.cooldown <= 0)
+        if (shootInput && this.cooldown <= 0)
         {
             const muzzle = this.pos.add(this.facing.scale(.75));
             bullets.push(new Bullet(muzzle, this.facing.scale(.85)));
@@ -1405,6 +1469,9 @@ class Player extends EngineObject
     }
     render()
     {
+        // hide player during the first half of the mid-wave death pause (breathing room)
+        if (respawnTimer > respawnHiddenFrames) return;
+
         const angle = this.facing.angle();
         const body = (this.invuln > 0 && Math.floor(this.invuln/4) & 1) ? rgb(1,1,1) : rgb(.2,.95,.9);
         drawRect(this.pos, vec2(1.05, 1.05), rgb(0,0,0,.25));
@@ -1701,10 +1768,13 @@ function gameRenderPost()
 {
     for (const f of floaters) f.render();
 
-    // crosshair
-    const cross = getMouseWorld();
-    drawRect(cross, vec2(.22,.04), rgb(1,1,1));
-    drawRect(cross, vec2(.04,.22), rgb(1,1,1));
+    // crosshair (only when using mouse — hidden for gamepad/touch)
+    if (lastAimSource === 'mouse')
+    {
+        const cross = getMouseWorld();
+        drawRect(cross, vec2(.22,.04), rgb(1,1,1));
+        drawRect(cross, vec2(.04,.22), rgb(1,1,1));
+    }
 
     const W = mainCanvasSize.x, H = mainCanvasSize.y;
 
@@ -1714,7 +1784,6 @@ function gameRenderPost()
 
     // TOP-RIGHT — wave
     drawTextScreen(`WAVE  ${gameWave}`, vec2(W - 16, 26), 24, rgb(1,.8,.3), 4, hsl(0,0,0), 'right');
-    drawTextScreen(`WASD + Mouse`,      vec2(W - 16, 54), 16, rgb(.7,.7,.7), 3, hsl(0,0,0), 'right');
 
     // BOTTOM-LEFT — lives + next extra-life threshold
     if (player)
