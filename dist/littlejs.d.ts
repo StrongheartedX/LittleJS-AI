@@ -1697,6 +1697,11 @@ declare module "littlejsengine" {
      *  @type {number}
      *  @memberof Draw */
     export let drawCount: number;
+    /** Keeps track of how many primitives were drawn each frame for debugging
+     *  A single draw call can render many primitives (e.g. a WebGL sprite batch).
+     *  @type {number}
+     *  @memberof Draw */
+    export let primitiveCount: number;
     /** Convert from screen to world space coordinates
      *  @param {Vector2} screenPos
      *  @return {Vector2}
@@ -1845,16 +1850,7 @@ declare module "littlejsengine" {
      *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
      *  @memberof Draw */
     export function drawCircle(pos: Vector2, size?: number, color?: Color, lineWidth?: number, lineColor?: Color, useWebGL?: boolean, screenSpace?: boolean, context?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void;
-    /** Draw a circle filled with a radial gradient from the center to the rim
-     *  @param {Vector2} pos
-     *  @param {number}  [size=1] - Diameter
-     *  @param {Color}   [colorInner=WHITE]
-     *  @param {Color}   [colorOuter=CLEAR_WHITE]
-     *  @param {boolean} [useWebGL=glEnable]
-     *  @param {boolean} [screenSpace]
-     *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
-     *  @memberof Draw */
-    export function drawCircleGradient(pos: Vector2, size?: number, colorInner?: Color, colorOuter?: Color, useWebGL?: boolean, screenSpace?: boolean, context?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void;
+    export function drawCircleGradient(pos: any, size: number, colorInner: Color, colorOuter: Color, useWebGL: boolean, screenSpace: boolean, context: any): void;
     /**
      * @callback Canvas2DDrawFunction - A function that draws to a 2D canvas context
      * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} context
@@ -2076,6 +2072,18 @@ declare module "littlejsengine" {
      *  @param {number} [rgbaAdditive=0] - black is 0
      *  @memberof WebGL */
     export function glDraw(x: number, y: number, sizeX: number, sizeY: number, angle?: number, uv0X?: number, uv0Y?: number, uv1X?: number, uv1Y?: number, rgba?: number, rgbaAdditive?: number): void;
+    /** Add an untextured rect to the gl draw list
+     *  Picks the optimal path: if already in poly mode, emits a tristrip rect
+     *  so it batches with surrounding polys; otherwise uses the instanced path
+     *  with uvs and rgba zeroed so the color falls through the additive slot.
+     *  @param {number} x
+     *  @param {number} y
+     *  @param {number} sizeX
+     *  @param {number} sizeY
+     *  @param {number} angle
+     *  @param {number} rgba - color as 32-bit integer
+     *  @memberof WebGL */
+    export function glDrawUntextured(x: number, y: number, sizeX: number, sizeY: number, angle: number, rgba: number): void;
     /** Transform and add a polygon to the gl draw list
      *  @param {Array<Vector2>} points - Array of Vector2 points
      *  @param {number} rgba - Color of the polygon as a 32-bit integer

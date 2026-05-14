@@ -35,7 +35,7 @@ const engineName = 'LittleJS';
  *  @type {string}
  *  @default
  *  @memberof Engine */
-const engineVersion = '1.18.11';
+const engineVersion = '1.18.11.1';
 
 /** Frames per second to update
  *  @type {number}
@@ -294,6 +294,7 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
             glFlush();
             debugRenderPost();
             drawCount = 0;
+            primitiveCount = 0;
         }
     }
 
@@ -3176,6 +3177,12 @@ let textureInfos = [];
  *  @memberof Draw */
 let drawCount;
 
+/** Keeps track of how many primitives were drawn each frame for debugging
+ *  A single draw call can render many primitives (e.g. a WebGL sprite batch).
+ *  @type {number}
+ *  @memberof Draw */
+let primitiveCount;
+
 // internal predicates for tint short-circuiting in canvas2D draw paths
 // isWhite ignores alpha because alpha is applied via globalAlpha, not multiply
 // isBlack includes alpha so additive colors that only contribute alpha are not skipped
@@ -3416,19 +3423,19 @@ function drawTile(pos, size=vec2(1), tileInfo, color=WHITE,
         }
         else
         {
-            // if no tile info, force untextured by zeroing rgba (so whatever
-            // texture is bound doesn't leak in) and folding color+additive
-            // into the additive slot — matches the Canvas2D path's
-            // color.add(additiveColor) on line ~337.
+            // untextured: glDrawUntextured picks the optimal path (poly
+            // tristrip if already in poly mode, otherwise instanced with
+            // uvs/rgba zeroed). Color+additive are folded together to match
+            // the Canvas2D path's color.add(additiveColor) on line ~337.
             const combined = additiveColor ? color.add(additiveColor) : color;
-            glDraw(pos.x, pos.y, size.x, size.y, angle, 0, 0, 0, 0,
-                0, combined.rgbaInt());
+            glDrawUntextured(pos.x, pos.y, size.x, size.y, angle, combined.rgbaInt());
         }
     }
     else
     {
         // normal canvas 2D rendering method (slower)
         ++drawCount;
+        ++primitiveCount;
         size = new Vector2(size.x, -size.y); // flip upside down sprites
         drawCanvas2D(pos, size, angle, mirror, (context)=>
         {
@@ -3514,6 +3521,7 @@ function drawRectGradient(pos, size, colorTop=WHITE, colorBottom=BLACK, angle=0,
     {
         // normal canvas 2D rendering method (slower)
         ++drawCount;
+        ++primitiveCount;
         size = new Vector2(size.x, -size.y); // fix upside down sprites
         drawCanvas2D(pos, size, angle, false, (context)=>
         {
@@ -3576,8 +3584,9 @@ function drawTextureWrapped(pos, size, wrapCount, texture=0, color=WHITE,
         return;
     }
 
-    // Canvas2D path — increment drawCount here (WebGL batch counts via glBatchCount)
+    // Canvas2D path — increment counts here (WebGL counts via glFlush)
     ++drawCount;
+    ++primitiveCount;
 
     if (!screenSpace)
     {
@@ -3651,6 +3660,7 @@ function drawLineList(points, width=.1, color, wrap=false, pos=vec2(), angle=0, 
     {
         // normal canvas 2D rendering method (slower)
         ++drawCount;
+        ++primitiveCount;
         drawCanvas2D(pos, vec2(1), angle, false, (context)=>
         {
             context.strokeStyle = color.toString();
@@ -3832,6 +3842,9 @@ function drawCircle(pos, size=1, color=WHITE, lineWidth=0, lineColor=BLACK, useW
 }
 
 /** Draw a circle filled with a radial gradient from the center to the rim
+ *  - Best when batched with other untextured polys
+ *  - If drawing mostly textured sprites, bake the gradient into a texture and use drawTile instead
+ *  - Stacking gradients at the exact same position may show a faint vertical artifact
  *  @param {Vector2} pos
  *  @param {number}  [size=1] - Diameter
  *  @param {Color}   [colorInner=WHITE]
@@ -3840,6 +3853,7 @@ function drawCircle(pos, size=1, color=WHITE, lineWidth=0, lineColor=BLACK, useW
  *  @param {boolean} [screenSpace]
  *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
  *  @memberof Draw */
+let drawCircleGradientOffset = 0;
 function drawCircleGradient(pos, size=1, colorInner=WHITE, colorOuter=CLEAR_WHITE, useWebGL=glEnable, screenSpace=false, context)
 {
     ASSERT(isVector2(pos), 'pos must be a vec2');
@@ -3858,15 +3872,21 @@ function drawCircleGradient(pos, size=1, colorInner=WHITE, colorOuter=CLEAR_WHIT
             pos = screenToWorld(pos);
             size /= cameraScale;
         }
-        // encode fan as tristrip: interleave center between every ring vertex
+        // fan as tristrip; rotate the boundary vertex by one slice per call
+        // so back-to-back gradients at the same position have their hole
+        // (from gpu edge-rule on the boundary line-degen) at different rim
+        // verts and don't visibly stack
         const sides = glCircleSides;
         const radius = size/2;
         const innerInt = colorInner.rgbaInt();
         const outerInt = colorOuter.rgbaInt();
-        const points = [], colors = [];
-        for (let i=sides+1; i--;)
+        const offset = drawCircleGradientOffset++;
+        const startA = (offset%sides)/sides*PI*2;
+        const points = [vec2(pos.x + sin(startA)*radius, pos.y + cos(startA)*radius)];
+        const colors = [outerInt];
+        for (let i=sides; i--;)
         {
-            const a = (i%sides)/sides*PI*2;
+            const a = ((i+offset)%sides)/sides*PI*2;
             points.push(pos);
             colors.push(innerInt);
             points.push(vec2(pos.x + sin(a)*radius, pos.y + cos(a)*radius));
@@ -3878,6 +3898,7 @@ function drawCircleGradient(pos, size=1, colorInner=WHITE, colorOuter=CLEAR_WHIT
     {
         // normal canvas 2D rendering method (slower)
         ++drawCount;
+        ++primitiveCount;
         drawCanvas2D(pos, vec2(size), 0, false, (context)=>
         {
             const gradient = context.createRadialGradient(0, 0, 0, 0, 0, .5);
@@ -7736,7 +7757,8 @@ function glFlush()
             glContext.drawArrays(glContext.TRIANGLE_STRIP, 0, glBatchCount);
         else
             glContext.drawArraysInstanced(glContext.TRIANGLE_STRIP, 0, 4, glBatchCount);
-        drawCount += glBatchCount;
+        ++drawCount;
+        primitiveCount += glBatchCount;
         glBatchCount = 0;
     }
     glBatchAdditive = glAdditive;
@@ -7794,6 +7816,67 @@ function glDraw(x, y, sizeX, sizeY, angle=0, uv0X=0, uv0Y=0, uv1X=1, uv1Y=1, rgb
     glPositionData[offset++] = uv1Y;
     glColorData[offset++] = rgba;
     glColorData[offset++] = rgbaAdditive;
+    glPositionData[offset++] = angle;
+}
+
+/** Add an untextured rect to the gl draw list
+ *  Picks the optimal path: if already in poly mode, emits a tristrip rect
+ *  so it batches with surrounding polys; otherwise uses the instanced path
+ *  with uvs and rgba zeroed so the color falls through the additive slot.
+ *  @param {number} x
+ *  @param {number} y
+ *  @param {number} sizeX
+ *  @param {number} sizeY
+ *  @param {number} angle
+ *  @param {number} rgba - color as 32-bit integer
+ *  @memberof WebGL */
+function glDrawUntextured(x, y, sizeX, sizeY, angle, rgba)
+{
+    if (glPolyMode)
+    {
+        // batch with surrounding polys as a 4-vertex tristrip rect
+        const vertCount = 6; // 4 corners + 2 degenerate verts
+        if (glBatchCount+vertCount >= gl_MAX_POLY_VERTEXES || glBatchAdditive !== glAdditive)
+            glFlush();
+
+        // compute rotated corners in world space (matches glDrawPointsTransform rotation)
+        const hx = sizeX*.5, hy = sizeY*.5;
+        const c = cos(angle), s = sin(angle);
+        const chx = c*hx, shx = s*hx, chy = c*hy, shy = s*hy;
+        const x0 = x - chx - shy, y0 = y + shx - chy; // (-hx,-hy)
+        const x1 = x + chx - shy, y1 = y - shx - chy; // ( hx,-hy)
+        const x2 = x - chx + shy, y2 = y + shx + chy; // (-hx, hy)
+        const x3 = x + chx + shy, y3 = y - shx + chy; // ( hx, hy)
+
+        // write tristrip with leading/trailing degenerate verts
+        let offset = glBatchCount * gl_INDICES_PER_POLY_VERTEX;
+        glPositionData[offset++] = x0; glPositionData[offset++] = y0; glColorData[offset++] = rgba;
+        glPositionData[offset++] = x0; glPositionData[offset++] = y0; glColorData[offset++] = rgba;
+        glPositionData[offset++] = x1; glPositionData[offset++] = y1; glColorData[offset++] = rgba;
+        glPositionData[offset++] = x2; glPositionData[offset++] = y2; glColorData[offset++] = rgba;
+        glPositionData[offset++] = x3; glPositionData[offset++] = y3; glColorData[offset++] = rgba;
+        glPositionData[offset++] = x3; glPositionData[offset++] = y3; glColorData[offset++] = rgba;
+        glBatchCount += vertCount;
+        return;
+    }
+
+    // instanced path: zero uvs and rgba so the texture contribution is killed,
+    // then carry the real color in the additive slot
+    if (glBatchCount >= gl_MAX_INSTANCES || glBatchAdditive !== glAdditive)
+        glFlush();
+    glSetInstancedMode();
+
+    let offset = glBatchCount++ * gl_INDICES_PER_INSTANCE;
+    glPositionData[offset++] = x;
+    glPositionData[offset++] = y;
+    glPositionData[offset++] = sizeX;
+    glPositionData[offset++] = sizeY;
+    glPositionData[offset++] = 0;
+    glPositionData[offset++] = 0;
+    glPositionData[offset++] = 0;
+    glPositionData[offset++] = 0;
+    glColorData[offset++] = 0;
+    glColorData[offset++] = rgba;
     glPositionData[offset++] = angle;
 }
 
