@@ -91,6 +91,10 @@ let distance = 0;            // floored player.pos.x in meters
 let deathTimer = 0;          // counts up after death; opens dialog at ~1s
 let coins = 0;
 
+// sound effects (assigned in gameInit)
+let sndThrust, sndCoin, sndShieldPickup, sndShieldBreak,
+    sndMissileWarn, sndMissileLaunch, sndHit;
+
 // shield
 const SHIELD_CHANCE_DEFAULT = 0.06;
 let shieldChance = SHIELD_CHANCE_DEFAULT;
@@ -140,6 +144,7 @@ function killPlayer()
     if (!alive) return;
     alive = false;
     deathTimer = 0;
+    sndHit && sndHit.play();
 }
 
 function returnToTitle()
@@ -620,6 +625,21 @@ class Player extends EngineObject
             keyIsDown('Space') || keyIsDown('ArrowUp') ||
             gamepadIsDown(0);
 
+        // thrust loop — retrigger every 0.12s while held
+        if (this.thrusting && alive)
+        {
+            if (!this._thrustTimer || this._thrustTimer <= 0)
+            {
+                sndThrust && sndThrust.play();
+                this._thrustTimer = 0.12;
+            }
+            this._thrustTimer -= 1/60;
+        }
+        else
+        {
+            this._thrustTimer = 0;
+        }
+
         // apply per-frame gravity + thrust
         this.velocity.y += gravityY;
         if (this.thrusting) this.velocity.y += thrustForce;
@@ -804,12 +824,14 @@ async function gameInit()
     // One callback drives `paused` for every menu, including dialogs.
     setMenuVisibilityCallback(v => paused = v);
 
-    // sounds — real definitions land in Task 10; placeholder so collect calls work.
-    window.sndCoin = new SoundGenerator({ frequency: 1200, attack: 0.005, release: 0.08, volume: 0.4, pitchJump: 600, pitchJumpTime: 0.05 });
-    window.sndMissileWarn   = new SoundGenerator({ frequency: 880, release: 0.1, volume: 0.3 });
-    window.sndMissileLaunch = new SoundGenerator({ frequency: 220, release: 0.4, volume: 0.5, slide: -3 });
-    window.sndShieldPickup = new SoundGenerator({ frequency: 1200, attack: 0.005, release: 0.2, volume: 0.4, pitchJump: 800, pitchJumpTime: 0.1 });
-    window.sndShieldBreak  = new SoundGenerator({ frequency: 200, attack: 0.005, release: 0.15, volume: 0.5, noise: 0.6 });
+    // sounds — full set defined here so every gameplay event has audio.
+    sndThrust        = new SoundGenerator({ frequency: 90,  release: 0.12, volume: 0.25, noise: 0.6 });
+    sndCoin          = new SoundGenerator({ frequency: 1200, attack: 0.005, release: 0.08, volume: 0.4, pitchJump: 600, pitchJumpTime: 0.05 });
+    sndShieldPickup  = new SoundGenerator({ frequency: 880,  attack: 0.005, release: 0.25, volume: 0.4, pitchJump: 600, pitchJumpTime: 0.1 });
+    sndShieldBreak   = new SoundGenerator({ frequency: 220,  attack: 0.005, release: 0.18, volume: 0.5, noise: 0.6 });
+    sndMissileWarn   = new SoundGenerator({ frequency: 1100, release: 0.06, volume: 0.3 });
+    sndMissileLaunch = new SoundGenerator({ frequency: 240,  release: 0.4,  volume: 0.5, slide: -3 });
+    sndHit           = new SoundGenerator({ frequency: 110,  release: 0.3,  volume: 0.7, noise: 0.7 });
 
     // ----- global UI sounds (LittleJS Sound class wraps zzfx params and
     //       routes through the engine's audio system, so master volume,
