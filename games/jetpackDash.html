@@ -1,0 +1,282 @@
+<!DOCTYPE html><head>
+<title>Jetpack Dash</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Override any CSS variable on #littlejs-menus to re-skin all menus
+   and toolbars. Uncomment to try a different look — the helper itself
+   never needs to change. */
+/*
+#littlejs-menus {
+    --menu-bg:           rgba(20, 0, 30, 0.92);
+    --menu-fg:           #fff;
+    --menu-accent:       #f0a;
+    --menu-font:         'Orbitron', sans-serif;
+    --menu-border-width: 4px;
+    --menu-radius:       18px;
+}
+*/
+</style>
+</head><body style="background:#000">
+<script src="../dist/littlejs.js"></script>
+<script src="../templates/menus.js"></script>
+<script src="../templates/soundGenerator.js"></script>
+<script src="../templates/textureGenerator.js"></script>
+<script src="../templates/tweakables.js"></script>
+<script>
+'use strict';
+
+// engine settings, do not remove
+debugWatermark = false;
+showEngineVersion = false;
+paused = false;
+
+// engine settings, customize if necessary
+gravity = vec2(0, 0);
+cameraPos = vec2(0, 0);
+cameraScale = 32;
+// Default LittleJS canvas cap is 1920x1080 — raise it so the canvas
+// fills modern high-res monitors instead of letterboxing.
+canvasMaxSize = vec2(2048, 2048);
+
+///////////////////////////////////////////////////////////////////////////////
+// MENU SYSTEM TEMPLATE
+// Demonstrates createMenu() and createToolbar() from menus.js.
+
+let playerPos = vec2(0, 0);
+const playerSize = vec2(2, 2);
+
+///////////////////////////////////////////////////////////////////////////////
+// Pause the engine whenever any menu (including alert/confirm dialogs) is
+// visible. setMenuVisibilityCallback fires for every show/hide, so we don't
+// have to wire onShow/onHide on each individual menu — and we can't miss
+// dialogs created internally by showAlertDialog / showConfirmDialog. Without
+// this, alert dialogs leave paused=false, letting gameUpdate run on the same
+// frame as a menu Esc and re-open pause on top of the surfaced menu.
+
+// HUD toolbar is only meaningful during gameplay. Tracked separately
+// because "in a menu" doesn't tell us whether the game has started yet
+// (title screen is also a menu, but the HUD shouldn't be available there).
+let isPlaying = false;
+function setPlaying(p)
+{
+    isPlaying = p;
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
+
+async function gameInit()
+{
+    // Initial bg shared with the color picker in OPTIONS, so opening the
+    // menu shows the swatch matching what's actually on screen.
+    canvasClearColor = new Color().setHex('#264d40');
+
+    // Match the engine's master volume to whatever the options slider starts at,
+    // so the very first menu sound plays at the user-visible volume.
+    setSoundVolume(.8);
+
+    // One callback drives `paused` for every menu, including dialogs.
+    setMenuVisibilityCallback(v => paused = v);
+
+    // ----- global UI sounds (LittleJS Sound class wraps zzfx params and
+    //       routes through the engine's audio system, so master volume,
+    //       muting, and user-gesture gating all just work). -----
+    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sound_select.play(),
+        activate: () => sound_activate.play(),
+    });
+
+    // ----- title menu -----
+    // dismissable: true lets the player Esc / B back to the canvas prompt;
+    // attachClickToReveal (set up at the end of gameInit) re-shows the
+    // menu on the next click / Space / Enter / A / Start.
+    // onStart wires gamepad Start to launch "play" directly without the
+    // player having to navigate to the PLAY item first.
+    const playFromTitle = () => { setPlaying(true); titleMenu.hide(); };
+    const titleMenu = createMenu({
+        id: 'title',
+        title: 'JETPACK DASH',
+        dismissable: true,
+        onStart: playFromTitle,
+        items: [
+            {type:'label',  text:'Hold to fly. Dodge. Collect.'},
+            {type:'button', label:'PLAY',    onClick: playFromTitle},
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+    });
+
+    // ----- options menu (shared between title and pause) -----
+    // Demonstrates separators grouping audio / display / back.
+    // The `persist:'key'` flag on slider / checkbox / color / input items
+    // auto-loads from localStorage on init and auto-saves on every change.
+    // onChange also fires once at init time with the resolved value, so
+    // the consumer's effect (e.g. setSoundVolume) applies the saved value
+    // before the first menu sound plays.
+    let musicOn = true;
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider',   id:'volume', label:'VOLUME',       value: 0.8, min:0, max:1,
+                persist:'menuDemo.volume',
+                onChange: v => setSoundVolume(v)},
+            {type:'checkbox', id:'music',  label:'MUSIC',        value: musicOn,
+                persist:'menuDemo.music',
+                onChange: v => { musicOn = v; getToolbar('hud')?.getItem('music')?.setValue(v); }},
+            {type:'separator'},
+            {type:'checkbox', id:'shake',  label:'SCREEN SHAKE', value: true,
+                persist:'menuDemo.shake',
+                onChange: v => console.log('shake ->', v)},
+            {type:'color',    id:'bg',     label:'BG COLOR',     value:'#264d40',
+                persist:'menuDemo.bg',
+                title:'Pick the canvas background color',
+                onChange: c => canvasClearColor = new Color().setHex(c)},
+            {type:'input',    id:'name',   label:'NAME',         value:'Player',
+                persist:'menuDemo.name',
+                placeholder:'Enter a name', maxLength:16,
+                title:'Demo of the text input item type',
+                onChange: v => console.log('name ->', v)},
+            {type:'button',   label:'FULLSCREEN', onClick: toggleFullscreen},
+            {type:'separator'},
+            {type:'button',   label:'BACK',       onClick: () => hideMenu('options')},
+        ],
+    });
+
+    // ----- about menu (demos the `text` item: wrapping multi-line paragraph) -----
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        onHide: popMenu,
+        items: [
+            {type:'label', text:'menus.js demo'},
+            {type:'text', text:'Hold MOUSE / SPACE / UP / A to thrust. ' +
+                'Release to fall. Don\'t hit zappers, missiles, lasers, ceiling, or floor. ' +
+                'Collect coins. Shield bubbles absorb one hit.\n\nBuilt with LittleJS.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    // ----- pause menu (initialItemId defaults selection to RESUME) -----
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
+            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
+            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
+            {
+                showConfirmDialog({
+                    message: 'Quit to title?',
+                    onYes: () =>
+                    {
+                        clearSubmenuStack();
+                        hideAllMenus();
+                        setPlaying(false);
+                        showMenu('title');
+                    },
+                });
+            }},
+        ],
+    });
+
+    // ----- HUD toolbar (visible only during gameplay; setPlaying drives it) -----
+    createToolbar({
+        id:        'hud',
+        anchor:    'top-right',
+        direction: 'horizontal',
+        items: [
+            // Order: music, fullscreen, menu. Anchor is top-right so the
+            // LAST item sits on the far right — putting the hamburger
+            // (always shown, primary action) on the corner under the thumb.
+            {type:'toggle', id:'music', label:'♪', title:'Toggle music', value: musicOn,
+                onChange: v => { musicOn = v; getMenu('options').getItem('music').setValue(v); }},
+            {type:'button', id:'fs',    label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen},
+            {type:'button', id:'menu',  label:'☰', title:'Menu', onClick: () =>
+            {
+                // ☰ toggles between gameplay and the pause-menu flow. If any
+                // menu is up (pause itself, or a sub-menu opened from pause),
+                // a press exits all the way back to gameplay.
+                if (isMenuVisible())
+                {
+                    clearSubmenuStack();
+                    hideAllMenus();
+                }
+                else showMenu('pause');
+            }},
+        ],
+    });
+
+    // Wait for first user interaction (click / touch / Space / Enter / A /
+    // Start) before showing the title menu. Mirrors the pinball pattern:
+    // the canvas shows a "CLICK TO PLAY" prompt while !isPlaying and no
+    // menu is up; the listener re-arms after Esc/B dismisses the title.
+    // The () => !isPlaying gate keeps clicks during gameplay from
+    // accidentally re-revealing the title menu.
+    attachClickToReveal('title', () => !isPlaying);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdate()
+{
+    // gameUpdate only runs when paused=false, which only happens when no
+    // menu is visible. Gate on isPlaying so the Esc/Start pause shortcut
+    // doesn't fire from the "CLICK TO PLAY" pre-play state — title-menu
+    // reveal owns Esc/Start there via attachClickToReveal.
+    if (isPlaying && (keyWasPressed('Escape') || gamepadWasPressed(9)))
+    {
+        playMenuSound('activate');
+        showMenu('pause');
+        inputClearKey('Escape');
+        // Partial clear (only the pressed bit, not down) so the engine
+        // doesn't re-trigger pressed every frame the button is held.
+        inputClearKey(9, 1, false, true, false);
+    }
+
+    if (isPlaying)
+    {
+        const dir = keyDirection();
+        playerPos = playerPos.add(dir.scale(.2));
+    }
+}
+
+function gameUpdatePost()
+{
+}
+
+function gameRender()
+{
+    // Draw gameplay content only while actually playing — the pre-play
+    // / post-quit "title screen" state shows just the prompt below.
+    if (isPlaying)
+        drawRect(playerPos, playerSize, hsl(.13, 1, .6));
+}
+
+function gameRenderPost()
+{
+    // "Menu System Demo" header — title-screen banner only. Hide once
+    // the player is actually playing.
+    if (!isPlaying)
+        drawTextScreen('JETPACK DASH', vec2(mainCanvasSize.x/2, 150),
+            32, hsl(0, 0, 1), 4, hsl(0, 0, 0));
+
+    // Pre-play / post-quit prompt — only when not playing AND no menu
+    // is up. Pulses opacity so it reads as "do something". Adapts to
+    // touch devices via isTouchDevice.
+    if (!isPlaying && !isMenuVisible())
+    {
+        const prompt = isTouchDevice ? 'TOUCH TO PLAY' : 'CLICK TO PLAY';
+        const a = 0.5 + 0.5 * Math.sin(time * 3);
+        drawTextScreen(prompt, vec2(mainCanvasSize.x/2, mainCanvasSize.y/2),
+            48, hsl(0, 0, 1, a), 6, hsl(0, 0, 0, a));
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
+</script></body></html>
