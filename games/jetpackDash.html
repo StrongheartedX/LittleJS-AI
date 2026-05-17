@@ -913,7 +913,6 @@ async function gameInit()
             {type:'label',  text:'Hold to fly. Dodge. Collect.'},
             {type:'label',  id:'bestLabel', text:'Best: 0 M'},
             {type:'button', label:'PLAY',    onClick: playFromTitle},
-            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
         ],
         onShow: () =>
@@ -922,44 +921,6 @@ async function gameInit()
             if (lbl && lbl.setLabel) lbl.setLabel('Best: ' + bestDistance + ' M');
             else if (lbl && lbl.setValue) lbl.setValue('Best: ' + bestDistance + ' M');
         },
-    });
-
-    // ----- options menu (shared between title and pause) -----
-    // Demonstrates separators grouping audio / display / back.
-    // The `persist:'key'` flag on slider / checkbox / color / input items
-    // auto-loads from localStorage on init and auto-saves on every change.
-    // onChange also fires once at init time with the resolved value, so
-    // the consumer's effect (e.g. setSoundVolume) applies the saved value
-    // before the first menu sound plays.
-    let musicOn = true;
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider',   id:'volume', label:'VOLUME',       value: 0.8, min:0, max:1,
-                persist:'jetpackDash.volume',
-                onChange: v => setSoundVolume(v)},
-            {type:'checkbox', id:'music',  label:'MUSIC',        value: musicOn,
-                persist:'jetpackDash.music',
-                onChange: v => { musicOn = v; getToolbar('hud')?.getItem('music')?.setValue(v); }},
-            {type:'separator'},
-            {type:'checkbox', id:'shake',  label:'SCREEN SHAKE', value: true,
-                persist:'jetpackDash.shake',
-                onChange: v => console.log('shake ->', v)},
-            {type:'color',    id:'bg',     label:'BG COLOR',     value:'#1a1a2a',
-                persist:'jetpackDash.bg',
-                title:'Pick the canvas background color',
-                onChange: c => canvasClearColor = new Color().setHex(c)},
-            {type:'input',    id:'name',   label:'NAME',         value:'Player',
-                persist:'jetpackDash.name',
-                placeholder:'Enter a name', maxLength:16,
-                title:'Demo of the text input item type',
-                onChange: v => console.log('name ->', v)},
-            {type:'button',   label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'separator'},
-            {type:'button',   label:'BACK',       onClick: () => hideMenu('options')},
-        ],
     });
 
     // ----- about menu (demos the `text` item: wrapping multi-line paragraph) -----
@@ -984,7 +945,6 @@ async function gameInit()
         initialItemId: 'resume',
         items: [
             {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
             {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
             {
                 showConfirmDialog({
@@ -1001,11 +961,8 @@ async function gameInit()
         anchor:    'top-right',
         direction: 'horizontal',
         items: [
-            // Order: music, fullscreen, menu. Anchor is top-right so the
-            // LAST item sits on the far right — putting the hamburger
-            // (always shown, primary action) on the corner under the thumb.
-            {type:'toggle', id:'music', label:'♪', title:'Toggle music', value: musicOn,
-                onChange: v => { musicOn = v; getMenu('options').getItem('music').setValue(v); }},
+            // Anchor is top-right so the LAST item sits on the far right —
+            // putting the hamburger (primary action) on the corner under the thumb.
             {type:'button', id:'fs',    label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen},
             {type:'button', id:'menu',  label:'☰', title:'Menu', onClick: () =>
             {
@@ -1117,20 +1074,19 @@ function gameRender()
     if (!isPlaying) return;
 
     const camX = cameraPos.x;
+    // stripes are anchored to even-integer world positions so they scroll
+    // smoothly past the camera instead of snapping per-frame.
+    const base = Math.floor(camX / 2) * 2;
+
     // floor — dark base with yellow hazard stripes
     drawRect(vec2(camX, -0.5), vec2(60, 1), hsl(.08, .3, .15));
-    for (let i = -30; i < 30; i += 2)
-    {
-        const x = Math.floor(camX + i);
+    for (let x = base - 30; x <= base + 30; x += 2)
         drawRect(vec2(x + 0.5, -0.15), vec2(1, 0.15), hsl(.13, .9, .5));
-    }
+
     // ceiling
     drawRect(vec2(camX, ceilingY + 0.5), vec2(60, 1), hsl(.08, .3, .15));
-    for (let i = -30; i < 30; i += 2)
-    {
-        const x = Math.floor(camX + i);
+    for (let x = base - 30; x <= base + 30; x += 2)
         drawRect(vec2(x + 0.5, ceilingY + 0.15), vec2(1, 0.15), hsl(.13, .9, .5));
-    }
 }
 
 function gameRenderPost()
