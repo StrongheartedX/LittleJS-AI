@@ -15,7 +15,7 @@ paused = false;
 // engine settings
 gravity = vec2(0, 0);
 cameraPos = vec2(0, 0);
-cameraScale = 32;
+cameraScale = 20;   // arcade-style zoom — even more road visible
 
 ///////////////////////////////////////////////////////////////////////////////
 // Spy Hunter prototype: top-down endless road. Mouse steers, mouse aims guns.
@@ -46,7 +46,26 @@ const CIVILIAN_PENALTY = 750;
 const SCORE_SWITCHBLADE = 200;
 const SCORE_ENFORCER = 300;
 const SCORE_BULLY_RAM = 500;
-const CAMERA_LOOKAHEAD = 7.5;
+const CAMERA_LOOKAHEAD = 4.0;     // player nearer the center of the screen
+
+// Score multiplier (1x -> 2x -> 3x; civilian kill resets to 1x)
+const MULT_KILLS_TO_2X = 3;
+const MULT_KILLS_TO_3X = 7;
+const MULT_MAX = 3;
+
+// Extra life milestone
+const EXTRA_LIFE_INTERVAL = 10000;
+const MAX_LIVES = 5;
+
+// HUD
+const HUD_HEIGHT = 72;
+
+// Curving road — anchor points along Y define where the road's centerline sits
+const ROAD_ANCHOR_SPACING = 18;   // world units between anchors
+const ROAD_MAX_OFFSET = 10;       // max |x| the road centerline can wander to
+const ROAD_STRAIGHT_CHANCE = .35; // chance a new anchor stays the same as previous (straight section)
+const ROAD_DRIFT_AMOUNT = 6;      // base random shift between anchors
+const ROAD_RECENTER_PULL = .55;   // mean-reversion: each new x starts at last.x * this
 
 // Enemy kinds
 const KIND_CIV_BLUE     = 0;
@@ -72,9 +91,65 @@ let props = [];
 let score = 0;
 let distance = 0;
 let gameOver = false;
+let scoreMultiplier = 1;
+let killsForMultBonus = 0;
+let extraLifeAt = EXTRA_LIFE_INTERVAL;
+let announceTimer = new Timer();
+let announceText = '';
+let announceColor = hsl(.13,1,.6);
 
 let carSpawnTimer = new Timer();
 let propSpawnTimer = new Timer();
+
+// road anchors — sorted by y, ascending. roadCenterX(y) is smoothstep between bracketing anchors.
+let roadAnchors = [];
+
+function resetRoad()
+{
+    // seed a long straight behind/around the start so initial spawns are predictable
+    roadAnchors = [];
+    for (let y = -200; y <= 200; y += ROAD_ANCHOR_SPACING)
+        roadAnchors.push({y, x: 0});
+}
+
+function ensureRoadAhead(targetY)
+{
+    while (roadAnchors[roadAnchors.length-1].y < targetY)
+    {
+        const last = roadAnchors[roadAnchors.length-1];
+        let newX;
+        if (randBool(ROAD_STRAIGHT_CHANCE))
+            newX = last.x; // straight segment
+        else
+        {
+            const drift = rand(-1, 1) * ROAD_DRIFT_AMOUNT;
+            newX = clamp(last.x * ROAD_RECENTER_PULL + drift, -ROAD_MAX_OFFSET, ROAD_MAX_OFFSET);
+        }
+        roadAnchors.push({y: last.y + ROAD_ANCHOR_SPACING, x: newX});
+    }
+    // garbage-collect anchors well behind the camera
+    while (roadAnchors.length > 4 && roadAnchors[1].y < cameraPos.y - 60)
+        roadAnchors.shift();
+}
+
+function roadCenterX(y)
+{
+    if (roadAnchors.length < 2) return 0;
+    // forward-moving game; linear scan is fine for small anchor counts
+    for (let i = 0; i < roadAnchors.length - 1; i++)
+    {
+        const a = roadAnchors[i];
+        const b = roadAnchors[i+1];
+        if (y >= a.y && y <= b.y)
+        {
+            const t = (y - a.y) / (b.y - a.y);
+            const s = t * t * (3 - 2*t); // smoothstep — no kinks at anchors
+            return lerp(a.x, b.x, s);
+        }
+    }
+    if (y < roadAnchors[0].y) return roadAnchors[0].x;
+    return roadAnchors[roadAnchors.length-1].x;
+}
 
 // Sounds
 const sndShoot   = new SoundGenerator({volume:.30, frequency:520, attack:0, release:.07, shapeCurve:1.6, slide:-1.2, noise:.02});
@@ -83,17 +158,19 @@ const sndHitBad  = new SoundGenerator({volume:.55, frequency:180, attack:0, rele
 const sndHitCiv  = new SoundGenerator({volume:.35, frequency:240, attack:0, release:.12, shapeCurve:1.2, slide:-.2, noise:.12});
 const sndBoom    = new SoundGenerator({volume:.65, frequency:95,  attack:0, release:.28, shapeCurve:.25, slide:-.9, noise:.32, delay:.02});
 const sndRicochet = new SoundGenerator({volume:.30, frequency:1100, attack:0, release:.05, shapeCurve:1.8, slide:-1.6, noise:.10});
+const sndExtraLife = new SoundGenerator({volume:.5, frequency:660, attack:.01, release:.35, shapeCurve:1.6, slide:1.0});
+const sndMultUp    = new SoundGenerator({volume:.4, frequency:520, attack:.005, release:.18, shapeCurve:1.4, slide:.5});
+const sndMultDown  = new SoundGenerator({volume:.45, frequency:340, attack:0,   release:.22, shapeCurve:.9, slide:-.5, noise:.05});
 
 function laneX(i)
 {
     return (i - (LANES-1)/2) * LANE_SPACING;
 }
 
-function clampToRoad(x, halfSizeX)
+function clampToRoad(x, halfSizeX, y)
 {
-    const minX = -ROAD_HALF + halfSizeX;
-    const maxX =  ROAD_HALF - halfSizeX;
-    return clamp(x, minX, maxX);
+    const cx = roadCenterX(y);
+    return clamp(x, cx - ROAD_HALF + halfSizeX, cx + ROAD_HALF - halfSizeX);
 }
 
 function overlapAABB(a, b)
@@ -335,20 +412,38 @@ class EnemyBullet extends EngineObject
     }
 }
 
+// Roadside prop kinds
+const PROP_SIGN        = 0;
+const PROP_TREE_ROUND  = 1;
+const PROP_POST        = 2;
+const PROP_BILLBOARD   = 3;
+const PROP_BUSH        = 4;
+const PROP_PINE        = 5;
+const PROP_ROCKS       = 6;
+const PROP_STREETLIGHT = 7;
+const PROP_KIND_COUNT  = 8;
+
+const PROP_SIZES = {
+    [PROP_SIGN]:        vec2(1.20, 2.20),
+    [PROP_TREE_ROUND]:  vec2(1.30, 2.80),
+    [PROP_POST]:        vec2(0.80, 1.60),
+    [PROP_BILLBOARD]:   vec2(1.70, 2.00),
+    [PROP_BUSH]:        vec2(1.20, 0.85),
+    [PROP_PINE]:        vec2(1.55, 3.00),
+    [PROP_ROCKS]:       vec2(1.40, 1.05),
+    [PROP_STREETLIGHT]: vec2(1.00, 3.00),
+};
+
 class RoadsideProp extends EngineObject
 {
     constructor(pos, kind)
     {
-        super(pos, vec2(1,1));
+        const size = PROP_SIZES[kind] || vec2(1, 1);
+        super(pos, size);
         this.kind = kind;
         this.renderOrder = 1;
-
-        if (kind == 0) this.size = vec2(1.2, 2.2);
-        if (kind == 1) this.size = vec2(1.3, 2.8);
-        if (kind == 2) this.size = vec2(.8, 1.6);
-        if (kind == 3) this.size = vec2(1.7, 2.0);
-
         this.flip = randBool();
+        this.variant = rand();   // small per-instance color/shape variation
     }
     update()
     {
@@ -359,30 +454,78 @@ class RoadsideProp extends EngineObject
     {
         const x = this.pos.x;
         const y = this.pos.y;
-        drawRect(vec2(x, y- this.size.y/2 + .15), vec2(this.size.x*1.1, .25), rgb(0,0,0,.25));
+        // ground shadow
+        drawRect(vec2(x, y - this.size.y/2 + .15), vec2(this.size.x*1.1, .25), rgb(0,0,0,.25));
 
-        if (this.kind == 0)
+        switch (this.kind)
         {
-            drawRect(vec2(x, y - .7), vec2(.18, 1.2), rgb(.35,.30,.22));
-            drawRect(vec2(x, y + .25), vec2(1.2, .7), rgb(.85,.85,.9));
-            drawRect(vec2(x, y + .25), vec2(1.05, .55), rgb(.15,.25,.85,.95));
-        }
-        else if (this.kind == 1)
-        {
-            drawRect(vec2(x, y - .55), vec2(.3, 1.0), rgb(.32,.22,.15));
-            drawRect(vec2(x, y + .55), vec2(1.25, 1.15), rgb(.08,.35,.12));
-            drawRect(vec2(x + (this.flip?-.35:.35), y + .85), vec2(.85, .75), rgb(.06,.28,.10));
-        }
-        else if (this.kind == 2)
-        {
-            drawRect(vec2(x, y - .2), vec2(.22, 1.3), rgb(.75,.75,.75));
-            drawRect(vec2(x, y + .55), vec2(.28, .18), rgb(1,.25,.25));
-        }
-        else
-        {
-            drawRect(vec2(x, y - .6), vec2(.22, 1.1), rgb(.30,.22,.15));
-            drawRect(vec2(x, y + .35), vec2(1.7, .9), rgb(.12,.12,.14));
-            drawRect(vec2(x, y + .35), vec2(1.45, .65), rgb(.95,.75,.1,.9));
+            case PROP_SIGN:
+                drawRect(vec2(x, y - .7),  vec2(.18, 1.2),  rgb(.35,.30,.22));
+                drawRect(vec2(x, y + .25), vec2(1.2, .7),   rgb(.85,.85,.9));
+                drawRect(vec2(x, y + .25), vec2(1.05, .55), rgb(.15,.25,.85,.95));
+                break;
+
+            case PROP_TREE_ROUND:
+                drawRect(vec2(x, y - .55), vec2(.30, 1.00), rgb(.32,.22,.15));
+                drawRect(vec2(x, y + .55), vec2(1.25, 1.15), rgb(.08,.35,.12));
+                drawRect(vec2(x + (this.flip?-.35:.35), y + .85), vec2(.85, .75), rgb(.06,.28,.10));
+                break;
+
+            case PROP_POST:
+                drawRect(vec2(x, y - .2),  vec2(.22, 1.3),  rgb(.75,.75,.75));
+                drawRect(vec2(x, y + .55), vec2(.28, .18),  rgb(1,.25,.25));
+                break;
+
+            case PROP_BILLBOARD:
+                drawRect(vec2(x, y - .6),  vec2(.22, 1.1),  rgb(.30,.22,.15));
+                drawRect(vec2(x, y + .35), vec2(1.7, .9),   rgb(.12,.12,.14));
+                drawRect(vec2(x, y + .35), vec2(1.45, .65), rgb(.95,.75,.1,.9));
+                break;
+
+            case PROP_BUSH:
+                // low rounded clumps using stacked rects; greens vary by variant
+                {
+                    const tint = lerp(0.05, .15, this.variant);
+                    const a = rgb(.08+tint, .38+tint*.5, .14+tint);
+                    const b = rgb(.12+tint, .44+tint*.5, .18+tint);
+                    drawRect(vec2(x,          y - .12), vec2(1.10, .50), a);
+                    drawRect(vec2(x - .25,    y + .05), vec2(0.65, .42), b);
+                    drawRect(vec2(x + .22,    y + .00), vec2(0.55, .38), b);
+                    drawRect(vec2(x + (this.flip?.05:-.10), y + .18), vec2(.45, .28), a);
+                }
+                break;
+
+            case PROP_PINE:
+                // triangular cone via three stacked tapering rects
+                drawRect(vec2(x, y - 1.05), vec2(.32, .90), rgb(.30,.20,.12));
+                drawRect(vec2(x, y - .25), vec2(1.45, .55), rgb(.05,.30,.12));
+                drawRect(vec2(x, y + .25), vec2(1.05, .55), rgb(.07,.34,.14));
+                drawRect(vec2(x, y + .75), vec2(0.65, .55), rgb(.09,.38,.16));
+                drawRect(vec2(x, y + 1.18), vec2(.28, .35), rgb(.10,.40,.18));
+                break;
+
+            case PROP_ROCKS:
+                {
+                    const g = lerp(.42, .58, this.variant);
+                    drawRect(vec2(x,         y - .12), vec2(1.20, .70), rgb(g, g-.02, g-.04));
+                    drawRect(vec2(x - .30,   y + .15), vec2(.65,  .55), rgb(g+.08, g+.04, g+.02));
+                    drawRect(vec2(x + .30,   y + .20), vec2(.55,  .50), rgb(g-.05, g-.07, g-.08));
+                    drawRect(vec2(x + (this.flip?-.05:.10), y + .35), vec2(.35, .35), rgb(g+.12, g+.08, g+.06));
+                }
+                break;
+
+            case PROP_STREETLIGHT:
+                {
+                    // pole stretched the full prop height so the lamp head sits high
+                    drawRect(vec2(x, y - .20), vec2(.18, 2.40), rgb(.55,.55,.58));
+                    // arm hangs over the road (use flip to bend toward the road; sign of x tells which side)
+                    const lampSide = x < 0 ? 1 : -1;
+                    drawRect(vec2(x + lampSide*.30, y + 1.10), vec2(.80, .12), rgb(.55,.55,.58));
+                    // lamp head + warm glow
+                    drawRect(vec2(x + lampSide*.55, y + 1.00), vec2(.42, .26), rgb(.20,.20,.22));
+                    drawRect(vec2(x + lampSide*.55, y +  .80), vec2(.55, .22), rgb(1, .92, .55, .55));
+                }
+                break;
         }
     }
 }
@@ -425,7 +568,8 @@ class Car extends EngineObject
             this.turnTimer.set(rand(this.hostile?.45:.85, this.hostile?1.1:1.8));
             if (player && randBool(this.aggression))
             {
-                const playerLane = clamp(Math.round((player.pos.x / LANE_SPACING) + (LANES-1)/2), 0, LANES-1);
+                const playerRoadX = player.pos.x - roadCenterX(player.pos.y);
+                const playerLane = clamp(Math.round((playerRoadX / LANE_SPACING) + (LANES-1)/2), 0, LANES-1);
                 const drift = this.hostile ? (randInt(3)-1) : (randBool(.7)?0:(randInt(3)-1));
                 this.targetLane = clamp(playerLane + drift, 0, LANES-1);
             }
@@ -436,7 +580,8 @@ class Car extends EngineObject
         const beingRammed = this.kind == KIND_BULLY && abs(this.rammedVX) > .5;
         if (!beingRammed)
         {
-            const targetX = laneX(this.targetLane);
+            // lane target follows the curving road
+            const targetX = roadCenterX(this.pos.y) + laneX(this.targetLane);
             const steer = this.kind == KIND_BULLY ? .05 :
                           this.hostile ? .12 : .07;
             this.pos.x = lerp(this.pos.x, targetX, steer);
@@ -453,18 +598,19 @@ class Car extends EngineObject
         if (this.kind == KIND_BULLY)
         {
             // no clamp — once pushed off, it crashes (handled below)
-            if (abs(this.pos.x) > ROAD_HALF + this.size.x*.5 + .4)
+            const roadCx = roadCenterX(this.pos.y);
+            if (abs(this.pos.x - roadCx) > ROAD_HALF + this.size.x*.5 + .4)
             {
                 sndBoom.play(this.pos, 1, rand(.95,1.05));
                 explodeCar(this.pos, true);
-                score += SCORE_BULLY_RAM;
+                awardKill(SCORE_BULLY_RAM);
                 this.destroy();
                 return;
             }
         }
         else
         {
-            this.pos.x = clampToRoad(this.pos.x, this.size.x/2);
+            this.pos.x = clampToRoad(this.pos.x, this.size.x/2, this.pos.y);
         }
 
         // enforcer fires periodically toward player
@@ -502,6 +648,78 @@ function spawnHitSpark(pos)
     );
 }
 
+// big sustained explosion when the player runs out of lives
+function triggerGameOver()
+{
+    if (gameOver) return;
+    gameOver = true;
+    if (!player) return;
+
+    // sustained fire/sparks for ~0.6s
+    new ParticleEmitter(
+        player.pos, 0, vec2(1.2), .65, 70, PI, undefined,
+        rgb(1,.80,.20,.95), rgb(1,.42,.10,.90),
+        rgb(.25,.10,.04,0), rgb(.25,.10,.04,0),
+        .38, .40, .12, 18, 20,
+        .92, .92, 0, PI, .12, .8, false, false
+    );
+    // sustained smoke for ~1s
+    new ParticleEmitter(
+        player.pos, 0, vec2(.7), 1.0, 45, PI, undefined,
+        rgb(.22,.20,.22,.65), rgb(.14,.12,.14,.55),
+        rgb(.06,.06,.08,0), rgb(.06,.06,.08,0),
+        1.0, .85, 1.4, 5.5, 5,
+        .96, .98, 0, PI, .05, .55, false, false
+    );
+    sndBoom.play(player.pos, 1, .55);
+    sndBoom.play(player.pos, 1, .75);
+}
+
+function announce(text, color=hsl(.13,1,.6), duration=1.6)
+{
+    announceText = text;
+    announceColor = color;
+    announceTimer.set(duration);
+}
+
+function awardKill(amount)
+{
+    score += amount * scoreMultiplier;
+    killsForMultBonus++;
+    const prev = scoreMultiplier;
+    if (killsForMultBonus >= MULT_KILLS_TO_3X) scoreMultiplier = 3;
+    else if (killsForMultBonus >= MULT_KILLS_TO_2X) scoreMultiplier = 2;
+    if (scoreMultiplier > prev)
+    {
+        sndMultUp.play(0, 1, 1 + (scoreMultiplier-1)*.15);
+        announce('SCORE x' + scoreMultiplier, hsl(.13,1,.6));
+    }
+}
+
+function penalizeCivilian()
+{
+    score = max(0, score - CIVILIAN_PENALTY);
+    if (scoreMultiplier > 1)
+    {
+        sndMultDown.play();
+        announce('CIVILIAN! MULTIPLIER LOST', hsl(0,.85,.6));
+    }
+    scoreMultiplier = 1;
+    killsForMultBonus = 0;
+}
+
+function checkExtraLife()
+{
+    if (!player || player.lives >= MAX_LIVES) return;
+    if (score >= extraLifeAt)
+    {
+        player.lives++;
+        extraLifeAt += EXTRA_LIFE_INTERVAL;
+        sndExtraLife.play();
+        announce('EXTRA LIFE', hsl(.55,.7,.8));
+    }
+}
+
 class PlayerCar extends EngineObject
 {
     constructor()
@@ -516,6 +734,14 @@ class PlayerCar extends EngineObject
 
     update()
     {
+        if (gameOver)
+        {
+            // skid to a stop; no input, no steering
+            this.speed = max(0, this.speed - 18 * timeDelta);
+            this.pos.y += this.speed * timeDelta;
+            return;
+        }
+
         // speed control (W/S only)
         const accel = (keyIsDown('ArrowUp') || keyIsDown('KeyW')) ? 1 : 0;
         const brake = (keyIsDown('ArrowDown') || keyIsDown('KeyS')) ? 1 : 0;
@@ -527,15 +753,15 @@ class PlayerCar extends EngineObject
         this.pos.y += this.speed * timeDelta;
 
         // steering — mouse drives target; A/D nudges target as fallback
-        let targetX = clampToRoad(mousePos.x, this.size.x/2);
+        let targetX = clampToRoad(mousePos.x, this.size.x/2, this.pos.y);
         const left  = (keyIsDown('ArrowLeft')  || keyIsDown('KeyA')) ? 1 : 0;
         const right = (keyIsDown('ArrowRight') || keyIsDown('KeyD')) ? 1 : 0;
         if (left || right)
-            targetX = clampToRoad(this.pos.x + (right - left) * KEY_STEER_TARGET_OFFSET, this.size.x/2);
+            targetX = clampToRoad(this.pos.x + (right - left) * KEY_STEER_TARGET_OFFSET, this.size.x/2, this.pos.y);
 
         // tight tracking
         this.pos.x = lerp(this.pos.x, targetX, STEER_TIGHTNESS);
-        this.pos.x = clampToRoad(this.pos.x, this.size.x/2);
+        this.pos.x = clampToRoad(this.pos.x, this.size.x/2, this.pos.y);
 
         // shooting — aim toward mouse
         const wantFire = (keyIsDown('Space') || mouseIsDown(0));
@@ -557,6 +783,14 @@ class PlayerCar extends EngineObject
 
     render()
     {
+        if (gameOver)
+        {
+            // burned-out hulk: charred body + smoldering interior
+            drawRect(this.pos, this.size, rgb(.10,.09,.10));
+            drawRect(this.pos, vec2(this.size.x*.78, this.size.y*.58), rgb(.22,.16,.12));
+            drawRect(this.pos.add(vec2(0, .15)), vec2(this.size.x*.55, this.size.y*.30), rgb(.45,.18,.06,.85));
+            return;
+        }
         if (this.invuln.active() && ((time*10|0)%2))
             drawRect(this.pos, this.size.add(vec2(.35)), rgb(1,1,1,.22));
         renderPlayer(this.pos, this.size);
@@ -586,7 +820,7 @@ function spawnCar()
     if (!player) return;
     const y = player.pos.y + rand(14, 26);
     const lane = randInt(LANES);
-    const x = laneX(lane) + rand(-.25, .25);
+    const x = roadCenterX(y) + laneX(lane) + rand(-.25, .25);
     const progress = min(distance / 1400, 1);
     const kind = pickKind(progress);
     cars.push(new Car(vec2(x, y), kind));
@@ -597,8 +831,19 @@ function spawnProp()
     if (!player) return;
     const y = player.pos.y + rand(35, 75);
     const side = randBool() ? -1 : 1;
-    const x = side * (ROAD_HALF + rand(2.0, 6.5));
-    const kind = randInt(4);
+    // wider spawn range now that the camera is zoomed out further; offset from the road's centerline at this y
+    const x = roadCenterX(y) + side * (ROAD_HALF + rand(1.8, 14.0));
+    // weighted kind pick — bushes and trees most common, signs/lights rarer
+    const r = rand();
+    let kind;
+    if      (r < .26) kind = PROP_BUSH;
+    else if (r < .46) kind = PROP_TREE_ROUND;
+    else if (r < .62) kind = PROP_PINE;
+    else if (r < .74) kind = PROP_ROCKS;
+    else if (r < .84) kind = PROP_POST;
+    else if (r < .90) kind = PROP_STREETLIGHT;
+    else if (r < .96) kind = PROP_SIGN;
+    else              kind = PROP_BILLBOARD;
     props.push(new RoadsideProp(vec2(x, y), kind));
 }
 
@@ -613,13 +858,18 @@ function resetGame()
     score = 0;
     distance = 0;
     gameOver = false;
+    scoreMultiplier = 1;
+    killsForMultBonus = 0;
+    extraLifeAt = EXTRA_LIFE_INTERVAL;
+    announceTimer.unset();
 
     carSpawnTimer.unset();
     propSpawnTimer.unset();
 
+    resetRoad();
     player = new PlayerCar();
     for (let i=0; i<4; i++) spawnCar();
-    for (let i=0; i<4; i++) spawnProp();
+    for (let i=0; i<14; i++) spawnProp();
 }
 
 function runSanityTests()
@@ -649,11 +899,15 @@ function gameUpdate()
     if (keyWasPressed('KeyR'))
         resetGame();
 
+    // generate road anchors far enough ahead so spawns/AI always have a defined road
+    ensureRoadAhead(cameraPos.y + 120);
+
     if (!player || gameOver)
         return;
 
     distance += player.speed * timeDelta;
     score += player.speed * timeDelta * .45;
+    checkExtraLife();
 
     // spawn cars
     if (!carSpawnTimer.active())
@@ -664,12 +918,13 @@ function gameUpdate()
         if (cars.length < 7 && randBool(lerp(.02, .08, d))) spawnCar();
     }
 
-    // spawn props
+    // spawn props — denser, with frequent doubles/triples for varied roadsides
     if (!propSpawnTimer.active())
     {
-        propSpawnTimer.set(rand(.28, .55));
+        propSpawnTimer.set(rand(.14, .30));
         spawnProp();
-        if (randBool(.25)) spawnProp();
+        if (randBool(.55)) spawnProp();
+        if (randBool(.30)) spawnProp();
     }
 
     // player bullets vs cars
@@ -709,7 +964,7 @@ function gameUpdate()
                     c.destroy();
                     sndBoom.play(c.pos, 1, rand(.95,1.05));
                     explodeCar(c.pos, true);
-                    score += (c.kind == KIND_ENFORCER) ? SCORE_ENFORCER : SCORE_SWITCHBLADE;
+                    awardKill(c.kind == KIND_ENFORCER ? SCORE_ENFORCER : SCORE_SWITCHBLADE);
                 }
             }
             else
@@ -719,7 +974,7 @@ function gameUpdate()
                 {
                     c.destroy();
                     explodeCar(c.pos, false);
-                    score = max(0, score - CIVILIAN_PENALTY);
+                    penalizeCivilian();
                 }
             }
             break;
@@ -761,7 +1016,7 @@ function gameUpdate()
             player.invuln.set(1.1);
             player.speed = max(PLAYER_MIN_SPEED, player.speed - 7);
             if (player.lives <= 0)
-                gameOver = true;
+                triggerGameOver();
             break;
         }
     }
@@ -779,7 +1034,7 @@ function gameUpdate()
             player.lives--;
             player.invuln.set(1.1);
             if (player.lives <= 0)
-                gameOver = true;
+                triggerGameOver();
             break;
         }
     }
@@ -800,33 +1055,43 @@ function gameUpdatePost()
 function gameRender()
 {
     const camSize = getCameraSize();
+    const startY = cameraPos.y - camSize.y/2 - 2;
+    const endY   = cameraPos.y + camSize.y/2 + 2;
 
-    // grass
+    // grass (full screen)
     drawRect(cameraPos, camSize, rgb(.05,.25,.07));
 
-    // roadside darker strip
-    drawRect(cameraPos.add(vec2(-ROAD_HALF-4.4, 0)), vec2(4.0, camSize.y), rgb(.03,.18,.05));
-    drawRect(cameraPos.add(vec2( ROAD_HALF+4.4, 0)), vec2(4.0, camSize.y), rgb(.03,.18,.05));
+    // road drawn as thin Y-slices so it can curve along the road anchors
+    const sliceH = .80;
+    const sliceColor      = rgb(.16,.16,.17);
+    const sliceHilight    = rgb(.10,.10,.12,.30);
+    const dirtSide        = rgb(.03,.18,.05);
+    const edgeLine        = rgb(.92,.92,.92);
+    for (let y = startY; y < endY; y += sliceH)
+    {
+        const cx = roadCenterX(y + sliceH/2);
+        // dark dirt strips just outside the road
+        drawRect(vec2(cx - ROAD_HALF - 2.2, y + sliceH/2), vec2(4.0, sliceH), dirtSide);
+        drawRect(vec2(cx + ROAD_HALF + 2.2, y + sliceH/2), vec2(4.0, sliceH), dirtSide);
+        // road base
+        drawRect(vec2(cx, y + sliceH/2), vec2(ROAD_WIDTH, sliceH), sliceColor);
+        // very subtle highlight
+        drawRect(vec2(cx, y + sliceH/2), vec2(ROAD_WIDTH*.92, sliceH), sliceHilight);
+        // white edge lines
+        drawRect(vec2(cx - ROAD_HALF + .25, y + sliceH/2), vec2(.18, sliceH), edgeLine);
+        drawRect(vec2(cx + ROAD_HALF - .25, y + sliceH/2), vec2(.18, sliceH), edgeLine);
+    }
 
-    // road base
-    drawRect(cameraPos, vec2(ROAD_WIDTH, camSize.y), rgb(.16,.16,.17));
-    drawRect(cameraPos, vec2(ROAD_WIDTH*.92, camSize.y), rgb(.10,.10,.12,.30));
-
-    // shoulders
-    drawRect(cameraPos.add(vec2(-ROAD_HALF + .60, 0)), vec2(1.2, camSize.y), rgb(.16,.16,.17));
-    drawRect(cameraPos.add(vec2( ROAD_HALF - .60, 0)), vec2(1.2, camSize.y), rgb(.16,.16,.17));
-
-    // dashed center line
-    const startY = cameraPos.y - camSize.y/2 - 6;
-    const endY   = cameraPos.y + camSize.y/2 + 6;
+    // dashed center line — dashes ride the road centerline
     const scroll = player ? player.pos.y : 0;
     {
         const dashH = 1.6;
         const gapH  = 1.4;
-        for (let y = startY; y < endY; y += dashH + gapH)
+        for (let y = startY; y < endY + 6; y += dashH + gapH)
         {
             const yy = y - mod(scroll, dashH + gapH);
-            drawRect(vec2(0, yy + dashH/2), vec2(.32, dashH), rgb(1,1,1));
+            const cx = roadCenterX(yy + dashH/2);
+            drawRect(vec2(cx, yy + dashH/2), vec2(.32, dashH), rgb(1,1,1));
         }
     }
 
@@ -841,17 +1106,51 @@ function gameRender()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+function drawHudColumn(label, value, x, valueColor)
+{
+    const W = mainCanvasSize.x;
+    const H = mainCanvasSize.y;
+    const labelY = H - HUD_HEIGHT + 18;
+    const valueY = H - 18;
+    drawTextScreen(label, vec2(x, labelY), 16, hsl(0,0,.65), 3, hsl(0,0,0));
+    drawTextScreen(value, vec2(x, valueY), 34, valueColor,    4, hsl(0,0,0));
+}
+
 function gameRenderPost()
 {
+    const W = mainCanvasSize.x;
+    const H = mainCanvasSize.y;
+
+    // bottom HUD band background (screen-space rectangles)
+    drawRect(vec2(W/2, H - HUD_HEIGHT/2), vec2(W, HUD_HEIGHT), rgb(0,0,0,.62), 0, false, true);
+    drawRect(vec2(W/2, H - HUD_HEIGHT + 1), vec2(W, 2),        rgb(1,1,1,.35), 0, false, true);
+
+    // HUD columns
     const spd = player ? player.speed.toFixed(0) : '0';
     const lives = player ? player.lives : 0;
-    const hud = `SCORE ${score|0}   SPEED ${spd}   LIVES ${lives}`;
-    drawTextScreen(hud, vec2(mainCanvasSize.x/2, 32), 36, hsl(0,0,1), 4, hsl(0,0,0));
+    const livesStr = lives > 0 ? '★'.repeat(lives) : '-';
+    const multColor = scoreMultiplier > 1 ? hsl(.13,1,.6) : hsl(0,0,.8);
+
+    drawHudColumn('SCORE',  (score|0).toString().padStart(6,'0'), W * .10, hsl(0,0,1));
+    drawHudColumn('MULT',   'x' + scoreMultiplier,                W * .30, multColor);
+    drawHudColumn('SPEED',  spd,                                  W * .50, hsl(.55,.7,.8));
+    drawHudColumn('LIVES',  livesStr,                             W * .70, hsl(0,.6,.7));
+    drawHudColumn('DIST',   (distance/200).toFixed(1),            W * .90, hsl(0,0,1));
+
+    // announcement (extra life / multiplier change)
+    if (announceTimer.active())
+    {
+        const pct = announceTimer.getPercent();      // 0..1, 1 at expiry
+        const alpha = pct < .75 ? 1 : (1-pct)/.25;   // hold then fade
+        const fade = announceColor.copy();
+        fade.a = alpha;
+        drawTextScreen(announceText, vec2(W/2, H * .25), 56, fade, 6, hsl(0,0,0,alpha));
+    }
 
     if (gameOver)
     {
-        drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 40), 120, hsl(0,1,.6), 8, hsl(0,0,0));
-        drawTextScreen('Press R to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 50), 60, hsl(0,0,1), 6, hsl(0,0,0));
+        drawTextScreen('GAME OVER', vec2(W/2, H/2 - 40), 120, hsl(0,1,.6), 8, hsl(0,0,0));
+        drawTextScreen('Press R to restart', vec2(W/2, H/2 + 50), 60, hsl(0,0,1), 6, hsl(0,0,0));
     }
 }
 
