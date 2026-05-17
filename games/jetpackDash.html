@@ -91,6 +91,12 @@ let distance = 0;            // floored player.pos.x in meters
 let deathTimer = 0;          // counts up after death; opens dialog at ~1s
 let coins = 0;
 
+// shield
+const SHIELD_CHANCE_DEFAULT = 0.06;
+let shieldChance = SHIELD_CHANCE_DEFAULT;
+let hasShield = false;
+let shieldInvuln = 0;        // seconds of post-break invuln remaining
+
 ///////////////////////////////////////////////////////////////////////////////
 function startRun()
 {
@@ -101,6 +107,8 @@ function startRun()
     deathTimer = 0;
     distance = 0;
     coins = 0;
+    hasShield = false;
+    shieldInvuln = 0;
 
     // player sits at world x=0; camera offset keeps it ~1/3 from left of screen
     player = new Player(vec2(0, ceilingY / 2));
@@ -409,6 +417,38 @@ class Coin extends EngineObject
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+class ShieldPickup extends EngineObject
+{
+    constructor(pos)
+    {
+        super(pos, vec2(1.2), tile(TILE_SHIELD));
+        this.gravityScale = 0;
+        this.damping = 1;
+    }
+
+    update()
+    {
+        if (this.pos.x < cameraPos.x - 25) { this.destroy(); return; }
+        super.update();
+    }
+
+    tryCollect(p)
+    {
+        const dx = Math.abs(p.pos.x - this.pos.x);
+        const dy = Math.abs(p.pos.y - this.pos.y);
+        if (dx < (this.size.x + p.size.x)/2 &&
+            dy < (this.size.y + p.size.y)/2)
+        {
+            this.destroy();
+            hasShield = true;
+            sndShieldPickup && sndShieldPickup.play();
+            return true;
+        }
+        return false;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 function spawnChunk(chunkX)
 {
     // Decide a safe-gap Y band — center of the gap and its half-height
@@ -503,6 +543,12 @@ function spawnChunk(chunkX)
             new Coin(vec2(x, y));
         }
     }
+
+    // occasionally drop a shield in the safe gap, biased toward the gap center
+    if (Math.random() < shieldChance)
+    {
+        new ShieldPickup(vec2(chunkX + chunkWidth/2, gapCenter));
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -573,25 +619,55 @@ class Player extends EngineObject
         // toggle the thrust flame
         this.thrustEmitter.emitRate = (this.thrusting && alive) ? 80 : 0;
 
-        // hazard collisions
-        for (const obj of engineObjects)
+        // hazard collisions (with shield absorb)
+        if (shieldInvuln > 0) shieldInvuln -= 1/60;
+        else
         {
-            if (obj instanceof Hazard && obj.hitsPlayer(this))
+            for (const obj of engineObjects)
             {
-                killPlayer();
-                break;
+                if (obj instanceof Hazard && obj.hitsPlayer(this))
+                {
+                    if (hasShield)
+                    {
+                        hasShield = false;
+                        shieldInvuln = 0.6;
+                        sndShieldBreak && sndShieldBreak.play();
+                    }
+                    else
+                    {
+                        killPlayer();
+                    }
+                    break;
+                }
             }
         }
 
-        // coin pickup
+        // coin / shield pickup pass
         for (const obj of engineObjects)
         {
-            if (obj instanceof Coin) obj.tryCollect(this);
+            if (obj instanceof Coin)              obj.tryCollect(this);
+            else if (obj instanceof ShieldPickup) obj.tryCollect(this);
         }
 
         // ceiling / floor death
         if (this.pos.y >= ceilingY || this.pos.y <= 0)
             killPlayer();
+    }
+
+    render()
+    {
+        // flicker during invuln — skip the sprite this frame to flash
+        if (shieldInvuln > 0 && Math.floor(time * 20) % 2 === 0)
+            return;
+
+        super.render();   // draws TILE_PLAYER via the engine
+
+        if (hasShield)
+        {
+            // pulsing translucent bubble
+            const r = 1.3 + Math.sin(time * 5) * 0.08;
+            drawTile(this.pos, vec2(r * 2), tile(TILE_SHIELD));
+        }
     }
 }
 
@@ -714,6 +790,8 @@ async function gameInit()
     window.sndCoin = new SoundGenerator({ frequency: 1200, attack: 0.005, release: 0.08, volume: 0.4, pitchJump: 600, pitchJumpTime: 0.05 });
     window.sndMissileWarn   = new SoundGenerator({ frequency: 880, release: 0.1, volume: 0.3 });
     window.sndMissileLaunch = new SoundGenerator({ frequency: 220, release: 0.4, volume: 0.5, slide: -3 });
+    window.sndShieldPickup = new SoundGenerator({ frequency: 1200, attack: 0.005, release: 0.2, volume: 0.4, pitchJump: 800, pitchJumpTime: 0.1 });
+    window.sndShieldBreak  = new SoundGenerator({ frequency: 200, attack: 0.005, release: 0.15, volume: 0.5, noise: 0.6 });
 
     // ----- global UI sounds (LittleJS Sound class wraps zzfx params and
     //       routes through the engine's audio system, so master volume,
