@@ -70,6 +70,10 @@ const MISSILE_SPEED_DEFAULT = 0.45;
 let missileWarnTime = MISSILE_WARN_DEFAULT;
 let missileSpeed    = MISSILE_SPEED_DEFAULT;
 
+// laser tunables
+const LASER_ROTATE_DEFAULT = 0.6;   // rad/s
+let laserRotateSpeed = LASER_ROTATE_DEFAULT;
+
 // player physics
 const THRUST_FORCE_DEFAULT = 0.018;
 const GRAVITY_Y_DEFAULT    = -0.012;
@@ -122,6 +126,46 @@ function returnToTitle()
     clearSubmenuStack();
     hideAllMenus();
     showMenu('title');
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Slab-based line-segment vs AABB test. Returns true if segment intersects box.
+function segmentHitsBox(p0, p1, boxCenter, boxSize)
+{
+    const dx = p1.x - p0.x, dy = p1.y - p0.y;
+    const bx = boxCenter.x, by = boxCenter.y;
+    const hx = boxSize.x / 2, hy = boxSize.y / 2;
+    let tmin = 0, tmax = 1;
+
+    // X slab
+    if (Math.abs(dx) < 1e-9)
+    {
+        if (p0.x < bx - hx || p0.x > bx + hx) return false;
+    }
+    else
+    {
+        const t1 = (bx - hx - p0.x) / dx;
+        const t2 = (bx + hx - p0.x) / dx;
+        const lo = Math.min(t1, t2), hi = Math.max(t1, t2);
+        tmin = Math.max(tmin, lo);
+        tmax = Math.min(tmax, hi);
+        if (tmin > tmax) return false;
+    }
+    // Y slab
+    if (Math.abs(dy) < 1e-9)
+    {
+        if (p0.y < by - hy || p0.y > by + hy) return false;
+    }
+    else
+    {
+        const t1 = (by - hy - p0.y) / dy;
+        const t2 = (by + hy - p0.y) / dy;
+        const lo = Math.min(t1, t2), hi = Math.max(t1, t2);
+        tmin = Math.max(tmin, lo);
+        tmax = Math.min(tmax, hi);
+        if (tmin > tmax) return false;
+    }
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -282,6 +326,48 @@ class Missile extends Hazard
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+class Laser extends Hazard
+{
+    constructor(pos, beamLength, dirSign)
+    {
+        super(pos, vec2(0.8), TILE_LASER);
+        this.beamLength = beamLength;
+        this.angle = Math.random() * Math.PI * 2;
+        this.dir = dirSign;             // +1 CW or -1 CCW
+    }
+
+    update()
+    {
+        if (this.pos.x < cameraPos.x - 25) { this.destroy(); return; }
+        this.angle += laserRotateSpeed * (1/60) * this.dir;
+        super.update();
+    }
+
+    beamEnd()
+    {
+        return this.pos.add(vec2(Math.cos(this.angle), Math.sin(this.angle))
+            .scale(this.beamLength));
+    }
+
+    hitsPlayer(p)
+    {
+        return segmentHitsBox(this.pos, this.beamEnd(), p.pos, p.size);
+    }
+
+    render()
+    {
+        drawTile(this.pos, vec2(0.9), tile(TILE_LASER));
+        const end = this.beamEnd();
+        // outer glow
+        drawLine(this.pos, end, 0.18, hsl(0, 1, .5, 0.4));
+        // core beam
+        drawLine(this.pos, end, 0.08, hsl(0, 1, .7, 0.95));
+        // tip dot
+        drawTile(end, vec2(0.3), tile(TILE_LASER));
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 class Coin extends EngineObject
 {
     constructor(pos)
@@ -329,16 +415,26 @@ function spawnChunk(chunkX)
     const gapCenter = lerp(2 + minGap/2, ceilingY - 2 - minGap/2, Math.random());
     const gapHalf   = minGap / 2;
 
-    // ramp difficulty: missile weight grows with distance
-    const missileWeight = clamp(0.05 + distance / 4000, 0.05, 0.35);
+    // difficulty-ramped weights for hazard type
+    const d = distance;
+    const wMissile = clamp(0.05 + d / 4000, 0.05, 0.35);
+    const wLaser   = clamp(0.02 + d / 5000, 0.02, 0.25);
     const roll = Math.random();
 
-    if (roll < missileWeight)
+    if (roll < wMissile)
     {
         // missile crosses near gapCenter, slightly randomized
         const y = clamp(gapCenter + (Math.random() - 0.5) * 2, 1.5, ceilingY - 1.5);
         new Missile(y);
-        // no zapper this chunk; coins still spawn below
+    }
+    else if (roll < wMissile + wLaser)
+    {
+        // anchor on ceiling or floor; beam extends toward the gap
+        const onCeil = Math.random() < 0.5;
+        const anchorY = onCeil ? ceilingY - 0.6 : 0.6;
+        const beamLen = lerp(2.5, 4.5, Math.random());
+        const dirSign = Math.random() < 0.5 ? 1 : -1;
+        new Laser(vec2(chunkX, anchorY), beamLen, dirSign);
     }
     else
     {
