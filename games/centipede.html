@@ -713,54 +713,9 @@
 
       render()
       {
-          const t = time * 14;
-          const body = rgb(.9, .25, .9);     // bright purple
-          const dark = rgb(.45, .1, .55);    // shadow / accent
-          const ol = rgb(0, 0, 0, .95);
-          const legColor = rgb(.2, 0, .25);
-          const dx = sign(this.vel.x) || 1;
-
-          // 8 legs — 4 each side, two-segment with a knee bend, wiggling
-          for (let i = 0; i < 4; ++i)
-          {
-              const phase = t + i * 1.4;
-              const wig = Math.sin(phase) * .18;
-              const baseY = (i - 1.5) * .14;
-              // hip → knee → foot, left side
-              const hipL  = this.pos.add(vec2(-.18, baseY));
-              const kneeL = this.pos.add(vec2(-.55, baseY + .15 + wig));
-              const footL = this.pos.add(vec2(-.95, baseY - .35 + wig * .3));
-              drawLine(hipL, kneeL, .08, legColor);
-              drawLine(kneeL, footL, .08, legColor);
-              // right side, opposite phase
-              const wig2 = Math.sin(phase + Math.PI) * .18;
-              const hipR  = this.pos.add(vec2(.18, baseY));
-              const kneeR = this.pos.add(vec2(.55, baseY + .15 + wig2));
-              const footR = this.pos.add(vec2(.95, baseY - .35 + wig2 * .3));
-              drawLine(hipR, kneeR, .08, legColor);
-              drawLine(kneeR, footR, .08, legColor);
-          }
-
-          // abdomen (large round body, opposite of motion direction)
-          drawCircle(this.pos.add(vec2(-.28 * dx, -.05)), 1.0, body, .09, ol);
-          // belly highlight
-          drawCircle(this.pos.add(vec2(-.32 * dx, -.18)), .5, dark);
-
-          // head (smaller, in front)
-          drawCircle(this.pos.add(vec2(.32 * dx, .08)), .65, body, .09, ol);
-
-          // big yellow eyes with black pupils — look in motion direction
-          const ex = .32 * dx;
-          drawCircle(this.pos.add(vec2(ex - .15, .2)), .22, rgb(1, 1, .25), .04, ol);
-          drawCircle(this.pos.add(vec2(ex + .15, .2)), .22, rgb(1, 1, .25), .04, ol);
-          drawCircle(this.pos.add(vec2(ex - .15 + .05 * dx, .2)), .1, rgb(0, 0, 0));
-          drawCircle(this.pos.add(vec2(ex + .15 + .05 * dx, .2)), .1, rgb(0, 0, 0));
-
-          // fangs / chelicerae poking down from head
-          drawLine(this.pos.add(vec2(ex - .1, -.12)),
-                   this.pos.add(vec2(ex - .12, -.32)), .06, rgb(.9, .9, .8));
-          drawLine(this.pos.add(vec2(ex + .1, -.12)),
-                   this.pos.add(vec2(ex + .12, -.32)), .06, rgb(.9, .9, .8));
+          // spider sprite faces right; mirror when motion is leftward
+          const mirror = this.vel.x < 0;
+          drawTile(this.pos, vec2(2.0, 1.6), sprites.spider, WHITE, 0, mirror);
       }
   }
 
@@ -1064,6 +1019,7 @@
       setCanvasFixedSize(vec2(1280, 720));
       setCameraScale(28);
       setCameraPos(levelSize.scale(.5));
+      setCanvasPixelated(false);
 
       // build the procedural sprite atlas, then try to swap in centipede.png
       // if one is sitting next to this file (silent 404 if missing)
@@ -1075,6 +1031,15 @@
 
   function gameUpdate()
   {
+      // atlas tools: P saves atlas + prompt, L reloads centipede.png from disk
+      if (keyWasPressed('KeyP'))
+      {
+          saveAtlasImage('centipede');
+          saveAtlasPrompt('centipede-prompt');
+      }
+      if (keyWasPressed('KeyL'))
+          useAtlasImage('centipede.png');
+
       // update centipedes and collisions
       if (!gameOver && !gameWon)
       {
