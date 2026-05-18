@@ -49,6 +49,8 @@ The most polished prototypes — playable end-to-end with menus, sound, and a co
 | Orbitswarm | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/orbitswarm.html) |
 | Snake | 👾 | ✅ | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snake.html) |
 | Columns | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/columns.html) |
+| Robotron | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
+| Snood | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snood.html) |
 
 ## 🕹️ Works in Progress Made With AI
 
@@ -60,12 +62,10 @@ Did you make a game you think should be included? Send a pull request!
 |------|-------|-------|---------|-------|------|
 | Skiing | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/skiing.html) |
 | Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
-| Snood | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snood.html) |
 | Breakout | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/breakout.html) |
 | Combat | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/combat.html) |
 | Geometry Dash | 🏃 | | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/geometryDash.html) |
 | River Raid | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/riverRaid.html) |
-| Robotron | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
 | Plinko | 🎯 | ✅ | ✅ | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/plinko.html) |
 | Micro Racer | 🏎️ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) |
 | Spy Hunter | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/spyhunter.html) |
