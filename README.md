@@ -83,7 +83,6 @@ Rough early experiments — playable concepts that haven't been curated yet. Exp
 | Dr. Mario | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/drMario.html) |
 | Gradius | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/gradius.html) |
 | Kaboom | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/kaboom.html) |
-| Limbo | 🏃 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/limbo.html) |
 | Moon Patrol | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/moonPatrol.html) |
 | Mr. Driller | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mrDriller.html) |
 | Peggle | 🎯 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/peggle.html) |
