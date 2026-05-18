@@ -239,7 +239,7 @@ function emitFlapPuff()
         const spread = rand(-.9,.9);
         const dir = forward.scale(-1).add(up.scale(spread)).normalize();
         const v = dir.scale(rand(3.5, 7)).add(vec2(rand(-.6,.6), rand(-.4,.4)));
-        emitParticle(base.add(vec2(rand(-.1,.1), rand(-.1,.1))), v, rand(.20,.40), rand(.10,.18), i&1 ? puffLight : puffDark);
+        emitParticle(base.add(vec2(rand(-.1,.1), rand(-.1,.1))), v, rand(.25,.50), rand(.22,.36), i&1 ? puffLight : puffDark);
     }
 }
 
@@ -350,8 +350,8 @@ function initScenery()
     // parallax grass tufts (two layers)
     grassLayers = [
         // sit right on the ground surface so it lines up with the dirt lip
-        buildGrassLayer({ wrap: 70, parallax: .28, y: groundY + .10, colorA: grassFarA,  colorB: grassFarB,  count: 95,  minH: .22, maxH: .55 }),
-        buildGrassLayer({ wrap: 55, parallax: .55, y: groundY + .16, colorA: grassNearA, colorB: grassNearB, count: 110, minH: .26, maxH: .72 }),
+        buildGrassLayer({ wrap: 70, parallax: 1.0, y: groundY + .10, colorA: grassFarA,  colorB: grassFarB,  count: 95,  minH: .22, maxH: .55 }),
+        buildGrassLayer({ wrap: 55, parallax: 1.0, y: groundY + .16, colorA: grassNearA, colorB: grassNearB, count: 110, minH: .26, maxH: .72 }),
     ];
 }
 
@@ -438,10 +438,6 @@ function drawMountainField(F)
 
             // simple fill
             drawPoly(pts, F.colorA, 0, undefined, layerOffset);
-
-            // subtle ridge accent (outline along silhouette)
-            const ridge = pts.slice(1, -1);
-            drawPoly(ridge, F.colorB, .18, F.colorB, layerOffset);
         }
     }
 }
@@ -531,11 +527,26 @@ function drawScenery()
     drawCircle(sunPos, 2.55, sunCore);
 
 
+    // clouds (behind mountains)
+    {
+        const wrap = 80;
+        for (const c of clouds)
+        {
+            const off = -wrapOffset(bgScrollX * c.parallax, wrap);
+            // tile across view
+            for (let k=-1; k<=1; ++k)
+            {
+                const p = vec2(c.x + off + k*wrap, c.y);
+                drawCloud(p, c.r, c.parallax > .12);
+            }
+        }
+    }
+
     // mountains (back to front)
     for (let li=0; li<mountainLayers.length; ++li)
         drawMountainField(mountainLayers[li]);
 
-    // tiny birds (between mountains and clouds)
+    // tiny birds (in front of mountains)
     {
         for (const b of tinyBirds)
         {
@@ -548,21 +559,6 @@ function drawScenery()
             {
                 const p = vec2(base + k*wrap, b.y);
                 drawTinyBird(p, b.s, time*12 + b.ph);
-            }
-        }
-    }
-
-    // clouds (front of mountains)
-    {
-        const wrap = 80;
-        for (const c of clouds)
-        {
-            const off = -wrapOffset(bgScrollX * c.parallax, wrap);
-            // tile across view
-            for (let k=-1; k<=1; ++k)
-            {
-                const p = vec2(c.x + off + k*wrap, c.y);
-                drawCloud(p, c.r, c.parallax > .12);
             }
         }
     }
@@ -646,7 +642,7 @@ function gameUpdate()
             const up = rotateVec(vec2(0,1), tilt);
             const base = birdPos.add(scaleVec(forward, -birdRadius*1.0)).add(scaleVec(up, -0.08));
             const v = forward.scale(-rand(1.5, 3.2)).add(up.scale(rand(-.5,.5)));
-            emitParticle(base, v, rand(.18,.28), rand(.08,.13), puffDark);
+            emitParticle(base, v, rand(.25,.40), rand(.18,.28), puffDark);
         }
     }
 
@@ -951,7 +947,7 @@ function gameRenderPost()
     // prompts
     if (state === STATE_READY)
     {
-        drawTextScreen('FLAPPY (primitive edition)', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 20), 46, hsl(0,0,1), 6, hsl(0,0,0,.5));
+        drawTextScreen('FLAPPY', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 20), 46, hsl(0,0,1), 6, hsl(0,0,0,.5));
         drawTextScreen('SPACE / CLICK / TAP to start', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 40), 30, hsl(0,0,1,.9), 5, hsl(0,0,0,.5));
     }
     else if (state === STATE_DEAD)
@@ -959,9 +955,6 @@ function gameRenderPost()
         drawTextScreen('CRASH!', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 30), 56, hsl(.02,.9,.55), 7, hsl(0,0,0,.55));
         drawTextScreen('SPACE / CLICK / TAP to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 30), 30, hsl(0,0,1,.9), 5, hsl(0,0,0,.55));
     }
-
-    // tiny controls hint
-    drawTextScreen('Controls: Space / Click / Tap', vec2(165, mainCanvasSize.y - 26), 22, hsl(0,0,1,.75), 4, hsl(0,0,0,.35));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
