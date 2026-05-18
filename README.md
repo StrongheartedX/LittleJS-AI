@@ -59,6 +59,7 @@ Did you make a game you think should be included? Send a pull request!
 | Game | Genre | Touch | Gamepad | Box2D | Play |
 |------|-------|-------|---------|-------|------|
 | Skiing | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/skiing.html) |
+| Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
 | Snood | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snood.html) |
 | Breakout | 👾 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/breakout.html) |
 | Combat | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/combat.html) |
@@ -68,7 +69,7 @@ Did you make a game you think should be included? Send a pull request!
 | Plinko | 🎯 | ✅ | ✅ | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/plinko.html) |
 | Micro Racer | 🏎️ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) |
 | Spy Hunter | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/spyhunter.html) |
-| Mario | 🏃 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) |
+| Dr. Mario | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/drMario.html) |
 
 ## 🧪 Prototypes & Experiments
 
@@ -80,7 +81,6 @@ Rough early experiments — playable concepts that haven't been curated yet. Exp
 | Baseball | ⚽ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/baseball.html) |
 | Joust | 🏃 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/joust.html) |
 | Basketball | ⚽ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/basketball.html) |
-| Dr. Mario | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/drMario.html) |
 | Gradius | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/gradius.html) |
 | Kaboom | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/kaboom.html) |
 | Moon Patrol | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/moonPatrol.html) |
