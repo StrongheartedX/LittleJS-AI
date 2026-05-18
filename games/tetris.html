@@ -1416,9 +1416,9 @@ async function gameInit()
 
 function createMenuUI()
 {
-    // Canvas is 1440x1080, UI uses screen coordinates with center at (720, 540)
-    const cx = 720;
-    const cy = 540;
+    // UI positions are relative to canvas center (anchor system)
+    const cx = 0;
+    const cy = 0;
 
     // Title is drawn manually in renderMenuTitle() for animation effect
 

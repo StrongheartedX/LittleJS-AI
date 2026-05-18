@@ -951,8 +951,9 @@ function gameInit()
 
 function createMenuButtons()
 {
-    const cx = mainCanvasSize.x / 2;
-    const cy = mainCanvasSize.y / 2;
+    // UI positions are relative to canvas center (anchor system)
+    const cx = 0;
+    const cy = 0;
     const btnW = 280;
     const btnH = 70;
     const spacing = 90;
@@ -1008,27 +1009,7 @@ function updateMenuButtons()
     btnMedium.visible = showMenu;
     btnHard.visible = showMenu;
     
-    // Update positions based on canvas size
-    if (showMenu)
-    {
-        const cx = mainCanvasSize.x / 2;
-        const cy = mainCanvasSize.y / 2;
-        const btnW = 280;
-        const btnH = 70;
-        const spacing = 90;
-        
-        txtSelectDifficulty.pos = vec2(cx, cy + 0);
-        txtSelectDifficulty.size = vec2(400, 50);
-        
-        btnEasy.pos = vec2(cx, cy + 60);
-        btnEasy.size = vec2(btnW, btnH);
-        
-        btnMedium.pos = vec2(cx, cy + 60 + spacing);
-        btnMedium.size = vec2(btnW, btnH);
-        
-        btnHard.pos = vec2(cx, cy + 60 + spacing * 2);
-        btnHard.size = vec2(btnW, btnH);
-    }
+    // Positions auto-center via the UI anchor system; nothing to update here.
 }
 
 function gameUpdate()
