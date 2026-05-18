@@ -51,6 +51,12 @@ const BULLET_MAX = 5;
 
 const ROCK_RADII = [0, 1.25, 2.05, 3.2]; // index = sizeTier (1..3)
 
+// Single knob for the vector-line look. Everything else scales from this.
+const LINE_WIDTH = 0.04;
+const LINE_WIDTH_THIN  = LINE_WIDTH * 0.75;   // fine details (cockpit, debris)
+const LINE_WIDTH_UFO   = LINE_WIDTH * 0.875;  // saucer body
+const LINE_WIDTH_FAINT = LINE_WIDTH * 0.625;  // background border
+
 // ============================================================
 // Globals
 // ============================================================
@@ -336,12 +342,12 @@ class Ship extends EngineObject
         const l = this.pos.subtract(dir.scale(SHIP_RADIUS*1.0)).add(right.scale(SHIP_RADIUS*0.95));
         const r = this.pos.subtract(dir.scale(SHIP_RADIUS*1.0)).subtract(right.scale(SHIP_RADIUS*0.95));
 
-        drawLine(nose, l, .08, col);
-        drawLine(l, r, .08, col);
-        drawLine(r, nose, .08, col);
+        drawLine(nose, l, LINE_WIDTH, col);
+        drawLine(l, r, LINE_WIDTH, col);
+        drawLine(r, nose, LINE_WIDTH, col);
 
         // tiny cockpit line
-        drawLine(this.pos.add(dir.scale(SHIP_RADIUS*.35)), this.pos.subtract(dir.scale(SHIP_RADIUS*.25)), .06, col);
+        drawLine(this.pos.add(dir.scale(SHIP_RADIUS*.35)), this.pos.subtract(dir.scale(SHIP_RADIUS*.25)), LINE_WIDTH_THIN, col);
     }
 }
 
@@ -449,14 +455,14 @@ class Rock extends EngineObject
             const pLocal = this.points[i].rotate(this.angle);
             const p = this.pos.add(pLocal);
             if (i)
-                drawLine(prev, p, .08, col);
+                drawLine(prev, p, LINE_WIDTH, col);
             prev = p;
         }
         // close
         if (this.points.length)
         {
             const first = this.pos.add(this.points[0].rotate(this.angle));
-            drawLine(prev, first, .08, col);
+            drawLine(prev, first, LINE_WIDTH, col);
         }
     }
 }
@@ -503,7 +509,7 @@ class Debris extends EngineObject
         const dir = angleToVec(this.angle);
         const aPos = this.pos.subtract(dir.scale(this.length*.5));
         const bPos = this.pos.add(dir.scale(this.length*.5));
-        drawLine(aPos, bPos, .06, col);
+        drawLine(aPos, bPos, LINE_WIDTH_THIN, col);
     }
 }
 
@@ -620,7 +626,7 @@ class Ufo extends EngineObject
         const col = rgb(1, 1, 1);
         const r = this.r;
         // saucer outline (hex-disc with cockpit dome)
-        const lw = .07;
+        const lw = LINE_WIDTH_UFO;
         const body = [
             vec2(-r,        r*.08),
             vec2(-r*.55,    r*.32),
@@ -953,10 +959,10 @@ function gameRender()
     // faint border
     const w = worldHalf.x, h = worldHalf.y;
     const col = rgb(1,1,1,.08);
-    drawLine(vec2(-w,-h), vec2(w,-h), .05, col);
-    drawLine(vec2(w,-h), vec2(w,h), .05, col);
-    drawLine(vec2(w,h), vec2(-w,h), .05, col);
-    drawLine(vec2(-w,h), vec2(-w,-h), .05, col);
+    drawLine(vec2(-w,-h), vec2(w,-h), LINE_WIDTH_FAINT, col);
+    drawLine(vec2(w,-h), vec2(w,h), LINE_WIDTH_FAINT, col);
+    drawLine(vec2(w,h), vec2(-w,h), LINE_WIDTH_FAINT, col);
+    drawLine(vec2(-w,h), vec2(-w,-h), LINE_WIDTH_FAINT, col);
 }
 
 function gameRenderPost()
