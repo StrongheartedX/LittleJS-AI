@@ -20,13 +20,9 @@ LittleJS and everything in this repository is **MIT licensed!** See [LICENSE](LI
 - [Templates Folder](templates/) - Starting templates and reusable components
 - [LittleJS GPT AI](https://chatgpt.com/g/g-67c7c080b5bc81919736bc8815836be6-littlejs-game-maker) - Use ChatGPT to make games without writing any code
 
-
-**Genre legend:** 🧩 Puzzle · 🚀 Shooter · 🎯 Physics/Aim · 🏎️ Racing · 🏃 Platformer/Action · 👾 Arcade · ♟️ Board · ⚽ Sports · 🗺️ Adventure
-**Support columns** (Touch, Gamepad, Box2D): ✅ = verified, blank = untested
-
 ## 🕹️ Featured Games Made With AI
 
-The most polished prototypes — playable end-to-end with menus, sound, and a complete loop.
+The most polished prototypes — playable games with menus, sound, and a complete loop.
 
 | Game | Genre | Touch | Gamepad | Box2D | Play |
 |------|-------|-------|---------|-------|------|
