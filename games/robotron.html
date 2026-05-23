@@ -1166,46 +1166,74 @@ class Human extends EngineObject
 ///////////////////////////////////////////////////////////////////////////////
 // wave composition (Robotron 2084 style cycling)
 
+// Arcade-exact Robotron 2084 wave data, decoded from the ROM table at $2E24.
+// Columns: [grunts, electrodes, mommies, daddies, mikeys, hulks, brains, spheroids, quarks]
+// Tanks are NOT spawned directly — Quarks transport them in.
+// After wave 40, waves 21–40 repeat indefinitely (until wave 256 wraps back to 1).
+const arcadeWaveData = [
+    // wave 1–10
+    [15,  5,  1, 1, 0,  0,  0, 0,  0],
+    [17, 15,  1, 1, 1,  5,  0, 1,  0],
+    [22, 25,  2, 2, 2,  6,  0, 3,  0],
+    [34, 25,  2, 2, 2,  7,  0, 4,  0],
+    [20, 20, 15, 0, 1,  0, 15, 1,  0],
+    [32, 25,  3, 3, 3,  7,  0, 4,  0],
+    [ 0,  0,  4, 4, 4, 12,  0, 0, 10],
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [60,  0,  3, 3, 3,  4,  0, 5,  0],
+    [25, 20,  0, 22, 0, 0, 20, 1,  0],
+    // wave 11–20
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [ 0,  0,  3, 3, 3, 13,  0, 0, 12],
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [27,  5,  5, 5, 5, 20,  0, 2,  0],
+    [25, 20,  0, 0, 22, 2, 20, 1,  0],
+    [35, 25,  3, 3, 3,  3,  0, 5,  0],
+    [ 0,  0,  3, 3, 3, 14,  0, 0, 12],
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [70,  0,  3, 3, 3,  3,  0, 5,  0],
+    [25, 20,  8, 8, 8,  2, 20, 2,  0],
+    // wave 21–30
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [ 0,  0,  3, 3, 3, 15,  0, 0, 12],
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [ 0,  0,  3, 3, 3, 13,  0, 6,  7],
+    [25, 20, 25, 0, 1,  1, 21, 1,  0],
+    [35, 25,  3, 3, 3,  8,  0, 5,  0],
+    [ 0,  0,  3, 3, 3, 16,  0, 0, 12],
+    [35, 25,  3, 3, 3,  8,  0, 5,  1],
+    [75,  0,  3, 3, 3,  4,  0, 5,  1],
+    [25, 20,  0, 25, 0, 1, 22, 1,  1],
+    // wave 31–40
+    [35, 25,  3, 3, 3,  8,  0, 5,  1],
+    [ 0,  0,  3, 3, 3, 16,  0, 0, 13],
+    [35, 25,  3, 3, 3,  8,  0, 5,  1],
+    [30,  0,  3, 3, 3, 25,  0, 2,  2],
+    [27, 15,  0, 0, 25, 2, 23, 1,  2],
+    [35, 25,  3, 3, 3,  8,  0, 5,  2],
+    [ 0,  0,  3, 3, 3, 16,  0, 0, 14],
+    [35, 25,  3, 3, 3,  8,  0, 5,  2],
+    [80,  0,  3, 3, 3,  6,  0, 5,  1],
+    [30, 15, 10, 10, 10, 2, 25, 1,  1],
+];
+
 function getWaveComposition(w)
 {
-    const tier = Math.floor((w - 1) / 10);
-    const lastDigit = w % 10;
-
-    // Hulk wave: 14, 34, 54... (large hulk crowd in the middle)
-    if (w >= 14 && (w - 14) % 20 === 0)
-        return { grunts: 0, hulks: 10 + tier * 3, brains: 0, spheroids: 0, quarks: 0, tanks: 0,
-                 electrodes: 6, humans: 5 };
-
-    // Double Trouble: 24, 44, 64... (Spheroids + Quarks dropping enforcers and tanks everywhere)
-    if (w >= 24 && (w - 24) % 20 === 0)
-        return { grunts: 0, hulks: 0, brains: 0, spheroids: 5 + tier, quarks: 4 + tier, tanks: 0,
-                 electrodes: 6, humans: 3 };
-
-    // Brain wave: every 5 — many brains hunting many humans
-    if (w % 5 === 0)
-        return { grunts: 0, hulks: w >= 10 ? 2 : 0, brains: 8 + tier * 2, spheroids: 0, quarks: 0, tanks: 0,
-                 electrodes: 4, humans: min(20, 14 + tier * 2) };
-
-    // Tank wave: ends in 2 or 7 (starting wave 7) — heavy tank presence + quarks dropping more
-    if (w >= 7 && (lastDigit === 2 || lastDigit === 7))
-        return { grunts: 0, hulks: 0, brains: 0, spheroids: 0, quarks: 5 + tier, tanks: 12 + tier * 3,
-                 electrodes: 4, humans: 3 };
-
-    // Grunt wave: ends in 9 — massive grunt swarm
-    if (w >= 9 && lastDigit === 9)
-        return { grunts: 50 + tier * 10, hulks: 0, brains: 0, spheroids: 0, quarks: 0, tanks: 0,
-                 electrodes: 4, humans: 3 };
-
-    // Standard wave
+    // After wave 40, waves 21–40 repeat
+    const effW = w > 40 ? ((w - 21) % 20) + 21 : w;
+    const d = arcadeWaveData[effW - 1];
     return {
-        grunts:    21 + tier * 5,
-        hulks:     w >= 2 ? 1 + Math.floor((w-2)/3) : 0,
-        brains:    0,
-        spheroids: w >= 2 ? 1 + Math.floor((w-2)/5) : 0,
-        quarks:    w >= 28 ? 1 + Math.floor((w-28)/8) : 0,
-        tanks:     0,
-        electrodes: min(electrodeMaxCount, 9 + Math.floor(w/2)),
-        humans:    3,
+        grunts:     d[0],
+        electrodes: d[1],
+        mommies:    d[2],
+        daddies:    d[3],
+        mikeys:     d[4],
+        humans:     d[2] + d[3] + d[4],
+        hulks:      d[5],
+        brains:     d[6],
+        spheroids:  d[7],
+        quarks:     d[8],
+        tanks:      0,   // tanks come from quarks only (arcade behavior)
     };
 }
 
@@ -1233,14 +1261,17 @@ function spawnElectrodesForWave(count)
     }
 }
 
-function spawnHumansForWave(count)
+function spawnHumansForWave(mommies, daddies, mikeys)
 {
     clearAllHumans();
-    for (let i=0;i<count;i++)
+    const spawnOne = type =>
     {
         const pos = randArenaPosAvoidStuff(safeZoneRadius, 2.0, 1.6);
-        humans.push(new Human(pos, i % 3));
-    }
+        humans.push(new Human(pos, type));
+    };
+    for (let i=0;i<mommies;i++) spawnOne(0);
+    for (let i=0;i<daddies;i++) spawnOne(1);
+    for (let i=0;i<mikeys;i++)  spawnOne(2);
 }
 
 function countKillableEnemiesAlive()
@@ -1310,16 +1341,16 @@ function enterGetReadyForWave(nextWave)
     clearAllBullets();
     const c = getWaveComposition(nextWave);
     spawnElectrodesForWave(c.electrodes);
-    spawnHumansForWave(c.humans);
+    spawnHumansForWave(c.mommies, c.daddies, c.mikeys);
 
     // Spawn enemies now so they appear alongside electrodes and humans.
     // They're frozen until startWave() unlocks the player (their update() bails on playerControlLocked).
-    for (let i=0;i<c.grunts;i++)     spawnGrunt();
-    for (let i=0;i<c.hulks;i++)      spawnHulk();
-    for (let i=0;i<c.brains;i++)     spawnBrain();
-    for (let i=0;i<c.spheroids;i++)  spawnSpheroid();
-    for (let i=0;i<c.quarks;i++)     spawnQuark();
-    for (let i=0;i<(c.tanks||0);i++) spawnTank();
+    for (let i=0;i<c.grunts;i++)    spawnGrunt();
+    for (let i=0;i<c.hulks;i++)     spawnHulk();
+    for (let i=0;i<c.brains;i++)    spawnBrain();
+    for (let i=0;i<c.spheroids;i++) spawnSpheroid();
+    for (let i=0;i<c.quarks;i++)    spawnQuark();
+    // Tanks are spawned only by Quarks, never directly (arcade behavior).
 }
 
 function endWave()
@@ -1651,14 +1682,23 @@ function runSelfTests()
 {
     console.assert(overlapAABB(vec2(0,0), vec2(1,1), vec2(.4,.4), vec2(1,1)) === true);
     console.assert(overlapAABB(vec2(0,0), vec2(1,1), vec2(10,10), vec2(1,1)) === false);
-    console.assert(getWaveComposition(1).grunts >= 21, 'wave 1 grunts');
-    console.assert(getWaveComposition(1).brains === 0, 'wave 1 no brains');
-    console.assert(getWaveComposition(2).spheroids >= 1, 'spheroids appear wave 2');
-    console.assert(getWaveComposition(5).brains >= 8 && getWaveComposition(5).humans >= 14, 'brain wave at 5');
-    console.assert(getWaveComposition(7).tanks >= 12, 'tank wave at 7');
-    console.assert(getWaveComposition(9).grunts >= 50, 'grunt wave at 9');
-    console.assert(getWaveComposition(14).hulks >= 10, 'hulk wave at 14');
-    console.assert(getWaveComposition(24).quarks >= 4 && getWaveComposition(24).spheroids >= 5, 'double trouble at 24');
+    // Arcade-exact wave data checks
+    const w1 = getWaveComposition(1);
+    console.assert(w1.grunts === 15 && w1.electrodes === 5 && w1.humans === 2, 'wave 1 arcade match');
+    const w5 = getWaveComposition(5);
+    console.assert(w5.brains === 15 && w5.mommies === 15 && w5.mikeys === 1 && w5.daddies === 0, 'wave 5 Mikey-bug brain wave');
+    const w7 = getWaveComposition(7);
+    console.assert(w7.grunts === 0 && w7.quarks === 10 && w7.hulks === 12, 'wave 7 quark+hulk tank wave');
+    const w9 = getWaveComposition(9);
+    console.assert(w9.grunts === 60 && w9.electrodes === 0, 'wave 9 grunt wave (no electrodes)');
+    const w14 = getWaveComposition(14);
+    console.assert(w14.hulks === 20, 'wave 14 hulk wave');
+    const w24 = getWaveComposition(24);
+    console.assert(w24.spheroids === 6 && w24.quarks === 7, 'wave 24 double trouble');
+    // Wave > 40 should repeat the 21–40 cycle
+    const w41 = getWaveComposition(41);
+    const w21 = getWaveComposition(21);
+    console.assert(w41.grunts === w21.grunts && w41.quarks === w21.quarks, 'wave 41 = wave 21 (cycle)');
     console.assert(scoreProg === 100, 'prog score is 100');
 }
 
@@ -1803,22 +1843,20 @@ function gameRenderPost()
     {
         drawTextScreen(`WAVE  ${gameWave}`, vec2(W/2, H/2 - 30), 90, rgb(1,.8,.3), 6, rgb(0,0,0));
         const comp = getWaveComposition(gameWave);
-        const w = gameWave;
-        const lastDigit = w % 10;
-        const isHulkWave = w >= 14 && (w - 14) % 20 === 0;
-        const isDoubleTrouble = w >= 24 && (w - 24) % 20 === 0;
-        const isBrainWave = w % 5 === 0;
-        const isTankWave = w >= 7 && (lastDigit === 2 || lastDigit === 7);
-        const isGruntWave = w >= 9 && lastDigit === 9;
+        // Detect special wave types directly from the arcade composition data
+        const isBrainWave      = comp.brains > 0;
+        const isTankWave       = !isBrainWave && comp.quarks >= 7;
+        const isGruntWave      = !isBrainWave && !isTankWave && comp.grunts >= 50;
+        const isHulkWave       = !isBrainWave && !isTankWave && comp.hulks >= 15;
+        const isDoubleTrouble  = !isBrainWave && !isTankWave && comp.spheroids >= 5 && comp.quarks >= 5;
         const subtitle =
-              isHulkWave      ? 'HULK WAVE - GET OUT OF THE CROWD'
-            : isDoubleTrouble ? 'DOUBLE TROUBLE - SPHEROIDS AND QUARKS'
-            : isBrainWave     ? 'BRAIN WAVE - SAVE THE FAMILY'
-            : isTankWave      ? 'TANK ATTACK'
-            : isGruntWave     ? 'GRUNT WAVE - SURROUNDED'
-            : (w === 2 && comp.spheroids > 0) ? 'SPHEROIDS APPEAR'
-            : (w === 2 && comp.hulks > 0)     ? 'HULKS APPEAR'
-            : comp.quarks > 0                 ? 'QUARKS APPEAR'
+              isBrainWave      ? 'BRAIN WAVE - SAVE THE FAMILY'
+            : isTankWave       ? 'TANK ATTACK'
+            : isGruntWave      ? 'GRUNT WAVE - SURROUNDED'
+            : isHulkWave       ? 'HULK WAVE - GET OUT OF THE CROWD'
+            : isDoubleTrouble  ? 'DOUBLE TROUBLE - SPHEROIDS AND QUARKS'
+            : (gameWave === 2) ? 'HULKS AND SPHEROIDS APPEAR'
+            : comp.quarks > 0  ? 'QUARKS APPEAR'
             : 'GET READY';
         drawTextScreen(subtitle, vec2(W/2, H/2 + 50), 30, rgb(.9,.9,1), 4, rgb(0,0,0));
     }
