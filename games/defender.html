@@ -47,6 +47,7 @@ let isPlaying, gameOver;
 let player;
 let enemies, bullets, humans, particles;
 let terrain;             // array of terrain heights along world X
+let stars;               // pre-generated starfield: [{x, y, b, s, phase}, ...]
 let baiterTimer;
 let bombFlash;           // 0..1 white flash after smart bomb
 let shakeTimer;
@@ -112,6 +113,28 @@ function terrainAt(x)
     const i0 = Math.floor(f) % N;
     const i1 = (i0 + 1) % N;
     return lerp(terrain[i0], terrain[i1], f - Math.floor(f));
+}
+
+// Pre-generated starfield. Stars live in world space and wrap with the world.
+// Cull per-frame by camera bounds — keeps the field dense and gap-free no
+// matter where the camera is.
+const STAR_COUNT  = 500;
+const STAR_Y_LOW  = -16;     // a bit below the terrain trough
+const STAR_Y_HIGH = SKY_TOP + 4;
+function genStars()
+{
+    stars = [];
+    const rg = new RandomGenerator(8472);
+    for (let i = 0; i < STAR_COUNT; i++)
+    {
+        stars.push({
+            x:     rg.float(0, WORLD_W),
+            y:     rg.float(STAR_Y_LOW, STAR_Y_HIGH),
+            b:     rg.float(.35, 1),
+            s:     rg.float(.05, .13),
+            phase: rg.float(0, Math.PI * 2),
+        });
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1248,6 +1271,7 @@ async function gameInit()
     });
 
     // Seed the attract-mode world and surface the title menu
+    genStars();
     startAttractMode();
     showMenu('title');
 }
@@ -1356,22 +1380,19 @@ function gameUpdatePost()
 // Render
 function drawStars()
 {
-    // Sparse parallax stars; deterministic per-tile based on integer x
     const cs = getCameraSize();
-    const left  = cameraPos.x - cs.x / 2 - 1;
-    const right = cameraPos.x + cs.x / 2 + 1;
-    for (let i = Math.floor(left); i < Math.ceil(right); i++)
+    const halfW = cs.x / 2 + 1;
+    const yMin = cameraPos.y - cs.y / 2 - 1;
+    const yMax = cameraPos.y + cs.y / 2 + 1;
+    for (const st of stars)
     {
-        const seed = ((i % WORLD_W) + WORLD_W) % WORLD_W;
-        const rg = new RandomGenerator(seed * 131 + 7);
-        const n = rg.int(0, 2);
-        for (let k = 0; k < n; k++)
-        {
-            const sx = i + rg.float();
-            const sy = -2 + rg.float() * (SKY_TOP + 2);
-            const b = rg.float(.3, .9);
-            drawRect(vec2(camDrawX(sx), sy), vec2(.07, .07), hsl(0, 0, b, .9));
-        }
+        if (st.y < yMin || st.y > yMax) continue;
+        const dx = wrapDX(st.x, cameraPos.x);
+        if (Math.abs(dx) > halfW) continue;
+        // Subtle twinkle
+        const a = .6 + .4 * Math.sin(time * 2 + st.phase);
+        drawRect(vec2(cameraPos.x + dx, st.y),
+            vec2(st.s, st.s), hsl(0, 0, st.b, a));
     }
 }
 
