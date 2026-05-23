@@ -2092,8 +2092,8 @@ function buildMenus()
 function fitCameraToArena()
 {
     if (!mainCanvasSize || mainCanvasSize.x < 100) return;
-    const marginX = 1.2;
-    const marginY = 1.2;
+    const marginX = 2.2;
+    const marginY = 2.2;
     cameraScale = min(
         mainCanvasSize.x / (arenaSize.x + marginX),
         mainCanvasSize.y / (arenaSize.y + marginY)
@@ -2309,7 +2309,7 @@ function gameRenderPost()
     // TOP-RIGHT is reserved for the HUD toolbar (fullscreen / menu buttons)
 
     // BOTTOM-LEFT — lives + next extra-life threshold
-    const bottomOffset = 48;
+    const bottomOffset = 28;
     if (player)
     {
         drawTextScreen('LIVES', vec2(20, H - bottomOffset), 36, rgb(.7,1,1), 5, hsl(0,0,0), 'left');
