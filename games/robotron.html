@@ -2110,6 +2110,22 @@ function spawnAttractDecoration()
 
 function gameUpdate()
 {
+    {
+        // stretch canvas to sides leaving black areas so virtual gamepads can go there
+        const a1 = 1280 / 720;
+        const a2 = innerWidth / innerHeight;
+        canvasFixedSize = vec2(1280, 720);
+        if (a2 > a1) 
+            canvasFixedSize.x *= a2/a1;
+        cameraScale = 32;
+    }
+    /*{
+        // scale up to native res
+        const scale = Math.ceil(innerHeight / canvasFixedSize.y);
+        setCanvasFixedSize(canvasFixedSize.multiply(vec2(scale)));
+        cameraScale = 32 * scale;
+    }*/
+
     // Pause hotkey — only meaningful when actually playing
     if (isPlaying && !gameOver &&
         (keyWasPressed('Escape') || (typeof gamepadWasPressed === 'function' && gamepadWasPressed(9))))
