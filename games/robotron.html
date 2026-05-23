@@ -253,9 +253,9 @@ class Bullet extends EngineObject
         // outer glow streak (tall rect — angle 0 means pointing up, vel.angle() rotates correctly)
         drawRect(this.pos, vec2(.22, .8), rgb(c.r, c.g, c.b, .35), angle);
         // bright core streak
-        drawRect(this.pos, vec2(.14, .55), c, angle);
+        drawRect(this.pos, vec2(.14, 2), c, angle);
         // hot white center
-        drawRect(this.pos, vec2(.22, .22), rgb(1,1,1));
+        drawRect(this.pos, vec2(.1, 1), rgb(1,1,1), angle);
     }
 }
 
@@ -1189,9 +1189,10 @@ class Human extends EngineObject
     }
     render()
     {
-        const bob = Math.sin(this.walkPhase) * .06;
-        // Small leg swing so legs stay anchored to the body (was .08 — caused detach)
-        const legSwing = Math.sin(this.walkPhase) * .03;
+        const phase = Math.sin(this.walkPhase);
+        const bob = phase * .04;
+        const armSwing = phase * .07;        // symmetric swing around body Y
+        const legStretch = phase * .05;       // one leg longer / other shorter
         const palette = [
             { body: rgb(1, .45, .75), head: rgb(1, .85, .7), hair: rgb(.85, .55, .25) },
             { body: rgb(.3, .55, 1),  head: rgb(1, .85, .7), hair: rgb(.25, .15, .1)  },
@@ -1205,14 +1206,29 @@ class Human extends EngineObject
         const p = this.pos.add(shake);
 
         const flash = this.startled && (this.startled & 4) ? rgb(1,1,1) : c.body;
+        const bodyCenterY = -.05 + bob;
+        const bodyBottomY = bodyCenterY - .21;       // body height .42 / 2
+
+        // shadow
         drawRect(p.add(vec2(0,-.45)), vec2(.5, .1), rgb(0,0,0,.35));
-        drawRect(p.add(vec2(-.1, -.32 - legSwing)), vec2(.13, .22), c.body);
-        drawRect(p.add(vec2( .1, -.32 + legSwing)), vec2(.13, .22), c.body);
-        drawRect(p.add(vec2(0, -.05 + bob)), vec2(.42, .42), flash);
-        drawRect(p.add(vec2(-.27,  bob)), vec2(.12, .3), flash);
-        drawRect(p.add(vec2( .27, -bob)), vec2(.12, .3), flash);
-        drawRect(p.add(vec2(0, .3 + bob)), vec2(.26, .26), c.head);
-        drawRect(p.add(vec2(0, .42 + bob)), vec2(.28, .08), c.hair);
+
+        // legs — animate by HEIGHT so the top is always anchored to body bottom (no detach)
+        const baseLegH = .22;
+        const leftLegH  = baseLegH + legStretch;
+        const rightLegH = baseLegH - legStretch;
+        drawRect(p.add(vec2(-.1, bodyBottomY - leftLegH /2)), vec2(.13, leftLegH ), c.body);
+        drawRect(p.add(vec2( .1, bodyBottomY - rightLegH/2)), vec2(.13, rightLegH), c.body);
+
+        // body
+        drawRect(p.add(vec2(0, bodyCenterY)), vec2(.42, .42), flash);
+
+        // arms — both anchored to body's Y, swing symmetrically (opposite of each other)
+        drawRect(p.add(vec2(-.27, bodyCenterY + armSwing)), vec2(.12, .3), flash);
+        drawRect(p.add(vec2( .27, bodyCenterY - armSwing)), vec2(.12, .3), flash);
+
+        // head + hair + eyes ride with the bobbing body
+        drawRect(p.add(vec2(0,    .3  + bob)), vec2(.26, .26), c.head);
+        drawRect(p.add(vec2(0,    .42 + bob)), vec2(.28, .08), c.hair);
         drawRect(p.add(vec2(-.06, .32 + bob)), vec2(.04), rgb(0,0,0));
         drawRect(p.add(vec2( .06, .32 + bob)), vec2(.04), rgb(0,0,0));
     }
@@ -1530,7 +1546,7 @@ class Player extends EngineObject
         if (shootInput && this.cooldown <= 0)
         {
             // Bullets fire straight from the player — no aim barrel in arcade Robotron
-            bullets.push(new Bullet(this.pos.copy(), this.facing.scale(.85)));
+            bullets.push(new Bullet(this.pos.copy(), this.facing.scale(1)));
             this.cooldown = 5;
             sfxShoot.play(this.pos);
         }
@@ -1555,35 +1571,44 @@ class Player extends EngineObject
         // hide player during the first half of the mid-wave death pause (breathing room)
         if (respawnTimer > respawnHiddenFrames) return;
 
-        const bob = Math.sin(this.walkPhase) * .06;
-        const legSwing = Math.sin(this.walkPhase) * .03;
+        const phase = Math.sin(this.walkPhase);
+        const bob = phase * .05;
+        const armSwing = phase * .08;
+        const legStretch = phase * .06;
         const blink = this.invuln > 0 && (Math.floor(this.invuln/4) & 1);
 
-        // Arcade Robotron hero: red helmet, white torso, dark legs
         const body = blink ? rgb(1, 1, 1) : rgb(.95, .95, .95);
         const dark = rgb(.25, .25, .3);
         const head = blink ? rgb(1, .6, .6) : rgb(1, .2, .2);
         const headDark = rgb(.55, .05, .05);
         const eyes = rgb(1, 1, 1);
 
+        const bodyCenterY = -.02 + bob;
+        const bodyBottomY = bodyCenterY - .275;     // body height .55 / 2
+
         // shadow
         drawRect(this.pos.add(vec2(0, -.55)), vec2(.7, .14), rgb(0,0,0,.4));
-        // legs (alternating swing — uses same small offset as humans so they stay attached)
-        drawRect(this.pos.add(vec2(-.14, -.4 - legSwing)), vec2(.2, .32), dark);
-        drawRect(this.pos.add(vec2( .14, -.4 + legSwing)), vec2(.2, .32), dark);
+
+        // legs — height-animated, anchored to body bottom (no detach)
+        const baseLegH = .32;
+        const leftLegH  = baseLegH + legStretch;
+        const rightLegH = baseLegH - legStretch;
+        drawRect(this.pos.add(vec2(-.14, bodyBottomY - leftLegH /2)), vec2(.2, leftLegH ), dark);
+        drawRect(this.pos.add(vec2( .14, bodyBottomY - rightLegH/2)), vec2(.2, rightLegH), dark);
+
         // white torso
-        drawRect(this.pos.add(vec2(0, -.02 + bob)), vec2(.55, .55), body);
-        // arms
-        drawRect(this.pos.add(vec2(-.35,  bob)), vec2(.16, .42), body);
-        drawRect(this.pos.add(vec2( .35, -bob)), vec2(.16, .42), body);
-        // big red helmet/head
-        drawRect(this.pos.add(vec2(0, .42 + bob)), vec2(.6, .5), head);
-        // helmet shadow band along the bottom
-        drawRect(this.pos.add(vec2(0, .22 + bob)), vec2(.62, .08), headDark);
-        // eye visor slit
-        drawRect(this.pos.add(vec2(0, .42 + bob)), vec2(.42, .1), headDark);
-        drawRect(this.pos.add(vec2(-.1, .42 + bob)), vec2(.08, .08), eyes);
-        drawRect(this.pos.add(vec2( .1, .42 + bob)), vec2(.08, .08), eyes);
+        drawRect(this.pos.add(vec2(0, bodyCenterY)), vec2(.55, .55), body);
+
+        // arms — both anchored to body Y, swing symmetrically opposite
+        drawRect(this.pos.add(vec2(-.35, bodyCenterY + armSwing)), vec2(.16, .42), body);
+        drawRect(this.pos.add(vec2( .35, bodyCenterY - armSwing)), vec2(.16, .42), body);
+
+        // big red helmet/head + visor
+        drawRect(this.pos.add(vec2(0,    .42 + bob)), vec2(.6, .5), head);
+        drawRect(this.pos.add(vec2(0,    .22 + bob)), vec2(.62, .08), headDark);
+        drawRect(this.pos.add(vec2(0,    .42 + bob)), vec2(.42, .1), headDark);
+        drawRect(this.pos.add(vec2(-.1,  .42 + bob)), vec2(.08, .08), eyes);
+        drawRect(this.pos.add(vec2( .1,  .42 + bob)), vec2(.08, .08), eyes);
     }
 }
 
