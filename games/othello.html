@@ -42,7 +42,7 @@ let blackScore = 2;
 let whiteScore = 2;
 let validMoves = [];
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai' — set on startGame
-let difficulty = 'medium'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let passCount = 0;
 let moveHistory = [];
 let lastMove = null; // {row, col} for highlighting
@@ -267,20 +267,43 @@ const othelloGame = {
             }
         }
 
-        // Mobility (and disc counts in one pass)
+        // Mobility, disc counts, and frontier discs in one pass.
         let playerMoves = 0, opponentMoves = 0;
         let playerDiscs = 0, opponentDiscs = 0;
+        let playerFrontier = 0, opponentFrontier = 0;
         for (let r = 0; r < BOARD_SIZE; r++)
         {
             for (let c = 0; c < BOARD_SIZE; c++)
             {
-                if (b[r][c] === player) playerDiscs++;
-                else if (b[r][c] === opponent) opponentDiscs++;
+                const cell = b[r][c];
+                if (cell === player) playerDiscs++;
+                else if (cell === opponent) opponentDiscs++;
                 if (getFlipsForState(b, r, c, player).length > 0) playerMoves++;
                 if (getFlipsForState(b, r, c, opponent).length > 0) opponentMoves++;
+
+                // Frontier disc: any of the 8 neighbors is empty.
+                if (cell !== DISC_EMPTY)
+                {
+                    let isFrontier = false;
+                    for (let dr = -1; dr <= 1 && !isFrontier; dr++)
+                        for (let dc = -1; dc <= 1 && !isFrontier; dc++)
+                        {
+                            if (dr === 0 && dc === 0) continue;
+                            const nr = r + dr, nc = c + dc;
+                            if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE
+                                && b[nr][nc] === DISC_EMPTY)
+                                isFrontier = true;
+                        }
+                    if (isFrontier)
+                    {
+                        if (cell === player) playerFrontier++;
+                        else opponentFrontier++;
+                    }
+                }
             }
         }
         score += (playerMoves - opponentMoves) * 2;
+        score -= (playerFrontier - opponentFrontier) * 3;
 
         // Late-game disc count (only weighty once the board is mostly full)
         if (playerDiscs + opponentDiscs > 40)
@@ -294,7 +317,7 @@ function strategyForDifficulty(d)
 {
     if (d === 'easy')   return randomAI;
     if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 5); // 'hard' (depth 5 with move ordering)
+    return (game, state) => alphaBetaAI(game, state, 6); // 'hard' (depth 6 with move ordering)
 }
 
 function getFlipsForMove(row, col, player)
@@ -719,7 +742,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
-    difficulty = localStorage.getItem('othello.difficulty') || 'medium';
+    difficulty = localStorage.getItem('othello.difficulty') || 'hard';
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu (including dialogs).
