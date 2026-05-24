@@ -594,27 +594,20 @@ class Hulk extends EngineObject
     }
     pickMarchDir()
     {
-        // Attract mode: ignore humans, just wander a random cardinal direction
-        if (!isPlaying)
+        // Arcade hulks mostly wander randomly. They do NOT pursue humans —
+        // humans only die when a hulk happens to wander into them.
+        // Roughly 10% of the time the hulk picks a cardinal step toward the player.
+        const dirs = [vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1)];
+        if (isPlaying && player && rand() < .1)
         {
-            const dirs = [vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1)];
-            this.marchDir = dirs[randInt(4)];
-            return;
+            const diff = player.pos.subtract(this.pos);
+            if (abs(diff.x) > abs(diff.y))
+                this.marchDir = vec2(Math.sign(diff.x) || 1, 0);
+            else
+                this.marchDir = vec2(0, Math.sign(diff.y) || 1);
         }
-        let target = null, bestDist = Infinity;
-        for (const h of humans)
-        {
-            if (h.destroyed) continue;
-            const d = h.pos.subtract(this.pos).length();
-            if (d < bestDist) { bestDist = d; target = h; }
-        }
-        if (!target && player) target = player;
-        if (!target) { this.marchDir = vec2(1, 0); return; }
-        const diff = target.pos.subtract(this.pos);
-        if (abs(diff.x) > abs(diff.y))
-            this.marchDir = vec2(Math.sign(diff.x) || 1, 0);
         else
-            this.marchDir = vec2(0, Math.sign(diff.y) || 1);
+            this.marchDir = dirs[randInt(4)];
     }
     push(dir)
     {
