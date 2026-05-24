@@ -81,6 +81,22 @@ let gameOverTimer = 0;          // frames after death before the GAME OVER menu 
 let isPlaying = false;          // true once the player hits PLAY (menu system gates state)
 let humanRescueBonus = humanRescueStart;
 let nextBonusLifeAt = bonusLifeInterval;
+
+// Global arcade-faithful projectile / spawner caps
+let enforcerCount = 0;       // arcade max 8 — spheroids refuse to drop more
+let sparkCount = 0;          // arcade max 20 — enforcers refuse to fire when full
+let cruiseMissileCount = 0;  // arcade max 8  — brains refuse to fire when full
+let tankCount = 0;           // arcade max 20 — quarks refuse to drop tanks when full
+let shellCount = 0;          // arcade max ~20 — tanks refuse to fire when full
+const MAX_ENFORCERS      = 8;
+const MAX_SPARKS         = 20;
+const MAX_CRUISE_MISSILES = 8;
+const MAX_TANKS          = 20;
+const MAX_SHELLS         = 20;
+
+// Arcade grunt speedup: ROBSPD is reduced per kill (faster), clamped at RMXSPD.
+// Modeled here as a per-wave multiplier that climbs each grunt kill.
+let gruntSpeedMul = 1;
 let playerControlLocked = true;
 
 // sfx
@@ -270,19 +286,26 @@ class Bullet extends EngineObject
 }
 
 // Spark: spinning rainbow cross. Speed scales with distance to player (slow up close, fast far away).
-// No lifetime — only dies on hit, shot down, or leaving the arena.
+// Arcade: lifetime random 20–35 ticks. Globally capped at MAX_SPARKS.
 class Spark extends EngineObject
 {
     constructor(pos, vel)
     {
         super(pos, vec2(.3));
+        sparkCount++;
         this.vel = vel.copy();
-        // normalize an initial direction in case the caller passed a length-scaled vector
         const m = this.vel.length();
         this.dir = m > .001 ? this.vel.scale(1/m) : vec2(1, 0);
         this.renderOrder = 5;
         this.phase = rand(0, 1);
         this.spinAngle = rand(0, 6.28);
+        this.life = randInt(60, 110);   // ~1–2 sec — slightly longer than arcade for larger arena
+    }
+    destroy()
+    {
+        if (this.destroyed) return;
+        sparkCount--;
+        super.destroy();
     }
     update()
     {
@@ -306,7 +329,7 @@ class Spark extends EngineObject
         this.pos = this.pos.add(this.vel);
         this.phase = (this.phase + .12) % 1;
         this.spinAngle += .35;
-        // No lifetime — only off-screen kills it
+        if (--this.life <= 0) this.destroy();
         if (abs(this.pos.x) > arenaHalf.x + 2 || abs(this.pos.y) > arenaHalf.y + 2) this.destroy();
     }
     render()
@@ -327,12 +350,20 @@ class CruiseMissile extends EngineObject
     constructor(pos, target)
     {
         super(pos, vec2(.28));
+        cruiseMissileCount++;
         this.target = target;
         this.renderOrder = 5;
         this.segments = [];
         this.huePhase = rand(0, 1);
         this.dir = this.pickDir();
         this.changeTimer = randInt(15, 35);
+        this.life = randInt(300, 450);   // arcade: long-lived, bounces off walls
+    }
+    destroy()
+    {
+        if (this.destroyed) return;
+        cruiseMissileCount--;
+        super.destroy();
     }
     pickDir()
     {
@@ -364,12 +395,20 @@ class CruiseMissile extends EngineObject
         }
         const speed = .14;
         this.pos = this.pos.add(this.dir.scale(speed));
+
+        // Arcade: cruise missiles bounce/reflect off playfield boundaries
+        const minX = -arenaHalf.x + .3, maxX = arenaHalf.x - .3;
+        const minY = -arenaHalf.y + .3, maxY = arenaHalf.y - .3;
+        if (this.pos.x < minX) { this.pos.x = minX; this.dir.x =  abs(this.dir.x); }
+        if (this.pos.x > maxX) { this.pos.x = maxX; this.dir.x = -abs(this.dir.x); }
+        if (this.pos.y < minY) { this.pos.y = minY; this.dir.y =  abs(this.dir.y); }
+        if (this.pos.y > maxY) { this.pos.y = maxY; this.dir.y = -abs(this.dir.y); }
+
         this.segments.unshift(this.pos.copy());
-        if (this.segments.length > 38) this.segments.pop();   // long trail (~4x longer)
+        if (this.segments.length > 8) this.segments.pop();   // arcade: 8-point trail
         this.huePhase = (this.huePhase + .04) % 1;
-        // No lifetime — only dies on hit, shot down, or leaving arena
-        if (abs(this.pos.x) > arenaHalf.x + 2 || abs(this.pos.y) > arenaHalf.y + 2)
-            this.destroy();
+
+        if (--this.life <= 0) this.destroy();
     }
     render()
     {
@@ -473,14 +512,22 @@ class Grunt extends KillableEnemy
         this.wanderDir = randVec2(1);
         this.wanderTimer = randInt(30, 90);
     }
+    destroy()
+    {
+        if (this.destroyed) return;
+        // Arcade: each grunt kill speeds up remaining grunts (ROBSPD shrinks → faster).
+        // Modeled as a multiplicative bump up to ~3× per wave.
+        if (isPlaying) gruntSpeedMul = min(gruntSpeedMul * 1.04, 3);
+        super.destroy();
+    }
     getSpeed()
     {
-        // Arcade: grunts crawl at wave start and climb to roughly player speed.
-        // Player speed ~.17, base grunt ~.04. Cap ramp at 4x → ~.16 late wave.
+        // Arcade: grunts speed up per kill (ROBSPD reduces, clamped at RMXSPD ≈ 3×).
+        // Also a small wave-time ramp so a passive wave still gets harder.
         const t = waveTime;
-        const ramp = 1 + min(3, t / 1200) * 1.0;
+        const ramp = 1 + min(1.5, t / 1800) * .5;       // gentler than before — kills are the main driver
         const waveMul = 1 + (gameWave - 1) * .05;
-        return this.baseSpeed * ramp * waveMul;
+        return this.baseSpeed * ramp * waveMul * gruntSpeedMul;
     }
     update()
     {
@@ -615,7 +662,6 @@ class Brain extends KillableEnemy
         this.brainPulse = rand(0, 6.28);
         this.possessing = null;     // human being reprogrammed
         this.possessTimer = 0;      // frames remaining in the grab
-        this.activeShot = null;     // only one cruise missile in flight at a time
     }
     findHuman()
     {
@@ -682,11 +728,9 @@ class Brain extends KillableEnemy
             }
             // Brains also lob the occasional cruise missile at the player even while hunting humans
             this.shootTimer--;
-            const hasActiveShot = this.activeShot && !this.activeShot.destroyed;
-            if (this.shootTimer <= 0 && !hasActiveShot && player)
+            if (this.shootTimer <= 0 && cruiseMissileCount < MAX_CRUISE_MISSILES && player)
             {
-                this.activeShot = new CruiseMissile(this.pos.copy(), player);
-                enemyBullets.push(this.activeShot);
+                enemyBullets.push(new CruiseMissile(this.pos.copy(), player));
                 this.shootTimer = randInt(200, 360);
                 sfxMissile.play(this.pos);
             }
@@ -699,11 +743,9 @@ class Brain extends KillableEnemy
             if (d > 5)
                 this.pos = this.pos.add(toP.scale(speed * .8 / d));
             this.shootTimer--;
-            const hasActiveShot = this.activeShot && !this.activeShot.destroyed;
-            if (this.shootTimer <= 0 && !hasActiveShot)
+            if (this.shootTimer <= 0 && cruiseMissileCount < MAX_CRUISE_MISSILES)
             {
-                this.activeShot = new CruiseMissile(this.pos.copy(), player);
-                enemyBullets.push(this.activeShot);
+                enemyBullets.push(new CruiseMissile(this.pos.copy(), player));
                 this.shootTimer = randInt(140, 260);
                 sfxMissile.play(this.pos);
             }
@@ -865,7 +907,7 @@ class Spheroid extends KillableEnemy
         this.setEdgeVelocity();
         this.spawnTimer = randInt(25, 70);   // first enforcer drops almost immediately
         this.phase = rand(0, 6.28);
-        this.spawnsRemaining = randInt(3, 6);  // 3-5 enforcers then it vanishes (arcade behavior)
+        this.spawnsRemaining = randInt(2, 6);  // arcade: ceil(rand(1..ENFNUM)/2) ≈ 1–5 per spheroid
     }
     snapToNearestEdge()
     {
@@ -917,17 +959,23 @@ class Spheroid extends KillableEnemy
         this.spawnTimer--;
         if (this.spawnTimer <= 0)
         {
-            enemies.push(new Enforcer(this.pos.copy()));
-            burst(this.pos, 22, rgb(1, .4, .4));
-            sfxSpawn.play(this.pos);
-            this.spawnTimer = randInt(80, 160);
-            // Spheroid vanishes (no score) after dropping its quota of Enforcers
-            if (--this.spawnsRemaining <= 0)
+            // Arcade: spheroids refuse to drop when global enforcer cap is hit — they wait instead
+            if (enforcerCount < MAX_ENFORCERS)
             {
-                burst(this.pos, 28, rgb(1, .5, .5));
-                this.destroy();
-                return;
+                enemies.push(new Enforcer(this.pos.copy()));
+                burst(this.pos, 22, rgb(1, .4, .4));
+                sfxSpawn.play(this.pos);
+                this.spawnTimer = randInt(80, 160);
+                // Spheroid vanishes (no score) after dropping its quota
+                if (--this.spawnsRemaining <= 0)
+                {
+                    burst(this.pos, 28, rgb(1, .5, .5));
+                    this.destroy();
+                    return;
+                }
             }
+            else
+                this.spawnTimer = 30;   // try again shortly
         }
         this.phase += .18;
         if (this.flash > 0) this.flash--;
@@ -952,10 +1000,16 @@ class Enforcer extends KillableEnemy
     constructor(pos)
     {
         super(pos, vec2(.9, 1.1), 1, scoreEnforcer, rgb(.4, .6, 1));
-        this.activeShot = null;     // only one spark in flight at a time
+        enforcerCount++;
         this.vel = randVec2(.07);
         this.shootTimer = randInt(50, 100);
         this.walkPhase = rand(0, 6.28);
+    }
+    destroy()
+    {
+        if (this.destroyed) return;
+        enforcerCount--;
+        super.destroy();
     }
     update()
     {
@@ -984,12 +1038,10 @@ class Enforcer extends KillableEnemy
         this.pos = clampToArena(this.pos, .5);
 
         this.shootTimer--;
-        const hasActiveShot = this.activeShot && !this.activeShot.destroyed;
-        if (this.shootTimer <= 0 && !hasActiveShot && d < 22)
+        if (this.shootTimer <= 0 && sparkCount < MAX_SPARKS && d < 22)
         {
             const aim = dir.scale(.08); // initial direction; Spark scales speed by distance per-frame
-            this.activeShot = new Spark(this.pos.copy(), aim);
-            enemyBullets.push(this.activeShot);
+            enemyBullets.push(new Spark(this.pos.copy(), aim));
             this.shootTimer = randInt(70, 150);
             sfxSpark.play(this.pos);
         }
@@ -1033,15 +1085,24 @@ class TankShell extends EngineObject
     constructor(pos, vel)
     {
         super(pos, vec2(.4));
+        shellCount++;
         this.vel = vel.copy();
         this.renderOrder = 5;
         this.bouncesLeft = 2;
         this.phase = 0;
+        this.life = randInt(120, 200);   // arcade: ~48–79 ticks, scaled up for larger arena
+    }
+    destroy()
+    {
+        if (this.destroyed) return;
+        shellCount--;
+        super.destroy();
     }
     update()
     {
         this.pos = this.pos.add(this.vel);
         this.phase += .15;
+        if (--this.life <= 0) { this.destroy(); return; }
         const minX = -arenaHalf.x + arenaPadding + .2;
         const maxX =  arenaHalf.x - arenaPadding - .2;
         const minY = -arenaHalf.y + arenaPadding + .2;
@@ -1073,11 +1134,17 @@ class Tank extends KillableEnemy
     constructor(pos)
     {
         super(pos, vec2(1.7, 1.5), 1, scoreTank, rgb(1, .25, .3));
+        tankCount++;
         this.vel = randVec2(.04);
         this.shootTimer = randInt(80, 160);
         this.turnTimer = randInt(40, 100);
         this.turretAngle = 0;
-        this.activeShot = null;     // only one bouncing shell in flight at a time
+    }
+    destroy()
+    {
+        if (this.destroyed) return;
+        tankCount--;
+        super.destroy();
     }
     update()
     {
@@ -1103,12 +1170,10 @@ class Tank extends KillableEnemy
             const toP = player.pos.subtract(this.pos);
             if (toP.lengthSquared() > .001) this.turretAngle = toP.angle();
             this.shootTimer--;
-            const hasActiveShot = this.activeShot && !this.activeShot.destroyed;
-            if (this.shootTimer <= 0 && !hasActiveShot && toP.length() < 24)
+            if (this.shootTimer <= 0 && shellCount < MAX_SHELLS && toP.length() < 24)
             {
                 const dir = vec2(Math.sin(this.turretAngle), Math.cos(this.turretAngle));
-                this.activeShot = new TankShell(this.pos.add(dir.scale(.9)), dir.scale(.16));
-                enemyBullets.push(this.activeShot);
+                enemyBullets.push(new TankShell(this.pos.add(dir.scale(.9)), dir.scale(.16)));
                 sfxMissile.play(this.pos);
                 this.shootTimer = randInt(110, 220);
             }
@@ -1160,7 +1225,7 @@ class Quark extends KillableEnemy
         this.vel = randVec2(.13);
         this.spawnTimer = randInt(40, 100);  // first tank drops fast so the wave feels active
         this.phase = rand(0, 6.28);
-        this.spawnsRemaining = randInt(3, 6);  // 3-5 tanks then it vanishes (arcade behavior)
+        this.spawnsRemaining = randInt(2, 6);  // arcade: ceil(rand(1..ENFNUM)/2) ≈ 1–5 per quark
     }
     update()
     {
@@ -1177,17 +1242,22 @@ class Quark extends KillableEnemy
         this.spawnTimer--;
         if (this.spawnTimer <= 0)
         {
-            enemies.push(new Tank(this.pos.copy()));
-            burst(this.pos, 22, rgb(.4, .6, 1));
-            sfxSpawn.play(this.pos);
-            this.spawnTimer = randInt(140, 240);
-            // Quark vanishes (no score) after dropping its quota of Tanks
-            if (--this.spawnsRemaining <= 0)
+            // Arcade: quarks refuse to drop when global tank cap is hit
+            if (tankCount < MAX_TANKS)
             {
-                burst(this.pos, 28, rgb(.5, .7, 1));
-                this.destroy();
-                return;
+                enemies.push(new Tank(this.pos.copy()));
+                burst(this.pos, 22, rgb(.4, .6, 1));
+                sfxSpawn.play(this.pos);
+                this.spawnTimer = randInt(140, 240);
+                if (--this.spawnsRemaining <= 0)
+                {
+                    burst(this.pos, 28, rgb(.5, .7, 1));
+                    this.destroy();
+                    return;
+                }
             }
+            else
+                this.spawnTimer = 30;   // wait for shell-cap window
         }
         this.phase += .14;
         if (this.flash > 0) this.flash--;
@@ -1522,6 +1592,7 @@ function enterGetReadyForWave(nextWave)
     playerControlLocked = true;
     respawnTimer = 0;
     humanRescueBonus = humanRescueStart;  // fresh family each wave
+    gruntSpeedMul = 1;                    // grunt speedup ramp resets per wave
 
     if (player) { player.pos = vec2(0); player.invuln = respawnInvulnFrames; }
 
@@ -1581,6 +1652,8 @@ function respawnMidWave()
     waveTime = 0;
     // Rescue bonus resets to 1000 on death (per FAQ)
     humanRescueBonus = humanRescueStart;
+    // Grunt speedup ramp resets on death too (arcade: ROBSPD restores to wave default)
+    gruntSpeedMul = 1;
 
     if (player)
     {
@@ -1900,6 +1973,10 @@ function resetGame()
     gameOver = false;
     gameOverTimer = 0;
     nextBonusLifeAt = bonusLifeInterval;
+    // Reset all global caps (destroy() overrides should have decremented these already,
+    // but force-clear in case anything slipped through)
+    enforcerCount = sparkCount = cruiseMissileCount = tankCount = shellCount = 0;
+    gruntSpeedMul = 1;
 
     player = new Player();
     // Lay out wave 1 (electrodes, humans, enemies — all visible during GET READY).
