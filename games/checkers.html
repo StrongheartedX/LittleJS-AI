@@ -6,6 +6,7 @@
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/menus.js"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/gameAI.js"></script>
 <script>
 'use strict';
 
@@ -45,6 +46,7 @@ let winner = null;
 let redCount = 12;
 let blackCount = 12;
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai'
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let isPlaying = false;
 let selectedCell = null;
 let allPlayerMoves = [];   // all legal moves for currentPlayer
@@ -330,78 +332,222 @@ function undoMove()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// AI
+// AI adapter — pure-functional view of the game for gameAI.js search.
+// State shape: { board, currentPlayer, gameOver, redCount, blackCount }.
+// Move shape:  { fromRow, fromCol, toRow, toCol, capture: {row, col} | null }
 
-function evaluateBoard(player)
+function getCurrentState()
 {
-    let score = 0;
-    for (let row = 0; row < BOARD_SIZE; row++)
+    return {
+        board: board.map(r => [...r]),
+        currentPlayer: currentPlayer,
+        gameOver: gameOver,
+        redCount: redCount,
+        blackCount: blackCount,
+    };
+}
+
+// Pure-functional helpers that work on a state board rather than the global board.
+function playerOfPiece(piece)
+{
+    if (piece === P_RED   || piece === P_RED_KING)   return PLAYER_RED;
+    if (piece === P_BLACK || piece === P_BLACK_KING) return PLAYER_BLACK;
+    return 0;
+}
+
+function isKingPiece(piece) { return piece === P_RED_KING || piece === P_BLACK_KING; }
+
+function getPieceMovesForState(b, row, col)
+{
+    const piece = b[row][col];
+    const moves = [], jumps = [];
+    if (piece === P_EMPTY) return {moves, jumps};
+
+    const player = playerOfPiece(piece);
+    const king   = isKingPiece(piece);
+
+    let dirs;
+    if (king)                        dirs = [[-1,-1],[-1,1],[1,-1],[1,1]];
+    else if (player === PLAYER_RED)  dirs = [[-1,-1],[-1,1]];
+    else                             dirs = [[1,-1],[1,1]];
+
+    for (const [dr, dc] of dirs)
     {
-        for (let col = 0; col < BOARD_SIZE; col++)
+        const nr = row + dr, nc = col + dc;
+        if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) continue;
+
+        if (b[nr][nc] === P_EMPTY)
         {
-            const p = board[row][col];
-            if (p === P_EMPTY) continue;
-
-            let val = isKing(p) ? 3 : 1;
-            // Advancement bonus (more valuable the further up board)
-            if (p === P_RED)   val += (BOARD_SIZE - 1 - row) * 0.08;
-            if (p === P_BLACK) val += row * 0.08;
-            // Back row defenders worth a bit extra
-            if (p === P_RED   && row === BOARD_SIZE - 1) val += 0.3;
-            if (p === P_BLACK && row === 0)              val += 0.3;
-
-            if (playerOf(p) === player) score += val;
-            else score -= val;
+            moves.push({row: nr, col: nc, capture: null});
+        }
+        else if (playerOfPiece(b[nr][nc]) !== player && playerOfPiece(b[nr][nc]) !== 0)
+        {
+            const jr = row + dr * 2, jc = col + dc * 2;
+            if (jr >= 0 && jr < BOARD_SIZE && jc >= 0 && jc < BOARD_SIZE && b[jr][jc] === P_EMPTY)
+                jumps.push({row: jr, col: jc, capture: {row: nr, col: nc}});
         }
     }
-    return score;
+
+    return {moves, jumps};
+}
+
+function getLegalMovesForState(b, player)
+{
+    const allMoves = [];
+    let anyJumps = false;
+
+    for (let row = 0; row < BOARD_SIZE; row++)
+        for (let col = 0; col < BOARD_SIZE; col++)
+            if (playerOfPiece(b[row][col]) === player)
+            {
+                const {jumps} = getPieceMovesForState(b, row, col);
+                for (const j of jumps)
+                {
+                    anyJumps = true;
+                    allMoves.push({fromRow: row, fromCol: col, toRow: j.row, toCol: j.col, capture: j.capture});
+                }
+            }
+
+    if (!anyJumps)
+        for (let row = 0; row < BOARD_SIZE; row++)
+            for (let col = 0; col < BOARD_SIZE; col++)
+                if (playerOfPiece(b[row][col]) === player)
+                {
+                    const {moves} = getPieceMovesForState(b, row, col);
+                    for (const m of moves)
+                        allMoves.push({fromRow: row, fromCol: col, toRow: m.row, toCol: m.col, capture: null});
+                }
+
+    return allMoves;
+}
+
+const checkersGame = {
+    getOpponent: (player) => player === PLAYER_RED ? PLAYER_BLACK : PLAYER_RED,
+    getCurrentPlayer: (state) => state.currentPlayer,
+    isTerminal: (state) => state.gameOver,
+
+    getLegalMoves(state, player)
+    {
+        return getLegalMovesForState(state.board, player);
+    },
+
+    applyMove(state, move, player)
+    {
+        const newBoard = state.board.map(r => [...r]);
+        let newRed = state.redCount, newBlack = state.blackCount;
+
+        const piece = newBoard[move.fromRow][move.fromCol];
+        newBoard[move.fromRow][move.fromCol] = P_EMPTY;
+        newBoard[move.toRow][move.toCol] = piece;
+
+        if (move.capture)
+        {
+            const cap = newBoard[move.capture.row][move.capture.col];
+            if (playerOfPiece(cap) === PLAYER_RED) newRed--;
+            else newBlack--;
+            newBoard[move.capture.row][move.capture.col] = P_EMPTY;
+        }
+
+        // King promotion
+        let promoted = false;
+        if (piece === P_RED && move.toRow === 0)
+        {
+            newBoard[move.toRow][move.toCol] = P_RED_KING;
+            promoted = true;
+        }
+        else if (piece === P_BLACK && move.toRow === BOARD_SIZE - 1)
+        {
+            newBoard[move.toRow][move.toCol] = P_BLACK_KING;
+            promoted = true;
+        }
+
+        // Check terminal conditions
+        if (newRed === 0)
+            return {board: newBoard, currentPlayer: PLAYER_BLACK, gameOver: true, redCount: newRed, blackCount: newBlack};
+        if (newBlack === 0)
+            return {board: newBoard, currentPlayer: PLAYER_RED, gameOver: true, redCount: newRed, blackCount: newBlack};
+
+        // Multi-jump continuation: if a capture was made and piece was not promoted,
+        // check if the piece can jump again. If so, same player continues.
+        if (move.capture && !promoted)
+        {
+            const {jumps} = getPieceMovesForState(newBoard, move.toRow, move.toCol);
+            if (jumps.length > 0)
+                return {board: newBoard, currentPlayer: player, gameOver: false, redCount: newRed, blackCount: newBlack};
+        }
+
+        // Switch to opponent; check if opponent has any moves.
+        const opponent = player === PLAYER_RED ? PLAYER_BLACK : PLAYER_RED;
+        const opponentMoves = getLegalMovesForState(newBoard, opponent);
+        if (opponentMoves.length === 0)
+            return {board: newBoard, currentPlayer: player, gameOver: true, redCount: newRed, blackCount: newBlack};
+
+        return {board: newBoard, currentPlayer: opponent, gameOver: false, redCount: newRed, blackCount: newBlack};
+    },
+
+    evaluate(state, player)
+    {
+        const b = state.board;
+        const opponent = player === PLAYER_RED ? PLAYER_BLACK : PLAYER_RED;
+        let score = 0;
+
+        for (let row = 0; row < BOARD_SIZE; row++)
+        {
+            for (let col = 0; col < BOARD_SIZE; col++)
+            {
+                const p = b[row][col];
+                if (p === P_EMPTY) continue;
+
+                let val = isKingPiece(p) ? 3 : 1;
+                // Advancement bonus
+                if (p === P_RED)   val += (BOARD_SIZE - 1 - row) * 0.08;
+                if (p === P_BLACK) val += row * 0.08;
+                // Back row defenders
+                if (p === P_RED   && row === BOARD_SIZE - 1) val += 0.3;
+                if (p === P_BLACK && row === 0)              val += 0.3;
+
+                if (playerOfPiece(p) === player) score += val;
+                else score -= val;
+            }
+        }
+        return score;
+    },
+};
+
+function strategyForDifficulty(d)
+{
+    if (d === 'easy')   return randomAI;
+    if (d === 'medium') return greedyAI;
+    return (game, state) => alphaBetaAI(game, state, 6); // 'hard' — depth 6
 }
 
 function findBestAIMove()
 {
     if (allPlayerMoves.length === 0) return null;
+    const strategy = strategyForDifficulty(difficulty);
+    return strategy(checkersGame, getCurrentState());
+}
 
-    let best = null;
-    let bestScore = -Infinity;
+function setDifficulty(d)
+{
+    difficulty = d;
+    localStorage.setItem('checkers.difficulty', d);
+    refreshDifficultyUI();
+}
 
-    for (const move of allPlayerMoves)
+function refreshDifficultyUI()
+{
+    const grid = getMenu('options')?.getItem('difficultyGrid');
+    if (grid)
     {
-        // Simulate
-        const oldBoard = board.map(r => [...r]);
-        const oldRed = redCount, oldBlack = blackCount;
-
-        const piece = board[move.fromRow][move.fromCol];
-        board[move.fromRow][move.fromCol] = P_EMPTY;
-        board[move.toRow][move.toCol] = piece;
-
-        if (move.capture)
-        {
-            const cap = board[move.capture.row][move.capture.col];
-            if (playerOf(cap) === PLAYER_RED) redCount--;
-            else blackCount--;
-            board[move.capture.row][move.capture.col] = P_EMPTY;
-        }
-
-        // Promotion in sim
-        if (piece === P_BLACK && move.toRow === BOARD_SIZE - 1)
-            board[move.toRow][move.toCol] = P_BLACK_KING;
-        if (piece === P_RED && move.toRow === 0)
-            board[move.toRow][move.toCol] = P_RED_KING;
-
-        const score = evaluateBoard(PLAYER_AI) + rand(0, 0.3);
-
-        if (score > bestScore)
-        {
-            bestScore = score;
-            best = move;
-        }
-
-        board = oldBoard;
-        redCount = oldRed;
-        blackCount = oldBlack;
+        grid.setCell(0, {earned: difficulty === 'easy'});
+        grid.setCell(1, {earned: difficulty === 'medium'});
+        grid.setCell(2, {earned: difficulty === 'hard'});
     }
-
-    return best;
+    const title = getMenu('title');
+    const upper = difficulty.toUpperCase();
+    title?.getItem('vsAI')?.setLabel(`PLAYER VS AI · ${upper}`);
+    title?.getItem('aiVsAi')?.setLabel(`AI VS AI · ${upper}`);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -627,6 +773,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
+    difficulty = localStorage.getItem('checkers.difficulty') || 'hard';
 
     // One callback drives `paused` for every menu (including dialogs).
     setMenuVisibilityCallback(v => paused = v);
@@ -656,7 +803,7 @@ async function gameInit()
         items: [
             {type:'button', id:'vsAI',   label:'PLAYER VS AI',     onClick: () => startGame('ai')},
             {type:'button',              label:'PLAYER VS PLAYER', onClick: () => startGame('pvp')},
-            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => console.log('AI vs AI: wired in commit 2')},
+            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => startGame('aivai')},
             {type:'button',              label:'OPTIONS',          onClick: () => pushMenu('options')},
             {type:'button',              label:'ABOUT',            onClick: () => pushMenu('about')},
         ],
@@ -668,6 +815,13 @@ async function gameInit()
         title: 'OPTIONS',
         onHide: popMenu,
         items: [
+            {type:'label', text:'DIFFICULTY'},
+            {type:'grid', id:'difficultyGrid', columns:3, cells: [
+                {label:'EASY',   title:'Random moves',                  onClick: () => setDifficulty('easy')},
+                {label:'MEDIUM', title:'Greedy 1-ply',                  onClick: () => setDifficulty('medium')},
+                {label:'HARD',   title:'Alpha-beta search to depth 6',  onClick: () => setDifficulty('hard')},
+            ]},
+            {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
                 persist:'checkers.volume',
                 onChange: v => setSoundVolume(v)},
@@ -726,6 +880,7 @@ async function gameInit()
     initBoard();
     setPlaying(false);
     showMenu('title');
+    refreshDifficultyUI();
 }
 
 function setPlaying(p)
