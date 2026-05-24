@@ -604,18 +604,18 @@ function drawBoard()
         drawCircle(pos, DISC_RADIUS * 2.1 * pulseSize, hsl(.15,1,.5));
     }
     
-    // Valid move indicators
-    if (!gameOver && validMoves.length > 0)
+    // Valid move indicators (gameplay only — keep them off the title board)
+    if (isPlaying && !gameOver && validMoves.length > 0)
     {
         for (const move of validMoves)
         {
             const pos = getCellWorldPos(move.row, move.col);
             const isHover = hoverCell && hoverCell.row === move.row && hoverCell.col === move.col;
-            
-            const color = currentPlayer === DISC_BLACK ? 
-                rgb(0.3, 0.3, 0.3, isHover ? 0.6 : 0.3) : 
+
+            const color = currentPlayer === DISC_BLACK ?
+                rgb(0.3, 0.3, 0.3, isHover ? 0.6 : 0.3) :
                 rgb(0.8, 0.8, 0.8, isHover ? 0.6 : 0.3);
-            
+
             drawCircle(pos, DISC_RADIUS * 0.8, color);
         }
     }
@@ -964,7 +964,6 @@ function gameUpdatePost()
 
 function gameRender()
 {
-    if (!isPlaying) return;
     drawBoard();
 }
 

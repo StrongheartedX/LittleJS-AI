@@ -471,9 +471,9 @@ function drawBoard()
         }
     }
 
-    // Hover indicator at top
+    // Hover indicator at top (gameplay only — keep the bobbing ghost off the title)
     const isHumanTurn = gameMode !== 'aivai' && (gameMode === 'pvp' || currentPlayer === PLAYER_HUMAN);
-    if (!gameOver && hoverCol >= 0 && !droppingDisc && isHumanTurn)
+    if (isPlaying && !gameOver && hoverCol >= 0 && !droppingDisc && isHumanTurn)
     {
         const isValid = board[ROWS - 1][hoverCol] === DISC_EMPTY;
         if (isValid)
@@ -767,7 +767,6 @@ function gameUpdatePost()
 
 function gameRender()
 {
-    if (!isPlaying) return;
     drawBoard();
 }
 
