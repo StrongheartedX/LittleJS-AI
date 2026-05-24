@@ -5,6 +5,7 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/menus.js"></script>
+<script src="../templates/gameAI.js"></script>
 <script src="../templates/soundGenerator.js"></script>
 <script>
 'use strict';
@@ -55,7 +56,13 @@ let previousBoardHash = null; // board state before the opponent's last move
 let boardHashBeforeMove = null; // scratch used during move processing
 
 let isPlaying = false;
-let gameMode  = 'pvp'; // 'pvp' | 'ai' | 'aivai' — 'ai'/'aivai' are placeholders for commit 2
+let gameMode  = 'pvp'; // 'pvp' | 'ai' | 'aivai'
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
+
+// AI timing
+let aiThinkTimer = 0;
+const AI_THINK_DELAY = 0.6;
+const AI_VS_AI_DELAY = 0.6;
 
 // Animation
 let hoverIntersection = null; // {row, col} under cursor
@@ -150,7 +157,8 @@ function boardHash(b)
 // Place a stone on board b at (row, col) for player, apply captures.
 // Returns { newBoard, captured } or { newBoard: null } if illegal (occupied /
 // suicide / ko). koHash is the board hash to reject (optional).
-function applyMoveAndCaptures(b, row, col, player, koHash)
+// State-parameterized version — operates on any board, used by both live game and AI search.
+function applyMoveAndCapturesForState(b, row, col, player, koHash)
 {
     if (b[row][col] !== STONE_EMPTY)
         return { newBoard: null, captured: 0 };
@@ -197,11 +205,128 @@ function applyMoveAndCaptures(b, row, col, player, koHash)
     return { newBoard: nb, captured };
 }
 
-// Returns true if (row, col) is a legal move for player on board b.
+// Thin wrapper — delegates to state version using the live board and ko hash.
+function applyMoveAndCaptures(b, row, col, player, koHash)
+{
+    return applyMoveAndCapturesForState(b, row, col, player, koHash);
+}
+
+// State-parameterized legality check — used by both live game and AI search.
+function isLegalMoveForState(b, row, col, player, koHash)
+{
+    const { newBoard } = applyMoveAndCapturesForState(b, row, col, player, koHash);
+    return newBoard !== null;
+}
+
+// Thin wrapper — delegates to state version using the live board and ko hash.
 function isLegalMove(b, row, col, player, koHash)
 {
-    const { newBoard } = applyMoveAndCaptures(b, row, col, player, koHash);
-    return newBoard !== null;
+    return isLegalMoveForState(b, row, col, player, koHash);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// AI ADAPTER
+
+function getCurrentState()
+{
+    return {
+        board: board.map(row => [...row]),
+        currentPlayer: currentPlayer,
+        gameOver: gameOver,
+        previousBoardHash: previousBoardHash,
+    };
+}
+
+// Heuristic eval for Capture Go (non-terminal positions).
+// Returns a score that is positive when player has the advantage.
+// Dominant signal: atari detection (group with 1 liberty is about to be captured).
+function evalCaptureGo(b, player)
+{
+    const opponent = player === STONE_BLACK ? STONE_WHITE : STONE_BLACK;
+    let score = 0;
+
+    const seen = new Set();
+    for (let row = 0; row < BOARD_SIZE; row++)
+    {
+        for (let col = 0; col < BOARD_SIZE; col++)
+        {
+            const stone = b[row][col];
+            if (stone === STONE_EMPTY) continue;
+            const key = row + ',' + col;
+            if (seen.has(key)) continue;
+            const group = getGroupAndLiberties(b, row, col);
+            for (const s of group.stones) seen.add(s.row + ',' + s.col);
+
+            // sign: +1 if this group belongs to player, -1 if opponent
+            const sign = (stone === player) ? 1 : -1;
+
+            // Liberty term: more liberties = harder to capture.
+            score += sign * group.liberties;
+
+            // Atari penalty/bonus: group with exactly 1 liberty is in immediate danger.
+            // Own group in atari is very bad; opponent group in atari is very good.
+            if (group.liberties === 1)
+                score += sign * -50;
+        }
+    }
+    return score;
+}
+
+// Pure-functional adapter for gameAI.js search.
+// State shape: { board, currentPlayer, gameOver, previousBoardHash }
+const captureGoGame = {
+    getOpponent: (player) => player === STONE_BLACK ? STONE_WHITE : STONE_BLACK,
+    getCurrentPlayer: (state) => state.currentPlayer,
+    isTerminal: (state) => state.gameOver,
+
+    getLegalMoves(state, player)
+    {
+        const moves = [];
+        for (let row = 0; row < BOARD_SIZE; row++)
+        {
+            for (let col = 0; col < BOARD_SIZE; col++)
+            {
+                if (isLegalMoveForState(state.board, row, col, player, state.previousBoardHash))
+                    moves.push({row, col});
+            }
+        }
+        return moves;
+    },
+
+    applyMove(state, move, player)
+    {
+        const result = applyMoveAndCapturesForState(state.board, move.row, move.col, player, state.previousBoardHash);
+        // result.newBoard should always be non-null here (getLegalMoves only returns legal moves)
+        const opponent = player === STONE_BLACK ? STONE_WHITE : STONE_BLACK;
+        return {
+            board: result.newBoard,
+            currentPlayer: opponent,
+            gameOver: result.captured > 0,
+            previousBoardHash: JSON.stringify(state.board), // board state BEFORE this move
+        };
+    },
+
+    evaluate(state, player)
+    {
+        // Terminal: by the time isTerminal is true, the player who just moved won.
+        // state.currentPlayer is whoever moves next — the loser.
+        // So if gameOver and state.currentPlayer === player, player LOST.
+        if (state.gameOver)
+            return state.currentPlayer === player ? -10000 : 10000;
+        return evalCaptureGo(state.board, player);
+    },
+};
+
+function strategyForDifficulty(d)
+{
+    if (d === 'easy')   return randomAI;
+    if (d === 'medium') return greedyAI;
+    return (game, state) => alphaBetaAI(game, state, 5); // 'hard' — depth 5
+}
+
+function findBestAIMove()
+{
+    return strategyForDifficulty(difficulty)(captureGoGame, getCurrentState());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -245,6 +370,17 @@ function makeMove(row, col)
         if (gameMode === 'pvp')
         {
             sfxWin  && sfxWin.play();
+        }
+        else if (gameMode === 'ai')
+        {
+            if (winner === PLAYER_HUMAN)
+                sfxWin  && sfxWin.play();
+            else
+                sfxLose && sfxLose.play();
+        }
+        else if (gameMode === 'aivai')
+        {
+            sfxSelect && sfxSelect.play();
         }
         return true;
     }
@@ -394,7 +530,13 @@ function drawUI()
     // Current player indicator.
     if (!gameOver)
     {
-        const turnText = currentPlayer === STONE_BLACK ? "Black's Turn" : "White's Turn";
+        let turnText;
+        if (gameMode === 'ai')
+            turnText = currentPlayer === PLAYER_HUMAN ? "Your Turn" : "AI Thinking...";
+        else if (gameMode === 'aivai')
+            turnText = currentPlayer === STONE_BLACK ? "AI Black Thinking..." : "AI White Thinking...";
+        else
+            turnText = currentPlayer === STONE_BLACK ? "Black's Turn" : "White's Turn";
         const turnColor = currentPlayer === STONE_BLACK ? rgb(0.85, 0.85, 0.85) : rgb(1, 1, 1);
         drawTextScreen(turnText, vec2(20, 102), 26, turnColor, 4, BLACK, 'left');
     }
@@ -404,8 +546,22 @@ function drawUI()
     {
         const cx = sw / 2, cy = sh / 2;
         drawTextScreen('CAPTURE GO', vec2(cx, cy - 60), 64, hsl(0.1, 0.9, 0.55), 6, BLACK);
-        const resultText  = winner === STONE_BLACK ? 'Black Wins!' : 'White Wins!';
-        const resultColor = winner === STONE_BLACK ? rgb(0.8, 0.8, 0.8) : rgb(1, 1, 1);
+        let resultText, resultColor;
+        if (gameMode === 'ai')
+        {
+            resultText  = winner === PLAYER_HUMAN ? 'You Win!' : 'AI Wins!';
+            resultColor = winner === PLAYER_HUMAN ? rgb(0, 1, 0.3) : rgb(1, 0.3, 0.3);
+        }
+        else if (gameMode === 'aivai')
+        {
+            resultText  = winner === STONE_BLACK ? 'AI Black Wins!' : 'AI White Wins!';
+            resultColor = winner === STONE_BLACK ? rgb(0.8, 0.8, 0.8) : rgb(1, 1, 1);
+        }
+        else
+        {
+            resultText  = winner === STONE_BLACK ? 'Black Wins!' : 'White Wins!';
+            resultColor = winner === STONE_BLACK ? rgb(0.8, 0.8, 0.8) : rgb(1, 1, 1);
+        }
         drawTextScreen(resultText, vec2(cx, cy), 52, resultColor, 5, BLACK);
         drawTextScreen('Press R to restart or ESC to pause',
             vec2(cx, cy + 60), 24, WHITE, 3, BLACK);
@@ -433,8 +589,31 @@ function startGame(mode)
 {
     gameMode = mode;
     initBoard();
+    aiThinkTimer = 0;
     setPlaying(true);
     hideMenu('title');
+}
+
+function setDifficulty(d)
+{
+    difficulty = d;
+    localStorage.setItem('captureGo.difficulty', d);
+    refreshDifficultyUI();
+}
+
+function refreshDifficultyUI()
+{
+    const grid = getMenu('options')?.getItem('difficultyGrid');
+    if (grid)
+    {
+        grid.setCell(0, {earned: difficulty === 'easy'});
+        grid.setCell(1, {earned: difficulty === 'medium'});
+        grid.setCell(2, {earned: difficulty === 'hard'});
+    }
+    const title = getMenu('title');
+    const upper = difficulty.toUpperCase();
+    title?.getItem('vsAI')?.setLabel(`PLAYER VS AI · ${upper}`);
+    title?.getItem('aiVsAi')?.setLabel(`AI VS AI · ${upper}`);
 }
 
 function quitToTitle()
@@ -453,6 +632,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos       = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
+    difficulty = localStorage.getItem('captureGo.difficulty') || 'hard';
     setSoundVolume(0.8);
 
     // One callback drives `paused` for every menu (including dialogs).
@@ -479,9 +659,9 @@ async function gameInit()
         dismissable: false,
         onStart: () => startGame('ai'),
         items: [
-            {type:'button', id:'vsAI',   label:'PLAYER VS AI',     onClick: () => console.log('AI wired in commit 2')},
+            {type:'button', id:'vsAI',   label:'PLAYER VS AI',     onClick: () => startGame('ai')},
             {type:'button',              label:'PLAYER VS PLAYER', onClick: () => startGame('pvp')},
-            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => console.log('AI wired in commit 2')},
+            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => startGame('aivai')},
             {type:'button',              label:'OPTIONS',          onClick: () => pushMenu('options')},
             {type:'button',              label:'ABOUT',            onClick: () => pushMenu('about')},
         ],
@@ -493,6 +673,13 @@ async function gameInit()
         title: 'OPTIONS',
         onHide: popMenu,
         items: [
+            {type:'label', text:'DIFFICULTY'},
+            {type:'grid', id:'difficultyGrid', columns:3, cells: [
+                {label:'EASY',   title:'Random moves',               onClick: () => setDifficulty('easy')},
+                {label:'MEDIUM', title:'Greedy 1-ply',               onClick: () => setDifficulty('medium')},
+                {label:'HARD',   title:'Alpha-beta search depth 5',  onClick: () => setDifficulty('hard')},
+            ]},
+            {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
                 persist:'captureGo.volume',
                 onChange: v => setSoundVolume(v)},
@@ -550,6 +737,7 @@ async function gameInit()
     initBoard();
     setPlaying(false);
     showMenu('title');
+    refreshDifficultyUI();
 }
 
 function gameUpdate()
@@ -574,11 +762,33 @@ function gameUpdate()
     // Update hover intersection.
     hoverIntersection = worldPosToIntersection(mousePos);
 
-    // Human input — always in PvP; AI modes not yet wired.
-    if (mouseWasPressed(0) && hoverIntersection)
+    // AI move — covers 'ai' mode (AI is white) and 'aivai' mode (AI plays both sides).
+    const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
+    if (isAITurn)
+    {
+        const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
+        aiThinkTimer += timeDelta;
+        if (aiThinkTimer >= delay)
+        {
+            const move = findBestAIMove();
+            if (move)
+            {
+                makeMove(move.row, move.col);
+                aiThinkTimer = 0;
+            }
+        }
+    }
+
+    // Human input — PvP always, or PvAI when it's the human's turn. Never in aivai.
+    const isHumanTurn = gameMode === 'pvp' || (gameMode === 'ai' && currentPlayer === PLAYER_HUMAN);
+    if (isHumanTurn && mouseWasPressed(0) && hoverIntersection)
     {
         const { row, col } = hoverIntersection;
-        makeMove(row, col);
+        if (isLegalMove(board, row, col, currentPlayer, previousBoardHash))
+        {
+            makeMove(row, col);
+            aiThinkTimer = 0;
+        }
     }
 }
 
