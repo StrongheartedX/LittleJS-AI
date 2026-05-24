@@ -1782,12 +1782,6 @@ function spawnTank()
     const pos = randArenaPosAvoid(8, electrodeKeepout, enemySpawnElectrodeBuffer);
     enemies.push(new Tank(pos));
 }
-function spawnEnforcer()
-{
-    // Used by mid-wave respawn — keeps surviving enforcers alive at fresh positions
-    const pos = randArenaPosAvoid(7, electrodeKeepout, enemySpawnElectrodeBuffer);
-    enemies.push(new Enforcer(pos));
-}
 
 function startWave(w)
 {
@@ -1889,7 +1883,8 @@ function respawnMidWave()
     for (let i=0;i<nS + nSExtra;i++) spawnSpheroid();
     for (let i=0;i<nQ;i++) spawnQuark();
     for (let i=0;i<nT;i++) spawnTank();
-    for (let i=0;i<nE;i++) spawnEnforcer();
+    // Arcade: surviving Enforcers are wiped by GNCIDE — only the converted Spheroids above
+    // bring them back (those new Spheroids will drop fresh Enforcers in due time).
     for (const t of survivingProgs)
         enemies.push(new Prog(randEdgeSpawn(), t));
 
@@ -1977,15 +1972,18 @@ class Player extends EngineObject
             this.facing = vec2(Math.sin(snapped), Math.cos(snapped));
         }
 
-        // FIRE: mouse left button, right stick pushed (twin-stick auto-fire), or gamepad A button
+        // FIRE: mouse left button, right stick pushed (twin-stick auto-fire), or gamepad A button.
+        // Arcade (RRG23.ASM LSPROC): 8-tick auto-fire cadence, max 4 player bullets on screen (LCNT cap).
         const shootInput = mouseIsDown(0) || rightStickActive || fireButtonHeld;
         if (this.cooldown > 0) this.cooldown--;
-        if (shootInput && this.cooldown <= 0)
+        let aliveBullets = 0;
+        for (const b of bullets) if (!b.destroyed) aliveBullets++;
+        if (shootInput && this.cooldown <= 0 && aliveBullets < 4)
         {
             // Bullets fire straight from the player — no aim barrel in arcade Robotron
             const bulletSpeed = 1;
             bullets.push(new Bullet(this.pos.copy(), this.facing.scale(bulletSpeed)));
-            this.cooldown = 7;
+            this.cooldown = 8;
             sfxShoot.play(this.pos);
         }
         if (this.invuln > 0) this.invuln--;
@@ -2064,6 +2062,13 @@ class Player extends EngineObject
 
 function applyElectrodeCollisions()
 {
+    // Arcade post collision (verified from RRP8.ASM / RRH11.ASM / source pass):
+    //   - Player:    dies on contact
+    //   - Grunt:     dies on contact, post is also destroyed (ROBOT calls COL0 against PPTR)
+    //   - Hulk:      passes through unharmed BUT destroys the post (HULK calls COL0 against PPTR)
+    //   - Human:     blocked but unharmed (treated as movement obstacle)
+    //   - Everyone else (Brain/Enforcer/Tank/Prog/Spheroid/Quark/sparks/missiles/shells):
+    //     no PPTR reference in their source — they pass through harmlessly
     if (player && !gameOver && player.invuln <= 0)
         for (const e of electrodes)
         {
@@ -2072,29 +2077,50 @@ function applyElectrodeCollisions()
         }
     for (const en of enemies)
     {
-        if (en.destroyed || !en.killable) continue;
-        // Spheroids and Quarks float around freely and ignore electrodes (matches arcade)
-        if (en instanceof Spheroid || en instanceof Quark) continue;
-        for (const el of electrodes)
+        if (en.destroyed) continue;
+        if (en instanceof Grunt)
         {
-            if (el.destroyed) continue;
-            if (isOverlapping(en.pos, en.size, el.pos, el.size))
+            for (const el of electrodes)
             {
-                en.killedByElectrode(el.pos);
-                // Arcade: electrode is also destroyed when a grunt walks into it
-                el.destroy();
-                burst(el.pos, 14, rgb(.5, 1, 1));
-                break;
+                if (el.destroyed) continue;
+                if (isOverlapping(en.pos, en.size, el.pos, el.size))
+                {
+                    en.killedByElectrode(el.pos);
+                    el.destroy();
+                    burst(el.pos, 14, rgb(.5, 1, 1));
+                    break;
+                }
+            }
+        }
+        else if (en instanceof Hulk)
+        {
+            for (const el of electrodes)
+            {
+                if (el.destroyed) continue;
+                if (isOverlapping(en.pos, en.size, el.pos, el.size))
+                {
+                    el.destroy();
+                    burst(el.pos, 14, rgb(.5, 1, 1));
+                    sfxHit.play(el.pos);
+                    // Hulk continues unscathed — no break, in case it's overlapping more than one
+                }
             }
         }
     }
-    for (const el of electrodes)
+    // Humans bounce off electrodes (arcade: obstacle, not fatal)
+    for (const h of humans)
     {
-        if (el.destroyed) continue;
-        for (const h of humans)
+        if (h.destroyed) continue;
+        for (const el of electrodes)
         {
-            if (h.destroyed) continue;
-            if (isOverlapping(el.pos, el.size, h.pos, h.size)) h.kill();
+            if (el.destroyed) continue;
+            if (isOverlapping(h.pos, h.size, el.pos, el.size))
+            {
+                const away = h.pos.subtract(el.pos);
+                const d = away.length();
+                if (d > .001) { h.dir = away.scale(1/d); h.pos = el.pos.add(h.dir.scale(.9)); }
+                break;
+            }
         }
     }
 }
