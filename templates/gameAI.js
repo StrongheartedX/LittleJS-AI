@@ -95,60 +95,154 @@ function minimaxValue(game, state, depth, maxPlayer)
     return best;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// alphaBetaAI — alpha-beta search with three classical enhancements:
+//   1. Iterative deepening: search d=1..depth in succession; each iteration
+//      seeds the next via the transposition table and killer hints.
+//   2. Transposition table (TT): Map keyed by JSON hash of {board,player},
+//      storing {depth, score, flag, bestMove}.  Local to each call —
+//      no cross-call pollution.
+//   3. Killer-move heuristic: two killer slots per ply updated on beta
+//      cutoffs; tried after the TT best-move in move ordering.
+
 function alphaBetaAI(game, state, depth)
 {
     const player = game.getCurrentPlayer(state);
-    const moves = game.getLegalMoves(state, player);
-    if (!moves.length) return null;
-    let bestMove = moves[0];
-    let bestScore = -Infinity;
-    let alpha = -Infinity;
-    const beta = Infinity;
-    for (const move of moves)
+    if (!game.getLegalMoves(state, player).length) return null;
+
+    // Transposition table — local to this search invocation.
+    const tt = new Map();
+
+    // killers[ply] = [move1, move2]
+    const killers = [];
+    for (let i = 0; i <= depth; i++) killers.push([null, null]);
+
+    let bestMove = null;
+
+    // Iterative deepening: d = 1, 2, … depth.
+    // The TT carries across iterations so each deeper pass benefits from
+    // the previous iteration's best-move ordering.
+    for (let d = 1; d <= depth; d++)
     {
-        const next = game.applyMove(state, move, player);
-        const score = alphaBetaValue(game, next, depth - 1, alpha, beta, player);
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bestMove = move;
-        }
-        alpha = Math.max(alpha, bestScore);
+        const result = alphaBetaSearch(game, state, d, -Infinity, Infinity, player, 0, tt, killers);
+        if (result.move !== null)
+            bestMove = result.move;
     }
+
     return bestMove;
 }
 
-function alphaBetaValue(game, state, depth, alpha, beta, maxPlayer)
+// alphaBetaSearch — recursive negamax-style alpha-beta with TT and killers.
+// Returns {score, move}.
+function alphaBetaSearch(game, state, depth, alpha, beta, maxPlayer, ply, tt, killers)
 {
+    // Capture alpha before any TT adjustment — required for correct flag.
+    const alphaOrig = alpha;
+
+    // Transposition-table lookup.
+    const hashKey = JSON.stringify({b: state.board, p: state.currentPlayer});
+    const ttEntry = tt.get(hashKey);
+
+    if (ttEntry && ttEntry.depth >= depth)
+    {
+        if (ttEntry.flag === 'exact')
+            return {score: ttEntry.score, move: ttEntry.bestMove};
+        if (ttEntry.flag === 'lowerbound')
+            alpha = Math.max(alpha, ttEntry.score);
+        else /* upperbound */
+            beta = Math.min(beta, ttEntry.score);
+        if (alpha >= beta)
+            return {score: ttEntry.score, move: ttEntry.bestMove};
+    }
+
+    // Terminal / leaf node.
     if (depth === 0 || game.isTerminal(state))
-        return game.evaluate(state, maxPlayer);
+        return {score: game.evaluate(state, maxPlayer), move: null};
+
     const player = game.getCurrentPlayer(state);
     const moves = game.getLegalMoves(state, player);
     if (!moves.length)
-        return game.evaluate(state, maxPlayer);
+        return {score: game.evaluate(state, maxPlayer), move: null};
+
+    // Move ordering: TT best-move first, then killers, then the rest.
+    orderMoves(moves, ttEntry, killers[ply]);
+
     const isMax = player === maxPlayer;
-    if (isMax)
+    let bestScore = isMax ? -Infinity : Infinity;
+    let bestMove = moves[0];
+
+    for (const move of moves)
     {
-        let best = -Infinity;
-        for (const move of moves)
+        const next = game.applyMove(state, move, player);
+        const childResult = alphaBetaSearch(
+            game, next, depth - 1, alpha, beta, maxPlayer, ply + 1, tt, killers);
+        const score = childResult.score;
+
+        if (isMax)
         {
-            const next = game.applyMove(state, move, player);
-            best = Math.max(best, alphaBetaValue(game, next, depth - 1, alpha, beta, maxPlayer));
-            alpha = Math.max(alpha, best);
-            if (beta <= alpha) break;
+            if (score > bestScore) { bestScore = score; bestMove = move; }
+            alpha = Math.max(alpha, bestScore);
         }
-        return best;
+        else
+        {
+            if (score < bestScore) { bestScore = score; bestMove = move; }
+            beta = Math.min(beta, bestScore);
+        }
+
+        if (beta <= alpha)
+        {
+            // Beta cutoff — record this as a killer move at this ply.
+            recordKiller(killers[ply], move);
+            break;
+        }
     }
-    else
+
+    // Store result in transposition table.
+    let flag;
+    if (bestScore <= alphaOrig)  flag = 'upperbound';
+    else if (bestScore >= beta)  flag = 'lowerbound';
+    else                         flag = 'exact';
+    tt.set(hashKey, {depth, score: bestScore, flag, bestMove});
+
+    return {score: bestScore, move: bestMove};
+}
+
+// orderMoves — in-place reorder: TT best-move to front, then killer moves.
+function orderMoves(moves, ttEntry, killerPair)
+{
+    const movesEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+    // Build hint list: [ttBestMove, killer0, killer1] in that priority order.
+    // We insert them in reverse so that after all insertions the highest-
+    // priority hint sits at index 0.
+    const hints = [];
+    if (ttEntry && ttEntry.bestMove) hints.push(ttEntry.bestMove);
+    if (killerPair[0]) hints.push(killerPair[0]);
+    if (killerPair[1]) hints.push(killerPair[1]);
+
+    for (let i = hints.length - 1; i >= 0; i--)
     {
-        let best = Infinity;
-        for (const move of moves)
+        const h = hints[i];
+        for (let j = 0; j < moves.length; j++)
         {
-            const next = game.applyMove(state, move, player);
-            best = Math.min(best, alphaBetaValue(game, next, depth - 1, alpha, beta, maxPlayer));
-            beta = Math.min(beta, best);
-            if (beta <= alpha) break;
+            if (movesEqual(moves[j], h))
+            {
+                if (j !== 0)
+                {
+                    const m = moves.splice(j, 1)[0];
+                    moves.unshift(m);
+                }
+                break;
+            }
         }
-        return best;
     }
+}
+
+// recordKiller — update a ply's two killer slots with a new cutoff move.
+function recordKiller(killerPair, move)
+{
+    const movesEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    if (killerPair[0] && movesEqual(killerPair[0], move)) return;
+    killerPair[1] = killerPair[0];
+    killerPair[0] = move;
 }
