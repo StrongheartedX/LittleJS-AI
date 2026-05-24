@@ -33,7 +33,8 @@ const respawnInvulnFrames = 120;
 const respawnPauseFrames = 120;    // mid-wave death pause — 1 sec gone, 1 sec materializing
 const respawnHiddenFrames = 60;    // first half: player invisible
 const interWaveDelayFrames = 120;
-const waveStartDelayFrames = 60;
+const waveStartDelayFrames = 100;        // longer so wave 1 fits the warp-in
+const warpInHideDuration = 70;           // frames the player stays hidden during the telebeam
 
 // electrode placement
 const electrodeKeepout = safeZoneRadius + 2.2;
@@ -77,6 +78,7 @@ let waveActive = false;
 let waveTime = 0;
 let interWaveTimer = 0;
 let respawnTimer = 0;
+let warpInHideTimer = 0;        // frames remaining of player-hidden telebeam window
 let gameOverTimer = 0;          // frames after death before the GAME OVER menu surfaces
 let isPlaying = false;          // true once the player hits PLAY (menu system gates state)
 let humanRescueBonus = humanRescueStart;
@@ -248,7 +250,7 @@ function spawnPlayerWarpIn(target)
         const ang = rand(0, 6.28);
         const dist = rand(6, 14);                // wide scatter across most of the arena
         const startPos = target.add(vec2(Math.cos(ang), Math.sin(ang)).scale(dist));
-        const life = randInt(55, 95);
+        const life = randInt(50, 70);             // tight finish — most done by player-appear time
         const size = rand(.12, .3);              // chunky pieces
         // Mix the player's palette + rainbow flecks
         let c;
@@ -1713,17 +1715,16 @@ function spawnTank()
 
 function startWave(w)
 {
-    // Enemies, electrodes, and humans were all laid out during GET READY.
+    // Enemies/electrodes/humans were laid out + warp-in particles already played during GET READY.
+    // Starting the wave just unlocks the player and begins the speed-ramp timer.
     waveActive = true;
     waveTime = 0;
-    // Brief warp-in lockout — player materializes at center via the telebeam reassembly
-    respawnTimer = 80;                         // ~1.3 sec: hidden ~20 frames, visible during convergence
-    playerControlLocked = true;
+    playerControlLocked = false;
+    respawnTimer = 0;
 
     sfxWaveStart.play(vec2(0));
     waveStartSweep = 50;
     whiteFlashTimer = 3;
-    if (player) spawnPlayerWarpIn(player.pos);
 }
 
 function enterGetReadyForWave(nextWave)
@@ -1737,6 +1738,11 @@ function enterGetReadyForWave(nextWave)
     gruntSpeedMul = 1;                    // grunt speedup ramp resets per wave
 
     if (player) { player.pos = vec2(0); player.invuln = respawnInvulnFrames; }
+
+    // Telebeam reassembly — fires for every wave (including game start). Player stays
+    // hidden until the chunks have mostly converged (warpInHideTimer).
+    warpInHideTimer = warpInHideDuration;
+    if (player) spawnPlayerWarpIn(player.pos);
 
     clearAllEnemies();
     clearAllBullets();
@@ -1756,24 +1762,9 @@ function enterGetReadyForWave(nextWave)
 
 function endWave()
 {
-    // Wave-clear celebration: rainbow radial burst from arena center + banner timer
-    for (let i = 0; i < 36; i++)
-    {
-        const ang = (i / 36) * Math.PI * 2;
-        const speed = rand(.35, .65);
-        const vel = vec2(Math.cos(ang), Math.sin(ang)).scale(speed);
-        const c = hsl(i / 36, 1, .7);
-        particles.push(new SimpleParticle(vec2(0), vel, randInt(40, 80), rand(.18, .32), c));
-    }
-    // Second concentric burst, slower + brighter
-    for (let i = 0; i < 24; i++)
-    {
-        const ang = (i / 24) * Math.PI * 2;
-        const vel = vec2(Math.cos(ang), Math.sin(ang)).scale(rand(.15, .3));
-        particles.push(new SimpleParticle(vec2(0), vel, randInt(30, 60), rand(.2, .35), rgb(1, 1, 1)));
-    }
+    // Wave-clear: banner + chime only (no center burst — it overlapped the warp-in
+    // for the next wave and read as a confusing explosion).
     waveClearTimer = 90;
-    whiteFlashTimer = 4;
     sfxRescue.play(vec2(0));
     enterGetReadyForWave(gameWave + 1);
     interWaveTimer = interWaveDelayFrames;
@@ -1929,6 +1920,8 @@ class Player extends EngineObject
     {
         // hide player during the first half of the mid-wave death pause (breathing room)
         if (respawnTimer > respawnHiddenFrames) return;
+        // also hide during the wave-start warp-in (every wave including game start)
+        if (warpInHideTimer > 0) return;
 
         const phase = Math.sin(this.walkPhase);
         const bob = phase * .05;
@@ -2147,7 +2140,7 @@ function resetGame()
     enforcerCount = sparkCount = cruiseMissileCount = tankCount = shellCount = 0;
     gruntSpeedMul = 1;
     // Reset juice effect timers so they don't leak across sessions
-    shakeTimer = shakeMag = whiteFlashTimer = waveClearTimer = waveStartSweep = 0;
+    shakeTimer = shakeMag = whiteFlashTimer = waveClearTimer = waveStartSweep = warpInHideTimer = 0;
     cameraPos = vec2(0);
 
     player = new Player();
@@ -2447,6 +2440,7 @@ function gameUpdate()
     // update particles/floaters always (visible during pauses)
     for (const p of particles) p.update();
     for (const f of floaters) f.update();
+    if (warpInHideTimer > 0) warpInHideTimer--;
 
     // Title screen: nothing else to do
     if (!isPlaying) { cleanupLists(); return; }
