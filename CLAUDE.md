@@ -26,6 +26,7 @@ Project constraints
   - **Screen culling**: `isOnScreen(pos, size)`.
   - **Camera dims**: `getCameraSize()` returns visible world dimensions; for auto-fitting an arena, `cameraScale = min(mainCanvasSize.x / arenaW, mainCanvasSize.y / arenaH)`.
   - **Direction input**: `keyDirection()` (8-way arrows+WASD), `gamepadStick(0|1)` (analog).
+  - **Touch dual-stick**: the engine ships a built-in on-screen gamepad with two virtual analog sticks — never hand-roll a touch joystick. In gameInit set `touchGamepadEnable = true`, `touchGamepadAnalog = true`, and `touchGamepadButtonCount = 1` (face-button area becomes the right analog stick — perfect for twin-stick shooters). Then read it via the same `gamepadStick(0)` / `gamepadStick(1)` — the engine merges touch + physical gamepad into the same API, so no `isTouchDevice` branching in gameplay code. Other tunables: `touchGamepadSize`, `touchGamepadAlpha`, `touchGamepadDisplayTime`. See [games/robotron.html](games/robotron.html) for a working setup.
   - **Debug-key remap**: `setDebugKey(key)`. menus.js auto-moves it off Escape so games loading menus.js don't have to call this themselves.
   - **Sounds**: `new Sound([...zzfx])` for UI/menu sfx, `SoundGenerator` for gameplay sfx. Never write raw WebAudio code.
   Rule of thumb: if you're writing a 1–5 line helper that touches positions, sizes, angles, colors, or input — grep `dist/littlejs.js` first. It almost certainly exists.

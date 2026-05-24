@@ -44,7 +44,7 @@ The most polished prototypes — playable games with menus, sound, and a complet
 | Orbitswarm | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/orbitswarm.html) |
 | Snake | 👾 | ✅ | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snake.html) |
 | Columns | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/columns.html) |
-| Robotron | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
+| Robotron | 🚀 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) |
 | Snood | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snood.html) |
 
 ## 🕹️ Works in Progress Made With AI
@@ -76,6 +76,7 @@ Rough early experiments — playable concepts that haven't been curated yet. Exp
 | Baseball | ⚽ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/baseball.html) |
 | Joust | 🏃 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/joust.html) |
 | Basketball | ⚽ | | | ✅ | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/basketball.html) |
+| Defender | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/defender.html) |
 | Gradius | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/gradius.html) |
 | Kaboom | 🎯 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/kaboom.html) |
 | Moon Patrol | 🏎️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/moonPatrol.html) |
