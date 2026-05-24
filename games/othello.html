@@ -166,6 +166,29 @@ function getCurrentState()
     };
 }
 
+// X-squares and C-squares per corner — penalized in evaluate() when the
+// adjacent corner is still empty (they hand the opponent the corner).
+const X_C_PENALTIES = [
+    {corner: [0, 0], x: [1, 1], cs: [[0, 1], [1, 0]]},
+    {corner: [0, 7], x: [1, 6], cs: [[0, 6], [1, 7]]},
+    {corner: [7, 0], x: [6, 1], cs: [[6, 0], [7, 1]]},
+    {corner: [7, 7], x: [6, 6], cs: [[6, 7], [7, 6]]},
+];
+
+// Positional weight table — used to order moves so alpha-beta tries
+// strong squares first (corners best, X-squares worst). The classical
+// Othello positional evaluation; standard since the 1980s.
+const POSITION_WEIGHTS = [
+    [100, -20,  10,   5,   5,  10, -20, 100],
+    [-20, -50,  -2,  -2,  -2,  -2, -50, -20],
+    [ 10,  -2,  -1,  -1,  -1,  -1,  -2,  10],
+    [  5,  -2,  -1,  -1,  -1,  -1,  -2,   5],
+    [  5,  -2,  -1,  -1,  -1,  -1,  -2,   5],
+    [ 10,  -2,  -1,  -1,  -1,  -1,  -2,  10],
+    [-20, -50,  -2,  -2,  -2,  -2, -50, -20],
+    [100, -20,  10,   5,   5,  10, -20, 100],
+];
+
 const othelloGame = {
     getOpponent: (player) => player === DISC_BLACK ? DISC_WHITE : DISC_BLACK,
     getCurrentPlayer: (state) => state.currentPlayer,
@@ -178,6 +201,9 @@ const othelloGame = {
             for (let col = 0; col < BOARD_SIZE; col++)
                 if (getFlipsForState(state.board, row, col, player).length > 0)
                     moves.push({row, col});
+        // Sort by positional weight (descending) so alpha-beta tries strong
+        // moves first — major pruning improvement.
+        moves.sort((a, b) => POSITION_WEIGHTS[b.row][b.col] - POSITION_WEIGHTS[a.row][a.col]);
         return moves;
     },
 
@@ -218,6 +244,19 @@ const othelloGame = {
             else if (b[r][c] === opponent) score -= 25;
         }
 
+        // X-square / C-square penalty (only counts when adjacent corner is empty)
+        for (const {corner, x, cs} of X_C_PENALTIES)
+        {
+            if (b[corner[0]][corner[1]] !== DISC_EMPTY) continue;
+            if (b[x[0]][x[1]] === player) score -= 25;
+            else if (b[x[0]][x[1]] === opponent) score += 25;
+            for (const c of cs)
+            {
+                if (b[c[0]][c[1]] === player) score -= 10;
+                else if (b[c[0]][c[1]] === opponent) score += 10;
+            }
+        }
+
         // Edge bonus
         for (let i = 0; i < BOARD_SIZE; i++)
         {
@@ -255,7 +294,7 @@ function strategyForDifficulty(d)
 {
     if (d === 'easy')   return randomAI;
     if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 4); // 'hard'
+    return (game, state) => alphaBetaAI(game, state, 5); // 'hard' (depth 5 with move ordering)
 }
 
 function getFlipsForMove(row, col, player)
