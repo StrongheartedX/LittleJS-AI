@@ -54,7 +54,6 @@ const scoreSpheroid = 1000;
 const scoreEnforcer = 150;
 const scoreTank     = 200;
 const scoreQuark    = 1000;
-const scoreEnemyBullet = 25;       // shooting down sparks / cruise missiles / shells
 const scoreElectrodeKill = 0;      // grunt walks into electrode — arcade gives no credit
 
 // lives and bonus (arcade default)
@@ -102,7 +101,7 @@ const MAX_SHELLS         = 20;
 
 // Arcade grunt speedup: ROBSPD is reduced per kill (faster), clamped at RMXSPD.
 // Modeled here as a per-wave multiplier that climbs each grunt kill.
-let gruntSpeedMul = 1;
+let gruntsKilledThisWave = 0;   // arcade: each kill nudges ROBSPD toward RMXSPD for remaining grunts
 
 // JUICE: screen shake (offsets cameraPos before render), flash overlays, wave transitions
 let shakeTimer = 0;
@@ -620,19 +619,20 @@ class Grunt extends KillableEnemy
     destroy()
     {
         if (this.destroyed) return;
-        // Arcade: each grunt kill speeds up remaining grunts (ROBSPD shrinks → faster).
-        // Modeled as a multiplicative bump up to ~3× per wave.
-        if (isPlaying) gruntSpeedMul = min(gruntSpeedMul * 1.04, 3);
+        // Arcade: each grunt kill decrements ROBSPD by 1 (clamped at RMXSPD) — survivors get faster
+        if (isPlaying) gruntsKilledThisWave++;
         super.destroy();
     }
     getSpeed()
     {
-        // Arcade: ROBSPD shrinks each wave (faster). Wave 1=20, wave 33=12 → ~1.67×.
-        // Combined with per-kill speedup (gruntSpeedMul) and a light passive ramp.
+        // True arcade model: effective ROBSPD shrinks by one per grunt killed this wave,
+        // clamped at RMXSPD (the per-wave speed ceiling). Speed factor = baseline / effective.
+        // Wave 1: ROBSPD=20→RMXSPD=9  (max ~2.2× faster after enough kills)
+        // Wave 8: ROBSPD=15→RMXSPD=4  (max ~5× faster — late waves get scary fast)
         const tu = getWaveTuning(gameWave);
-        const waveMul = 20 / tu.gruntDelay;
-        const ramp = 1 + min(1.5, waveTime / 1800) * .5;
-        return this.baseSpeed * ramp * waveMul * gruntSpeedMul;
+        const effDelay = max(tu.gruntDelayMin, tu.gruntDelay - gruntsKilledThisWave);
+        const waveMul = 20 / effDelay;
+        return this.baseSpeed * waveMul;
     }
     update()
     {
@@ -1009,7 +1009,9 @@ class Spheroid extends KillableEnemy
         this.accelTimer = randInt(1, 16);
         this.spawnTimer = randInt(25, 70);   // first enforcer drops almost immediately
         this.phase = rand(0, 6.28);
-        this.spawnsRemaining = randInt(2, 6);  // arcade: ceil(rand(1..ENFNUM)/2) ≈ 1–5 per spheroid
+        // Arcade: ceil(rand(1..ENFNUM)/2) — ENFNUM=10 → 1–5 enforcers, ENFNUM=11 → 1–6
+        const ENFNUM = getWaveTuning(gameWave).enforcerDropCount;
+        this.spawnsRemaining = Math.ceil(randInt(1, ENFNUM + 1) / 2);
     }
     update()
     {
@@ -1331,7 +1333,9 @@ class Quark extends KillableEnemy
         this.vel = randVec2(.13);
         this.spawnTimer = randInt(40, 100);  // first tank drops fast so the wave feels active
         this.phase = rand(0, 6.28);
-        this.spawnsRemaining = randInt(2, 6);  // arcade: ceil(rand(1..ENFNUM)/2) ≈ 1–5 per quark
+        // Same arcade formula as spheroids — ceil(rand(1..ENFNUM)/2)
+        const ENFNUM = getWaveTuning(gameWave).enforcerDropCount;
+        this.spawnsRemaining = Math.ceil(randInt(1, ENFNUM + 1) / 2);
     }
     update()
     {
@@ -1714,11 +1718,12 @@ function countKillableEnemiesAlive()
 
 function spawnGrunt()
 {
-    // Arcade: grunts spawn at random arena positions, kept outside a safety box around the player
+    // Arcade: grunts spawn at random arena positions, kept outside a safety box around the player.
+    // All grunts are 1-hit kills in the arcade — difficulty comes from speed (ROBSPD/RMXSPD)
+    // and quantity, never from HP buffs.
     const pos = randArenaPosAvoid(7, electrodeKeepout, enemySpawnElectrodeBuffer);
     const baseSpeed = .030 + rand(0, .012) + min(.02, gameWave * .0015);
-    const hp = 1 + (gameWave >= 8) + (gameWave >= 16);
-    enemies.push(new Grunt(pos, baseSpeed, hp));
+    enemies.push(new Grunt(pos, baseSpeed, 1));
 }
 function spawnHulk()
 {
@@ -1791,7 +1796,7 @@ function enterGetReadyForWave(nextWave)
     playerControlLocked = true;
     respawnTimer = 0;
     humanRescueBonus = humanRescueStart;  // fresh family each wave
-    gruntSpeedMul = 1;                    // grunt speedup ramp resets per wave
+    gruntsKilledThisWave = 0;             // ROBSPD restores to wave default for new wave
 
     if (player) { player.pos = vec2(0); player.invuln = respawnInvulnFrames; }
 
@@ -1861,7 +1866,7 @@ function respawnMidWave()
     // Rescue bonus resets to 1000 on death (per FAQ)
     humanRescueBonus = humanRescueStart;
     // Grunt speedup ramp resets on death too (arcade: ROBSPD restores to wave default)
-    gruntSpeedMul = 1;
+    gruntsKilledThisWave = 0;
 
     if (player)
     {
@@ -2110,20 +2115,7 @@ function applyPlayerBulletHits()
                 b.destroy();
             }
         }
-    // player bullets -> enemy bullets (shoot down for bonus)
-    for (const b of bullets)
-        for (const eb of enemyBullets)
-        {
-            if (b.destroyed || eb.destroyed) continue;
-            if (isOverlapping(b.pos, vec2(.35), eb.pos, vec2(.32)))
-            {
-                b.destroy();
-                eb.destroy();
-                score += scoreEnemyBullet;
-                burst(eb.pos, 10, rgb(1,1,.5));
-                floaters.push(new FloatText(eb.pos, `${scoreEnemyBullet}`, rgb(1,1,.5)));
-            }
-        }
+    // Arcade: player bullets pass through enemy projectiles — sparks/missiles/shells are indestructible
     // player bullets -> electrodes (destroy electrode, NO points per arcade)
     for (const b of bullets)
         for (const el of electrodes)
@@ -2194,7 +2186,7 @@ function resetGame()
     // Reset all global caps (destroy() overrides should have decremented these already,
     // but force-clear in case anything slipped through)
     enforcerCount = sparkCount = cruiseMissileCount = tankCount = shellCount = 0;
-    gruntSpeedMul = 1;
+    gruntsKilledThisWave = 0;
     // Reset juice effect timers so they don't leak across sessions
     shakeTimer = shakeMag = whiteFlashTimer = waveClearTimer = waveStartSweep = warpInHideTimer = 0;
     cameraPos = vec2(0);
