@@ -1,8 +1,10 @@
 <!DOCTYPE html><head>
 <title>LittleJS Checkers</title>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.12"></script>
+<script src="../templates/menus.js"></script>
 <script src="../templates/soundGenerator.js"></script>
 <script>
 'use strict';
@@ -42,7 +44,8 @@ let gameOver = false;
 let winner = null;
 let redCount = 12;
 let blackCount = 12;
-let gameMode = 'menu'; // 'menu', 'pvp', 'ai'
+let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai'
+let isPlaying = false;
 let selectedCell = null;
 let allPlayerMoves = [];   // all legal moves for currentPlayer
 let pieceValidMoves = [];  // legal moves starting from selectedCell
@@ -53,9 +56,6 @@ let lastMove = null;
 // Animation
 let movingPiece = null; // {fromRow, fromCol, toRow, toCol, piece, progress, capture, capturedPiece}
 const MOVE_DURATION = 0.25;
-
-// UI
-let btnVsAI, btnVsPlayer;
 
 // Sounds
 let sfxMove, sfxCapture, sfxKing, sfxWin, sfxLose, sfxSelect;
@@ -300,6 +300,8 @@ function endGame(winnerPlayer)
         if (winner === PLAYER_HUMAN) sfxWin && sfxWin.play();
         else sfxLose && sfxLose.play();
     }
+    else if (gameMode === 'aivai')
+        sfxSelect && sfxSelect.play();
 }
 
 function undoMove()
@@ -477,16 +479,16 @@ function drawBoard()
         drawRect(toPos,   vec2(CELL_SIZE * 0.95), rgb(1, 1, 0.3, 0.3));
     }
 
-    // Selected piece highlight
-    if (selectedCell)
+    // Selected piece highlight (gameplay only)
+    if (isPlaying && selectedCell)
     {
         const pos = getCellWorldPos(selectedCell.row, selectedCell.col);
         const pulse = 1 + Math.sin(time * 5) * 0.08;
         drawRect(pos, vec2(CELL_SIZE * 0.95 * pulse), rgb(0.3, 1, 0.3, 0.35));
     }
 
-    // Valid move indicators for selected piece
-    if (selectedCell && !gameOver)
+    // Valid move indicators for selected piece (gameplay only)
+    if (isPlaying && selectedCell && !gameOver)
     {
         for (const m of pieceValidMoves)
         {
@@ -496,9 +498,9 @@ function drawBoard()
         }
     }
 
-    // Hint: pulse pieces that have legal moves when nothing selected
-    if (!selectedCell && !gameOver && !movingPiece &&
-        (gameMode === 'pvp' || currentPlayer === PLAYER_HUMAN))
+    // Hint: pulse pieces that have legal moves when nothing selected (gameplay only)
+    if (isPlaying && !selectedCell && !gameOver && !movingPiece &&
+        (gameMode === 'pvp' || (gameMode === 'ai' && currentPlayer === PLAYER_HUMAN)))
     {
         const hintAlpha = 0.3 + Math.sin(time * 4) * 0.15;
         const seen = new Set();
@@ -556,9 +558,13 @@ function drawUI()
     // Current player
     if (!gameOver)
     {
-        const playerText = gameMode === 'ai'
-            ? (currentPlayer === PLAYER_HUMAN ? 'Your Turn' : 'AI Thinking...')
-            : (currentPlayer === PLAYER_RED ? "Red's Turn" : "Black's Turn");
+        let playerText;
+        if (gameMode === 'ai')
+            playerText = currentPlayer === PLAYER_HUMAN ? 'Your Turn' : 'AI Thinking...';
+        else if (gameMode === 'aivai')
+            playerText = currentPlayer === PLAYER_RED ? 'AI Red Thinking...' : 'AI Black Thinking...';
+        else
+            playerText = currentPlayer === PLAYER_RED ? "Red's Turn" : "Black's Turn";
         const color = currentPlayer === PLAYER_RED ? rgb(1, 0.4, 0.4) : rgb(0.9, 0.9, 0.9);
         drawTextScreen(playerText, vec2(30, 110), 28, color, 4, BLACK, 'left');
 
@@ -586,6 +592,11 @@ function drawUI()
             resultText = winner === PLAYER_HUMAN ? 'You Win!' : 'AI Wins!';
             resultColor = winner === PLAYER_HUMAN ? rgb(0, 1, 0.3) : rgb(1, 0.3, 0.3);
         }
+        else if (gameMode === 'aivai')
+        {
+            resultText = winner === PLAYER_RED ? 'AI Red Wins!' : 'AI Black Wins!';
+            resultColor = winner === PLAYER_RED ? rgb(1, 0.4, 0.4) : rgb(0.9, 0.9, 0.9);
+        }
         else
         {
             resultText = winner === PLAYER_RED ? 'Red Wins!' : 'Black Wins!';
@@ -595,27 +606,12 @@ function drawUI()
         drawTextScreen(resultText, vec2(screenSize.x / 2, screenSize.y / 2), 48,
             resultColor, 5, BLACK);
 
-        drawTextScreen('Press R to restart or ESC for menu', vec2(screenSize.x / 2, screenSize.y / 2 + 60), 24,
+        drawTextScreen('Press R to restart or ESC to pause', vec2(screenSize.x / 2, screenSize.y / 2 + 60), 24,
             WHITE, 3, BLACK);
     }
 
     // Controls
-    drawTextScreen('U: Undo | R: Restart | ESC: Menu', vec2(screenSize.x / 2, screenSize.y - 30), 20,
-        rgb(0.7, 0.7, 0.7), 2, BLACK);
-}
-
-function drawMenu()
-{
-    const screenSize = vec2(mainCanvasSize.x, mainCanvasSize.y);
-
-    drawTextScreen('CHECKERS', vec2(screenSize.x / 2, 230), 150, hsl(0, 0.7, 0.55), 8, hsl(0, 0.9, 0.15), 'center', undefined, 'bold');
-
-    const instructY = screenSize.y - 150;
-    drawTextScreen('How to Play:', vec2(screenSize.x / 2, instructY), 28,
-        rgb(0.8, 0.8, 0.8), 3, BLACK);
-    drawTextScreen('Move diagonally. Jump to capture (jumps are required).', vec2(screenSize.x / 2, instructY + 40), 22,
-        rgb(0.7, 0.7, 0.7), 2, BLACK);
-    drawTextScreen('Reach the far row to become a King!', vec2(screenSize.x / 2, instructY + 70), 22,
+    drawTextScreen('U: Undo | R: Restart | ESC: Pause', vec2(screenSize.x / 2, screenSize.y - 30), 20,
         rgb(0.7, 0.7, 0.7), 2, BLACK);
 }
 
@@ -624,36 +620,18 @@ function drawMenu()
 
 let aiThinkTimer = 0;
 const AI_THINK_DELAY = 0.5;
+const AI_VS_AI_DELAY = 0.6;
 
 async function gameInit()
 {
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
+    canvasClearColor = new Color().setHex('#0d0d14');
 
-    // UI system
-    new UISystemPlugin();
-    uiSystem.defaultCornerRadius = 8;
-    uiSystem.defaultLineWidth = 3;
+    // One callback drives `paused` for every menu (including dialogs).
+    setMenuVisibilityCallback(v => paused = v);
 
-    const cx = 0, cy = 0;
-
-    btnVsAI = new UIButton(vec2(cx, cy), vec2(500, 100), 'PLAYER VS AI');
-    btnVsAI.color = hsl(.55, .7, .35);
-    btnVsAI.hoverColor = hsl(.55, .8, .5);
-    btnVsAI.textColor = WHITE;
-    btnVsAI.textLineColor = BLACK;
-    btnVsAI.textLineWidth = 6;
-    btnVsAI.onClick = () => startGame('ai');
-
-    btnVsPlayer = new UIButton(vec2(cx, cy + 120), vec2(500, 100), 'PLAYER VS PLAYER');
-    btnVsPlayer.color = hsl(.02, .7, .4);
-    btnVsPlayer.hoverColor = hsl(.02, .8, .55);
-    btnVsPlayer.textColor = WHITE;
-    btnVsPlayer.textLineColor = BLACK;
-    btnVsPlayer.textLineWidth = 6;
-    btnVsPlayer.onClick = () => startGame('pvp');
-
-    // Sounds
+    // Sounds (gameplay)
     sfxMove    = new SoundGenerator({frequency: 320, release: 0.06, volume: 0.25});
     sfxCapture = new SoundGenerator({frequency: 180, release: 0.15, pitchJump: 80, pitchJumpTime: 0.05, volume: 0.5, noise: 0.2});
     sfxKing    = new SoundGenerator({frequency: 550, release: 0.3, pitchJump: 440, pitchJumpTime: 0.08, volume: 0.5});
@@ -661,30 +639,123 @@ async function gameInit()
     sfxLose    = new SoundGenerator({frequency: 220, release: 0.4, slide: -0.5, volume: 0.5});
     sfxSelect  = new SoundGenerator({frequency: 550, release: 0.08, volume: 0.35});
 
-    btnVsAI.soundClick = sfxSelect;
-    btnVsPlayer.soundClick = sfxSelect;
+    // Global menu sounds (LittleJS Sound class — routes through engine audio).
+    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sound_select.play(),
+        activate: () => sound_activate.play(),
+    });
 
-    showMenuButtons(true);
-    gameMode = 'menu';
+    // ----- title menu -----
+    createMenu({
+        id: 'title',
+        title: 'CHECKERS',
+        dismissable: false,
+        onStart: () => startGame('ai'),
+        items: [
+            {type:'button', id:'vsAI',   label:'PLAYER VS AI',     onClick: () => startGame('ai')},
+            {type:'button',              label:'PLAYER VS PLAYER', onClick: () => startGame('pvp')},
+            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => console.log('AI vs AI: wired in commit 2')},
+            {type:'button',              label:'OPTIONS',          onClick: () => pushMenu('options')},
+            {type:'button',              label:'ABOUT',            onClick: () => pushMenu('about')},
+        ],
+    });
+
+    // ----- options menu -----
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
+                persist:'checkers.volume',
+                onChange: v => setSoundVolume(v)},
+            {type:'separator'},
+            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
+            {type:'button', label:'BACK',       onClick: () => hideMenu('options')},
+        ],
+    });
+
+    // ----- about menu -----
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:'Checkers — move diagonally and jump over opponent pieces to capture them. ' +
+                'Captures are mandatory. Reach the far row to become a King and move in any direction. ' +
+                'Capture all opponent pieces or leave them with no legal moves to win. ' +
+                'Includes a watchable AI-vs-AI mode.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    // ----- pause menu -----
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
+            {type:'button', id:'restart', label:'RESTART', onClick: () => { initBoard(); aiThinkTimer = 0; hideMenu('pause'); }},
+            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button',               label:'QUIT TO TITLE', onClick: () =>
+            {
+                showConfirmDialog({message: 'Quit to title?', onYes: quitToTitle});
+            }},
+        ],
+    });
+
+    // ----- HUD toolbar (gameplay-only — setPlaying toggles visibility) -----
+    createToolbar({
+        id: 'hud',
+        anchor: 'top-right',
+        direction: 'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', hideOnTouch:true, onClick: toggleFullscreen},
+            {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
+            {
+                if (isMenuVisible()) { clearSubmenuStack(); hideAllMenus(); }
+                else showMenu('pause');
+            }},
+        ],
+    });
+
+    initBoard();
+    setPlaying(false);
+    showMenu('title');
 }
 
-function showMenuButtons(visible)
+function setPlaying(p)
 {
-    btnVsAI.visible = visible;
-    btnVsPlayer.visible = visible;
+    isPlaying = p;
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
+
+function quitToTitle()
+{
+    setPlaying(false);
+    clearSubmenuStack();
+    hideAllMenus();
+    showMenu('title');
 }
 
 function startGame(mode)
 {
     gameMode = mode;
-    showMenuButtons(false);
     initBoard();
     aiThinkTimer = 0;
+    setPlaying(true);
+    hideMenu('title');
 }
 
 function gameUpdate()
 {
-    if (gameMode === 'menu') return;
+    if (bindPauseKey({when: () => isPlaying})) return;
+    if (!isPlaying) return;
 
     // Advance move animation
     if (movingPiece)
@@ -706,23 +777,18 @@ function gameUpdate()
         aiThinkTimer = 0;
     }
 
-    if (keyWasPressed('Escape'))
-    {
-        gameMode = 'menu';
-        showMenuButtons(true);
-        return;
-    }
-
     if (gameOver) return;
 
     // Block input while a piece is animating
     if (movingPiece) return;
 
     // AI turn
-    if (gameMode === 'ai' && currentPlayer === PLAYER_AI)
+    const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
+    if (isAITurn)
     {
+        const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
-        if (aiThinkTimer >= AI_THINK_DELAY)
+        if (aiThinkTimer >= delay)
         {
             const move = findBestAIMove();
             if (move)
@@ -734,8 +800,9 @@ function gameUpdate()
         return;
     }
 
-    // Human input
-    if (mouseWasPressed(0))
+    // Human input — PvP always, or PvAI when it's the human's turn. Never in aivai.
+    const isHumanTurn = gameMode === 'pvp' || (gameMode === 'ai' && currentPlayer === PLAYER_HUMAN);
+    if (isHumanTurn && mouseWasPressed(0))
     {
         const cell = worldPosToCell(mousePos);
         if (!cell) return;
@@ -782,15 +849,12 @@ function gameUpdatePost()
 
 function gameRender()
 {
-    drawRect(cameraPos, vec2(100, 100), rgb(0.05, 0.05, 0.08));
-    if (gameMode === 'menu') return;
     drawBoard();
 }
 
 function gameRenderPost()
 {
-    if (gameMode === 'menu') drawMenu();
-    else drawUI();
+    if (isPlaying) drawUI();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
