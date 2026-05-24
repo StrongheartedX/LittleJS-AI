@@ -6,6 +6,7 @@
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/menus.js"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/gameAI.js"></script>
 <script>
 'use strict';
 
@@ -39,8 +40,12 @@ let currentPlayer = DISC_RED;
 let gameOver = false;
 let winner = null;
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai' — set on startGame
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let moveHistory = [];
 let winningCells = []; // [{row, col}, ...] for highlighting
+
+// Center-first move ordering — dramatically improves alpha-beta pruning
+const COLUMN_ORDER = [3, 2, 4, 1, 5, 0, 6];
 
 // Animation
 let droppingDisc = null; // {col, targetRow, currentY, player}
@@ -79,14 +84,19 @@ function getOpponent(player)
     return player === DISC_RED ? DISC_YELLOW : DISC_RED;
 }
 
-function getLowestEmptyRow(col)
+function getLowestEmptyRowForState(b, col)
 {
     for (let row = 0; row < ROWS; row++)
     {
-        if (board[row][col] === DISC_EMPTY)
+        if (b[row][col] === DISC_EMPTY)
             return row;
     }
     return -1; // column full
+}
+
+function getLowestEmptyRow(col)
+{
+    return getLowestEmptyRowForState(board, col);
 }
 
 function getValidColumns()
@@ -100,7 +110,7 @@ function getValidColumns()
     return cols;
 }
 
-function checkWinFrom(row, col, player)
+function checkWinForState(b, row, col, player)
 {
     const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
 
@@ -113,7 +123,7 @@ function checkWinFrom(row, col, player)
         {
             const r = row + dr * i;
             const c = col + dc * i;
-            if (r < 0 || r >= ROWS || c < 0 || c >= COLS || board[r][c] !== player)
+            if (r < 0 || r >= ROWS || c < 0 || c >= COLS || b[r][c] !== player)
                 break;
             cells.push({row: r, col: c});
         }
@@ -123,7 +133,7 @@ function checkWinFrom(row, col, player)
         {
             const r = row - dr * i;
             const c = col - dc * i;
-            if (r < 0 || r >= ROWS || c < 0 || c >= COLS || board[r][c] !== player)
+            if (r < 0 || r >= ROWS || c < 0 || c >= COLS || b[r][c] !== player)
                 break;
             cells.push({row: r, col: c});
         }
@@ -133,6 +143,11 @@ function checkWinFrom(row, col, player)
     }
 
     return null;
+}
+
+function checkWinFrom(row, col, player)
+{
+    return checkWinForState(board, row, col, player);
 }
 
 function makeMove(col, player)
@@ -209,107 +224,149 @@ function undoMove()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// AI
+// AI adapter — pure-functional view of the game for gameAI.js search.
+// State shape: { board, currentPlayer, gameOver }.
 
-function evaluateBoard(boardState, player)
+function getCurrentState()
 {
-    let score = 0;
-    const opponent = getOpponent(player);
+    return {
+        board: board.map(r => [...r]),
+        currentPlayer: currentPlayer,
+        gameOver: gameOver,
+    };
+}
 
-    // Evaluate all windows of 4
-    for (let row = 0; row < ROWS; row++)
+const connect4Game = {
+    getOpponent: (player) => player === DISC_RED ? DISC_YELLOW : DISC_RED,
+    getCurrentPlayer: (state) => state.currentPlayer,
+    isTerminal: (state) => state.gameOver,
+
+    getLegalMoves(state, player)
     {
-        for (let col = 0; col < COLS; col++)
+        // Center-first ordering baked in via COLUMN_ORDER for better pruning
+        const moves = [];
+        for (const col of COLUMN_ORDER)
         {
-            const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+            if (getLowestEmptyRowForState(state.board, col) >= 0)
+                moves.push({col});
+        }
+        return moves;
+    },
 
-            for (const [dr, dc] of directions)
+    applyMove(state, move, player)
+    {
+        const newBoard = state.board.map(r => [...r]);
+        const row = getLowestEmptyRowForState(newBoard, move.col);
+        newBoard[row][move.col] = player;
+
+        let nextGameOver = false;
+        if (checkWinForState(newBoard, row, move.col, player))
+        {
+            nextGameOver = true;
+        }
+        else
+        {
+            // Check draw: any DISC_EMPTY in top row means board is not full
+            let full = true;
+            for (let c = 0; c < COLS; c++)
             {
-                let mine = 0, theirs = 0, empty = 0;
+                if (newBoard[ROWS - 1][c] === DISC_EMPTY) { full = false; break; }
+            }
+            if (full) nextGameOver = true;
+        }
 
-                for (let i = 0; i < 4; i++)
+        const opponent = player === DISC_RED ? DISC_YELLOW : DISC_RED;
+        return {board: newBoard, currentPlayer: opponent, gameOver: nextGameOver};
+    },
+
+    evaluate(state, player)
+    {
+        const b = state.board;
+        const opponent = player === DISC_RED ? DISC_YELLOW : DISC_RED;
+        let score = 0;
+
+        // Evaluate all windows of 4
+        for (let row = 0; row < ROWS; row++)
+        {
+            for (let col = 0; col < COLS; col++)
+            {
+                const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+                for (const [dr, dc] of directions)
                 {
-                    const r = row + dr * i;
-                    const c = col + dc * i;
-                    if (r < 0 || r >= ROWS || c < 0 || c >= COLS)
+                    let mine = 0, theirs = 0, empty = 0;
+
+                    for (let i = 0; i < 4; i++)
                     {
-                        mine = -1;
-                        break;
+                        const r = row + dr * i;
+                        const c = col + dc * i;
+                        if (r < 0 || r >= ROWS || c < 0 || c >= COLS)
+                        {
+                            mine = -1;
+                            break;
+                        }
+                        if (b[r][c] === player) mine++;
+                        else if (b[r][c] === opponent) theirs++;
+                        else empty++;
                     }
-                    if (boardState[r][c] === player) mine++;
-                    else if (boardState[r][c] === opponent) theirs++;
-                    else empty++;
+
+                    if (mine < 0) continue;
+
+                    if (mine === 4) score += 1000;
+                    else if (mine === 3 && empty === 1) score += 50;
+                    else if (mine === 2 && empty === 2) score += 10;
+                    if (theirs === 3 && empty === 1) score -= 80;
+                    if (theirs === 4) score -= 1000;
                 }
-
-                if (mine < 0) continue;
-
-                if (mine === 4) score += 1000;
-                else if (mine === 3 && empty === 1) score += 50;
-                else if (mine === 2 && empty === 2) score += 10;
-                if (theirs === 3 && empty === 1) score -= 80;
-                if (theirs === 4) score -= 1000;
             }
         }
-    }
 
-    // Center column preference
-    for (let row = 0; row < ROWS; row++)
-    {
-        if (boardState[row][3] === player) score += 6;
-        if (boardState[row][3] === opponent) score -= 6;
-    }
+        // Center column preference
+        for (let row = 0; row < ROWS; row++)
+        {
+            if (b[row][3] === player) score += 6;
+            if (b[row][3] === opponent) score -= 6;
+        }
 
-    return score;
+        return score;
+    },
+};
+
+function strategyForDifficulty(d)
+{
+    if (d === 'easy')   return randomAI;
+    if (d === 'medium') return greedyAI;
+    return (game, state) => alphaBetaAI(game, state, 7); // 'hard' — depth 7 with center-first ordering
 }
 
 function findBestAIMove()
 {
     const validCols = getValidColumns();
-    if (validCols.length === 0)
-        return -1;
+    if (validCols.length === 0) return -1;
+    const move = strategyForDifficulty(difficulty)(connect4Game, getCurrentState());
+    return move ? move.col : -1;
+}
 
-    // Check for immediate win
-    for (const col of validCols)
-    {
-        const row = getLowestEmptyRow(col);
-        board[row][col] = PLAYER_AI;
-        if (checkWinFrom(row, col, PLAYER_AI))
-        {
-            board[row][col] = DISC_EMPTY;
-            return col;
-        }
-        board[row][col] = DISC_EMPTY;
-    }
+function setDifficulty(d)
+{
+    difficulty = d;
+    localStorage.setItem('connect4.difficulty', d);
+    refreshDifficultyUI();
+}
 
-    // Block immediate opponent win
-    for (const col of validCols)
+function refreshDifficultyUI()
+{
+    const grid = getMenu('options')?.getItem('difficultyGrid');
+    if (grid)
     {
-        const row = getLowestEmptyRow(col);
-        board[row][col] = PLAYER_HUMAN;
-        if (checkWinFrom(row, col, PLAYER_HUMAN))
-        {
-            board[row][col] = DISC_EMPTY;
-            return col;
-        }
-        board[row][col] = DISC_EMPTY;
+        grid.setCell(0, {earned: difficulty === 'easy'});
+        grid.setCell(1, {earned: difficulty === 'medium'});
+        grid.setCell(2, {earned: difficulty === 'hard'});
     }
-
-    // Simple best-column evaluation
-    let bestScore = -Infinity;
-    let bestCol = validCols[Math.floor(Math.random() * validCols.length)];
-    for (const col of validCols)
-    {
-        const row = getLowestEmptyRow(col);
-        board[row][col] = PLAYER_AI;
-        const score = evaluateBoard(board, PLAYER_AI);
-        board[row][col] = DISC_EMPTY;
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bestCol = col;
-        }
-    }
-    return bestCol;
+    const title = getMenu('title');
+    const upper = difficulty.toUpperCase();
+    title?.getItem('vsAI')?.setLabel(`PLAYER VS AI · ${upper}`);
+    title?.getItem('aiVsAi')?.setLabel(`AI VS AI · ${upper}`);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -415,7 +472,7 @@ function drawBoard()
     }
 
     // Hover indicator at top
-    const isHumanTurn = gameMode === 'pvp' || currentPlayer === PLAYER_HUMAN;
+    const isHumanTurn = gameMode !== 'aivai' && (gameMode === 'pvp' || currentPlayer === PLAYER_HUMAN);
     if (!gameOver && hoverCol >= 0 && !droppingDisc && isHumanTurn)
     {
         const isValid = board[ROWS - 1][hoverCol] === DISC_EMPTY;
@@ -501,12 +558,14 @@ function drawUI()
 
 let aiThinkTimer = 0;
 const AI_THINK_DELAY = 0.6;
+const AI_VS_AI_DELAY = 0.5;
 
 async function gameInit()
 {
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
+    difficulty = localStorage.getItem('connect4.difficulty') || 'hard';
 
     // One callback drives `paused` for every menu (including dialogs).
     setMenuVisibilityCallback(v => paused = v);
@@ -533,7 +592,7 @@ async function gameInit()
         items: [
             {type:'button', id:'vsAI',   label:'PLAYER VS AI',     onClick: () => startGame('ai')},
             {type:'button',              label:'PLAYER VS PLAYER', onClick: () => startGame('pvp')},
-            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => console.log('AI vs AI: wired in commit 2')},
+            {type:'button', id:'aiVsAi', label:'AI VS AI',         onClick: () => startGame('aivai')},
             {type:'button',              label:'OPTIONS',          onClick: () => pushMenu('options')},
             {type:'button',              label:'ABOUT',            onClick: () => pushMenu('about')},
         ],
@@ -545,6 +604,13 @@ async function gameInit()
         title: 'OPTIONS',
         onHide: popMenu,
         items: [
+            {type:'label', text:'DIFFICULTY'},
+            {type:'grid', id:'difficultyGrid', columns:3, cells: [
+                {label:'EASY',   title:'Random moves',                   onClick: () => setDifficulty('easy')},
+                {label:'MEDIUM', title:'Greedy 1-ply',                   onClick: () => setDifficulty('medium')},
+                {label:'HARD',   title:'Alpha-beta search to depth 7',   onClick: () => setDifficulty('hard')},
+            ]},
+            {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
                 persist:'connect4.volume',
                 onChange: v => setSoundVolume(v)},
@@ -602,6 +668,7 @@ async function gameInit()
     initBoard();
     setPlaying(false);
     showMenu('title');
+    refreshDifficultyUI();
 }
 
 function setPlaying(p)
@@ -663,12 +730,13 @@ function gameUpdate()
     // Update hover column
     hoverCol = worldPosToCol(mousePos);
 
-    // AI turn
+    // AI turn — covers both 'ai' mode (AI is yellow only) and 'aivai' mode (AI plays both sides).
     const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
     if (isAITurn && !droppingDisc)
     {
+        const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
-        if (aiThinkTimer >= AI_THINK_DELAY)
+        if (aiThinkTimer >= delay)
         {
             const col = findBestAIMove();
             if (col >= 0)
