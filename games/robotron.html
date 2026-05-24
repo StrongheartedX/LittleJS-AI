@@ -55,6 +55,7 @@ const scoreEnforcer = 150;
 const scoreTank     = 200;
 const scoreQuark    = 1000;
 const scoreElectrodeKill = 0;      // grunt walks into electrode — arcade gives no credit
+const scoreEnemyBullet   = 25;     // arcade: sparks/missiles/shells are killable for 25 pts each
 
 // lives and bonus (arcade default)
 const startingLives = 3;
@@ -1711,8 +1712,16 @@ function spawnHumansForWave(mommies, daddies, mikeys)
 
 function countKillableEnemiesAlive()
 {
+    // Arcade wave-end check: ROBCNT + CIRCNT + ENFCNT + BRNCNT + TNKCNT + SQCNT == 0.
+    // Hulks (unkillable) and Progs are explicitly NOT in that list — a wave with only
+    // leftover Progs still ends. Humans/posts/projectiles also don't keep the wave alive.
     let n = 0;
-    for (const e of enemies) if (!e.destroyed && e.killable) n++;
+    for (const e of enemies)
+    {
+        if (e.destroyed || !e.killable) continue;
+        if (e instanceof Prog) continue;
+        n++;
+    }
     return n;
 }
 
@@ -2129,7 +2138,20 @@ function applyPlayerBulletHits()
                 b.destroy();
             }
         }
-    // Arcade: player bullets pass through enemy projectiles — sparks/missiles/shells are indestructible
+    // Arcade: player bullets can destroy sparks/missiles/shells for 25 pts each (SPKIL/CMKIL/SHLKIL)
+    for (const b of bullets)
+        for (const eb of enemyBullets)
+        {
+            if (b.destroyed || eb.destroyed) continue;
+            if (isOverlapping(b.pos, vec2(.35), eb.pos, vec2(.32)))
+            {
+                b.destroy();
+                eb.destroy();
+                score += scoreEnemyBullet;
+                burst(eb.pos, 10, rgb(1,1,.5));
+                floaters.push(new FloatText(eb.pos, `${scoreEnemyBullet}`, rgb(1,1,.5)));
+            }
+        }
     // player bullets -> electrodes (destroy electrode, NO points per arcade)
     for (const b of bullets)
         for (const el of electrodes)
