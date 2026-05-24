@@ -1773,6 +1773,12 @@ function spawnTank()
     const pos = randArenaPosAvoid(8, electrodeKeepout, enemySpawnElectrodeBuffer);
     enemies.push(new Tank(pos));
 }
+function spawnEnforcer()
+{
+    // Used by mid-wave respawn — keeps surviving enforcers alive at fresh positions
+    const pos = randArenaPosAvoid(7, electrodeKeepout, enemySpawnElectrodeBuffer);
+    enemies.push(new Enforcer(pos));
+}
 
 function startWave(w)
 {
@@ -1837,7 +1843,7 @@ function endWave()
 function respawnMidWave()
 {
     // Count surviving enemies by type so we can respawn the same count at fresh positions.
-    let nG=0, nH=0, nB=0, nS=0, nQ=0, nT=0;
+    let nG=0, nH=0, nB=0, nS=0, nQ=0, nT=0, nE=0;
     const survivingProgs = [];
     for (const e of enemies)
     {
@@ -1848,16 +1854,24 @@ function respawnMidWave()
         else if (e instanceof Spheroid) nS++;
         else if (e instanceof Quark)    nQ++;
         else if (e instanceof Tank)     nT++;
+        else if (e instanceof Enforcer) nE++;
         else if (e instanceof Prog)     survivingProgs.push(e.humanType);
     }
+    // If a child enemy outlived its parent spawner, bring one fresh spawner back so the
+    // field doesn't go quiet after respawn. ceil(children/3) keeps it from being too punishing.
+    let nSExtra = 0, nQExtra = 0;
+    if (nE > 0 && nS === 0) nSExtra = Math.ceil(nE / 3);
+    if (nT > 0 && nQ === 0) nQExtra = Math.ceil(nT / 3);
+
     clearAllEnemies();
     clearAllBullets();
     for (let i=0;i<nG;i++) spawnGrunt();
     for (let i=0;i<nH;i++) spawnHulk();
     for (let i=0;i<nB;i++) spawnBrain();
-    for (let i=0;i<nS;i++) spawnSpheroid();
-    for (let i=0;i<nQ;i++) spawnQuark();
+    for (let i=0;i<nS + nSExtra;i++) spawnSpheroid();
+    for (let i=0;i<nQ + nQExtra;i++) spawnQuark();
     for (let i=0;i<nT;i++) spawnTank();
+    for (let i=0;i<nE;i++) spawnEnforcer();
     for (const t of survivingProgs)
         enemies.push(new Prog(randEdgeSpawn(), t));
 
