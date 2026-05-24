@@ -357,6 +357,13 @@ function playerOfPiece(piece)
 
 function isKingPiece(piece) { return piece === P_RED_KING || piece === P_BLACK_KING; }
 
+function isAdvancingMove(move, player)
+{
+    if (player === PLAYER_RED)   return move.toRow < move.fromRow;
+    if (player === PLAYER_BLACK) return move.toRow > move.fromRow;
+    return false;
+}
+
 function getPieceMovesForState(b, row, col)
 {
     const piece = b[row][col];
@@ -418,6 +425,19 @@ function getLegalMovesForState(b, player)
                         allMoves.push({fromRow: row, fromCol: col, toRow: m.row, toCol: m.col, capture: null});
                 }
 
+    // Move ordering: captures first, then advancing moves, then the rest.
+    // First-touch order at each search node (killer-move heuristic in
+    // gameAI.js still takes precedence on subsequent visits).
+    allMoves.sort((a, b) =>
+    {
+        const aCap = a.capture ? 1 : 0;
+        const bCap = b.capture ? 1 : 0;
+        if (aCap !== bCap) return bCap - aCap;
+        // Within same capture-status, advancing moves first.
+        const aAdv = isAdvancingMove(a, player) ? 1 : 0;
+        const bAdv = isAdvancingMove(b, player) ? 1 : 0;
+        return bAdv - aAdv;
+    });
     return allMoves;
 }
 
@@ -556,6 +576,31 @@ const checkersGame = {
                 }
             }
         }
+
+        // Trade-tempo bonus: when ahead in material, reward fewer total
+        // pieces on the board (trades simplify in our favor). When behind,
+        // penalize fewer pieces (less material left to recover with).
+        // Baseline 24 = starting total (12 + 12).
+        let tradeTotalPieces = 0;
+        let playerMaterial = 0, opponentMaterial = 0;
+        for (let r = 0; r < BOARD_SIZE; r++)
+        {
+            for (let c = 0; c < BOARD_SIZE; c++)
+            {
+                const p = b[r][c];
+                if (p === P_EMPTY) continue;
+                tradeTotalPieces++;
+                const owner = playerOfPiece(p);
+                const value = isKingPiece(p) ? 3 : 1;
+                if (owner === player) playerMaterial += value;
+                else opponentMaterial += value;
+            }
+        }
+        const materialDiff = playerMaterial - opponentMaterial;
+        if (materialDiff > 0)
+            score += (24 - tradeTotalPieces) * 0.1;
+        else if (materialDiff < 0)
+            score -= (24 - tradeTotalPieces) * 0.1;
 
         return score;
     },
