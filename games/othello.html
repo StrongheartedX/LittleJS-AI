@@ -6,6 +6,7 @@
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/menus.js"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/gameAI.js"></script>
 <script>
 'use strict';
 
@@ -41,6 +42,7 @@ let blackScore = 2;
 let whiteScore = 2;
 let validMoves = [];
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai' — set on startGame
+let difficulty = 'medium'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let passCount = 0;
 let moveHistory = [];
 let lastMove = null; // {row, col} for highlighting
@@ -141,6 +143,159 @@ function checkDirection(row, col, player, dRow, dCol)
     }
     
     return [];
+}
+
+function getFlipsForState(board, row, col, player)
+{
+    if (board[row][col] !== DISC_EMPTY) return [];
+    const opponent = player === DISC_BLACK ? DISC_WHITE : DISC_BLACK;
+    const directions = [
+        [-1, -1], [-1, 0], [-1, 1],
+        [0, -1],           [0, 1],
+        [1, -1],  [1, 0],  [1, 1]
+    ];
+    const allFlips = [];
+    for (const [dRow, dCol] of directions)
+    {
+        let r = row + dRow, c = col + dCol;
+        let hasOpponent = false;
+        while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE)
+        {
+            if (board[r][c] === DISC_EMPTY) break;
+            if (board[r][c] === opponent)
+            {
+                hasOpponent = true;
+                r += dRow; c += dCol;
+            }
+            else // board[r][c] === player
+            {
+                if (hasOpponent)
+                {
+                    let fr = row + dRow, fc = col + dCol;
+                    while (board[fr][fc] === opponent)
+                    {
+                        allFlips.push({row: fr, col: fc});
+                        fr += dRow; fc += dCol;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return allFlips;
+}
+
+function hasLegalMovesForState(board, player)
+{
+    for (let r = 0; r < BOARD_SIZE; r++)
+        for (let c = 0; c < BOARD_SIZE; c++)
+            if (getFlipsForState(board, r, c, player).length > 0) return true;
+    return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// AI adapter — pure-functional view of the game for gameAI.js search.
+// State shape: { board, currentPlayer, gameOver }.
+
+function getCurrentState()
+{
+    return {
+        board: board.map(row => [...row]),
+        currentPlayer: currentPlayer,
+        gameOver: gameOver,
+    };
+}
+
+const othelloGame = {
+    getOpponent: (player) => player === DISC_BLACK ? DISC_WHITE : DISC_BLACK,
+    getCurrentPlayer: (state) => state.currentPlayer,
+    isTerminal: (state) => state.gameOver,
+
+    getLegalMoves(state, player)
+    {
+        const moves = [];
+        for (let row = 0; row < BOARD_SIZE; row++)
+            for (let col = 0; col < BOARD_SIZE; col++)
+                if (getFlipsForState(state.board, row, col, player).length > 0)
+                    moves.push({row, col});
+        return moves;
+    },
+
+    applyMove(state, move, player)
+    {
+        const newBoard = state.board.map(row => [...row]);
+        const flips = getFlipsForState(newBoard, move.row, move.col, player);
+        newBoard[move.row][move.col] = player;
+        for (const flip of flips)
+            newBoard[flip.row][flip.col] = player;
+
+        // Advance the turn. If opponent can't move, skip them. If neither
+        // side can move, game is over.
+        const opponent = player === DISC_BLACK ? DISC_WHITE : DISC_BLACK;
+        let nextPlayer = opponent;
+        let nextGameOver = false;
+        if (!hasLegalMovesForState(newBoard, opponent))
+        {
+            if (hasLegalMovesForState(newBoard, player))
+                nextPlayer = player; // opponent passes, current player goes again
+            else
+                nextGameOver = true; // double-pass → game over
+        }
+        return {board: newBoard, currentPlayer: nextPlayer, gameOver: nextGameOver};
+    },
+
+    evaluate(state, player)
+    {
+        const b = state.board;
+        const opponent = player === DISC_BLACK ? DISC_WHITE : DISC_BLACK;
+        let score = 0;
+
+        // Corner bonus
+        const corners = [[0,0], [0,7], [7,0], [7,7]];
+        for (const [r, c] of corners)
+        {
+            if (b[r][c] === player) score += 25;
+            else if (b[r][c] === opponent) score -= 25;
+        }
+
+        // Edge bonus
+        for (let i = 0; i < BOARD_SIZE; i++)
+        {
+            for (const [r, c] of [[0,i], [7,i], [i,0], [i,7]])
+            {
+                if (b[r][c] === player) score += 5;
+                else if (b[r][c] === opponent) score -= 5;
+            }
+        }
+
+        // Mobility (and disc counts in one pass)
+        let playerMoves = 0, opponentMoves = 0;
+        let playerDiscs = 0, opponentDiscs = 0;
+        for (let r = 0; r < BOARD_SIZE; r++)
+        {
+            for (let c = 0; c < BOARD_SIZE; c++)
+            {
+                if (b[r][c] === player) playerDiscs++;
+                else if (b[r][c] === opponent) opponentDiscs++;
+                if (getFlipsForState(b, r, c, player).length > 0) playerMoves++;
+                if (getFlipsForState(b, r, c, opponent).length > 0) opponentMoves++;
+            }
+        }
+        score += (playerMoves - opponentMoves) * 2;
+
+        // Late-game disc count (only weighty once the board is mostly full)
+        if (playerDiscs + opponentDiscs > 40)
+            score += playerDiscs - opponentDiscs;
+
+        return score;
+    },
+};
+
+function strategyForDifficulty(d)
+{
+    if (d === 'easy')   return (game, state) => randomAI(game, state);
+    if (d === 'medium') return (game, state) => greedyAI(game, state);
+    return (game, state) => alphaBetaAI(game, state, 4); // 'hard'
 }
 
 function getFlipsForMove(row, col, player)
@@ -315,96 +470,11 @@ function endGame()
 ///////////////////////////////////////////////////////////////////////////////
 // AI
 
-function evaluateBoard(player)
-{
-    let score = 0;
-    
-    // Corner bonus
-    const corners = [[0,0], [0,7], [7,0], [7,7]];
-    for (const [r, c] of corners)
-    {
-        if (board[r][c] === player)
-            score += 25;
-        else if (board[r][c] === getOpponent(player))
-            score -= 25;
-    }
-    
-    // Edge bonus
-    for (let i = 0; i < BOARD_SIZE; i++)
-    {
-        if (board[0][i] === player) score += 5;
-        if (board[7][i] === player) score += 5;
-        if (board[i][0] === player) score += 5;
-        if (board[i][7] === player) score += 5;
-        
-        if (board[0][i] === getOpponent(player)) score -= 5;
-        if (board[7][i] === getOpponent(player)) score -= 5;
-        if (board[i][0] === getOpponent(player)) score -= 5;
-        if (board[i][7] === getOpponent(player)) score -= 5;
-    }
-    
-    // Mobility (number of valid moves)
-    let playerMoves = 0;
-    let opponentMoves = 0;
-    
-    for (let row = 0; row < BOARD_SIZE; row++)
-    {
-        for (let col = 0; col < BOARD_SIZE; col++)
-        {
-            if (isValidMove(row, col, player))
-                playerMoves++;
-            if (isValidMove(row, col, getOpponent(player)))
-                opponentMoves++;
-        }
-    }
-    
-    score += playerMoves * 2;
-    score -= opponentMoves * 2;
-    
-    // Disc count (less important early game)
-    const totalDiscs = blackScore + whiteScore;
-    if (totalDiscs > 40)
-    {
-        if (player === DISC_BLACK)
-            score += blackScore - whiteScore;
-        else
-            score += whiteScore - blackScore;
-    }
-    
-    return score;
-}
-
 function findBestAIMove()
 {
-    if (validMoves.length === 0)
-        return null;
-    
-    let bestMove = null;
-    let bestScore = -Infinity;
-    
-    for (const move of validMoves)
-    {
-        // Simulate move
-        const oldBoard = board.map(row => [...row]);
-        const flips = getFlipsForMove(move.row, move.col, PLAYER_AI);
-        
-        board[move.row][move.col] = PLAYER_AI;
-        for (const flip of flips)
-            board[flip.row][flip.col] = PLAYER_AI;
-        
-        const score = evaluateBoard(PLAYER_AI);
-        
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bestMove = move;
-        }
-        
-        // Restore board
-        board = oldBoard;
-    }
-    
-    return bestMove;
+    if (validMoves.length === 0) return null;
+    const strategy = strategyForDifficulty(difficulty);
+    return strategy(othelloGame, getCurrentState());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -649,6 +719,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
+    difficulty = localStorage.getItem('othello.difficulty') || 'medium';
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu (including dialogs).
@@ -684,12 +755,19 @@ async function gameInit()
         ],
     });
 
-    // ----- options menu (volume + fullscreen; difficulty added in Task 3) -----
+    // ----- options menu -----
     createMenu({
         id: 'options',
         title: 'OPTIONS',
         onHide: popMenu,
         items: [
+            {type:'label', text:'DIFFICULTY'},
+            {type:'grid', id:'difficultyGrid', columns:3, cells: [
+                {label:'EASY',   title:'Random moves',                  onClick: () => setDifficulty('easy')},
+                {label:'MEDIUM', title:'Greedy 1-ply',                  onClick: () => setDifficulty('medium')},
+                {label:'HARD',   title:'Alpha-beta search to depth 4',  onClick: () => setDifficulty('hard')},
+            ]},
+            {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
                 persist:'othello.volume',
                 onChange: v => setSoundVolume(v)},
@@ -746,6 +824,29 @@ async function gameInit()
     initBoard();
     setPlaying(false);
     showMenu('title');
+    refreshDifficultyUI();
+}
+
+function setDifficulty(d)
+{
+    difficulty = d;
+    localStorage.setItem('othello.difficulty', d);
+    refreshDifficultyUI();
+}
+
+function refreshDifficultyUI()
+{
+    const grid = getMenu('options')?.getItem('difficultyGrid');
+    if (grid)
+    {
+        grid.setCell(0, {earned: difficulty === 'easy'});
+        grid.setCell(1, {earned: difficulty === 'medium'});
+        grid.setCell(2, {earned: difficulty === 'hard'});
+    }
+    const title = getMenu('title');
+    const upper = difficulty.toUpperCase();
+    title?.getItem('vsAI')?.setLabel(`PLAYER VS AI · ${upper}`);
+    title?.getItem('aiVsAi')?.setLabel(`AI VS AI · ${upper}`);
 }
 
 function setPlaying(p)
