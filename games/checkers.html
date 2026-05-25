@@ -621,7 +621,7 @@ function strategyForDifficulty(d)
         for (let r = 0; r < BOARD_SIZE; r++)
             for (let c = 0; c < BOARD_SIZE; c++)
                 if (state.board[r][c] !== P_EMPTY) pieces++;
-        const depth = pieces > 20 ? 7 : pieces > 12 ? 8 : pieces > 6 ? 9 : 11;
+        const depth = pieces > 20 ? 8 : pieces > 12 ? 9 : pieces > 6 ? 10 : 12;
         return alphaBetaAI(game, state, depth, opts);
     };
 }
@@ -936,7 +936,7 @@ async function gameInit()
             {type:'grid', id:'difficultyGrid', columns:3, cells: [
                 {label:'EASY',   title:'Random moves',                  onClick: () => setDifficulty('easy')},
                 {label:'MEDIUM', title:'Alpha-beta search depth 4',     onClick: () => setDifficulty('medium')},
-                {label:'HARD',   title:'Adaptive depth (7-11) by piece count', onClick: () => setDifficulty('hard')},
+                {label:'HARD',   title:'Adaptive depth (8-12) by piece count', onClick: () => setDifficulty('hard')},
             ]},
             {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
