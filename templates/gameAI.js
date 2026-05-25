@@ -145,8 +145,14 @@ function alphaBetaSearch(game, state, depth, alpha, beta, maxPlayer, ply, tt, ki
     // Capture alpha before any TT adjustment — required for correct flag.
     const alphaOrig = alpha;
 
-    // Transposition-table lookup.
-    const hashKey = JSON.stringify({b: state.board, p: state.currentPlayer});
+    // Transposition-table lookup. Hash includes board + side to move plus any
+    // optional state fields that affect the search subtree (chess castling
+    // rights, chess en passant target). JSON.stringify omits undefined fields,
+    // so games without these fields hash identically to before.
+    const hashKey = JSON.stringify({
+        b: state.board, p: state.currentPlayer,
+        c: state.castlingRights, e: state.enPassantTarget,
+    });
     const ttEntry = tt.get(hashKey);
 
     if (ttEntry && ttEntry.depth >= depth)
