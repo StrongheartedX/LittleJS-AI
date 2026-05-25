@@ -1,0 +1,525 @@
+<!DOCTYPE html><head>
+<title>LittleJS Match 3</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+#littlejs-menus {
+    --menu-bg:           rgba(15, 0, 30, 0.92);
+    --menu-fg:           #fff;
+    --menu-accent:       #f0a;
+    --menu-font:         monospace;
+    --menu-border-width: 3px;
+    --menu-radius:       6px;
+}
+</style>
+</head><body style="background:#000">
+<script src="../dist/littlejs.js?1.18.12"></script>
+<script src="../templates/menus.js"></script>
+<script src="../templates/textureGenerator.js"></script>
+<script>
+'use strict';
+
+debugWatermark = false;
+showEngineVersion = false;
+paused = false;
+canvasMaxSize = vec2(2048, 2048);
+canvasPixelated = false;
+tilesPixelated = false;
+
+///////////////////////////////////////////////////////////////////////////////
+// Constants
+
+const fallTime = .2;
+const cameraOffset = vec2(0, -.5);
+const backgroundColor = hsl(0, 0, .12);
+const minMatchCount = 3;
+const highScoreKey = 'match3BestScore';
+
+// zzfx sound params from the LittleJS examples puzzle — already tuned
+const sound_goodMove = new Sound([.4,.2,250,.04,,.04,,,1,,,,,3]);
+const sound_badMove  = new Sound([,,700,,,.07,,,,3.7,,,,3,,,.1]);
+const sound_fall     = new Sound([.2,,1900,,,.01,,1.4,,91,,,,,,,,,,.7]);
+
+const tileColors =
+[
+    rgb(1,.2,.2),   // 0 red
+    rgb(1,1,1),     // 1 white
+    rgb(1,1,.2),    // 2 yellow
+    rgb(.3,1,.3),   // 3 green
+    rgb(.3,.7,1),   // 4 blue
+    rgb(.9,.3,1),   // 5 purple
+    rgb(.6,.6,.6),  // 6 gray
+];
+const tileTypeCount = tileColors.length;
+
+///////////////////////////////////////////////////////////////////////////////
+// State
+
+let level, levelSize, levelFall, fallTimer, dragStartPos, comboCount, score, bestScore;
+let isPlaying = false;
+const gemSprites = []; // TileInfo per gem type, filled in gameInit
+
+const getTile = (pos)=> level[pos.x + pos.y * levelSize.x];
+const setTile = (pos, data)=> level[pos.x + pos.y * levelSize.x] = data;
+
+///////////////////////////////////////////////////////////////////////////////
+// Sprite painters — each fills a 500x500 region. Painted in white + black so
+// drawTile's color tint produces gem-colored icons on the gem-colored bg.
+
+function paintCircle(ctx)
+{
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(250, 250, 200, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.arc(185, 185, 60, 0, Math.PI*2); ctx.fill();
+}
+
+function paintStar(ctx)
+{
+    const cx = 250, cy = 260, rO = 215, rI = rO * .45;
+    ctx.beginPath();
+    for (let i = 0; i < 10; ++i)
+    {
+        const a = -Math.PI/2 + i * Math.PI/5;
+        const r = i % 2 ? rI : rO;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+}
+
+function paintHeart(ctx)
+{
+    const cx = 250, cy = 200;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + 40);
+    ctx.bezierCurveTo(cx - 60, cy - 100, cx - 230, cy - 60, cx - 230, cy + 70);
+    ctx.bezierCurveTo(cx - 230, cy + 200, cx - 60, cy + 280, cx, cy + 380);
+    ctx.bezierCurveTo(cx + 60, cy + 280, cx + 230, cy + 200, cx + 230, cy + 70);
+    ctx.bezierCurveTo(cx + 230, cy - 60, cx + 60, cy - 100, cx, cy + 40);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+}
+
+function paintDiamond(ctx)
+{
+    const cx = 250, top = 50, bot = 450, sideY = 230;
+    const left = 60, right = 440;
+    ctx.beginPath();
+    ctx.moveTo(cx, top);
+    ctx.lineTo(right, sideY);
+    ctx.lineTo(cx, bot);
+    ctx.lineTo(left, sideY);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(140, sideY);
+    ctx.lineTo(cx, top + 40);
+    ctx.lineTo(360, sideY);
+    ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 14; ctx.stroke();
+}
+
+function paintTriangle(ctx)
+{
+    const cx = 250, top = 60, bot = 440;
+    ctx.beginPath();
+    ctx.moveTo(cx, top);
+    ctx.lineTo(440, bot);
+    ctx.lineTo(60, bot);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+}
+
+function paintBolt(ctx)
+{
+    ctx.beginPath();
+    ctx.moveTo(290, 50);
+    ctx.lineTo(90,  280);
+    ctx.lineTo(220, 280);
+    ctx.lineTo(150, 460);
+    ctx.lineTo(410, 220);
+    ctx.lineTo(270, 220);
+    ctx.lineTo(400, 50);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+}
+
+function paintPlus(ctx)
+{
+    const cx = 250, cy = 250, arm = 200, thick = 80;
+    ctx.beginPath();
+    ctx.moveTo(cx - thick, cy - arm);
+    ctx.lineTo(cx + thick, cy - arm);
+    ctx.lineTo(cx + thick, cy - thick);
+    ctx.lineTo(cx + arm,   cy - thick);
+    ctx.lineTo(cx + arm,   cy + thick);
+    ctx.lineTo(cx + thick, cy + thick);
+    ctx.lineTo(cx + thick, cy + arm);
+    ctx.lineTo(cx - thick, cy + arm);
+    ctx.lineTo(cx - thick, cy + thick);
+    ctx.lineTo(cx - arm,   cy + thick);
+    ctx.lineTo(cx - arm,   cy - thick);
+    ctx.lineTo(cx - thick, cy - thick);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+async function gameInit()
+{
+    // Atlas of 7 gem icons. Each is white-on-black so drawTile's tint param
+    // colors them at runtime, letting one atlas serve all 7 gem types.
+    initDrawToTexture();
+    gemSprites[0] = drawToTexture(0, paintCircle,   'glossy white circle gem with black outline');
+    gemSprites[1] = drawToTexture(1, paintStar,     'white five-point star with black outline');
+    gemSprites[2] = drawToTexture(2, paintHeart,    'white heart with black outline');
+    gemSprites[3] = drawToTexture(3, paintDiamond,  'white diamond/rhombus with black outline');
+    gemSprites[4] = drawToTexture(4, paintTriangle, 'white upward triangle with black outline');
+    gemSprites[5] = drawToTexture(5, paintBolt,     'white lightning bolt with black outline');
+    gemSprites[6] = drawToTexture(6, paintPlus,     'white plus / cross shape with black outline');
+
+    levelSize = vec2(12, 6);
+    cameraPos = levelSize.scale(.5).add(cameraOffset);
+    cameraScale = 150;
+    gravity = vec2(0, -.004);
+    canvasClearColor = backgroundColor;
+
+    bestScore = +(localStorage[highScoreKey] || 0);
+
+    setSoundVolume(.7);
+    setMenuVisibilityCallback(v => paused = v);
+
+    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sound_select.play(),
+        activate: () => sound_activate.play(),
+    });
+
+    createTitleMenu({
+        title: 'MATCH 3',
+        subtitle: 'Swap adjacent gems to line up 3+ in a row',
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text:'Best: ' + bestScore},
+        ],
+        items: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+        canReveal: () => !isPlaying,
+        onShow: () => getMenu('title').getItem('bestLabel').setLabel('Best: ' + bestScore),
+        onPlay: () => { gameReset(); isPlaying = true; },
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider', id:'vol', label:'VOLUME', value:.7, min:0, max:1,
+                persist:'match3.volume', onChange: v => setSoundVolume(v)},
+            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:'Drag a gem onto a neighbor to swap. ' +
+                'Line up 3 or more of the same gem to clear them. ' +
+                'Chains and cascades multiply your score.\n\n' +
+                'R restarts. Esc pauses.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume', label:'RESUME',  onClick: () => hideMenu('pause')},
+            {type:'button',              label:'RESTART', onClick: () => { hideMenu('pause'); gameReset(); }},
+            {type:'button',              label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
+                showConfirmDialog({
+                    message: 'Quit to title?',
+                    onYes: () =>
+                    {
+                        clearSubmenuStack();
+                        hideAllMenus();
+                        isPlaying = false;
+                        showMenu('title');
+                    },
+                })},
+        ],
+    });
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameReset()
+{
+    engineObjectsDestroy();
+
+    level = [];
+    const pos = vec2();
+    for (pos.x = levelSize.x; pos.x--;)
+    for (pos.y = levelSize.y; pos.y--;)
+        setTile(pos, randInt(tileTypeCount));
+
+    comboCount = score = 0;
+    fallTimer = new Timer;
+    dragStartPos = 0;
+    levelFall = [];
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdate()
+{
+    if (!isPlaying) return;
+    if (bindPauseKey({when: () => isPlaying})) return;
+
+    if (fallTimer.isSet())
+    {
+        if (fallTimer.elapsed())
+        {
+            // refill the top row so falling tiles have something to draw from
+            for (let x = 0; x < levelSize.x; ++x)
+                setTile(vec2(x, levelSize.y), randInt(tileTypeCount));
+        }
+
+        if (!fallTimer.active())
+        {
+            levelFall = [];
+            let keepFalling = 0;
+            const pos = vec2();
+            for (pos.x = levelSize.x; pos.x--;)
+            for (pos.y = 0; pos.y < levelSize.y; pos.y++)
+            {
+                const data = getTile(pos);
+                const abovePos = pos.add(vec2(0, 1));
+                const aboveData = getTile(abovePos);
+                if (data == -1 && aboveData >= 0)
+                {
+                    setTile(pos, aboveData);
+                    setTile(abovePos, -1);
+                    levelFall[pos.x + pos.y * levelSize.x] = keepFalling = 1;
+                }
+            }
+
+            if (keepFalling)
+            {
+                // bigger combos fall faster
+                const p = percent(comboCount, 9, 0);
+                fallTimer.set(fallTime * p);
+                sound_fall.play();
+            }
+            else
+                fallTimer.unset();
+        }
+    }
+    else
+    {
+        clearMatches();
+        if (!fallTimer.isSet())
+        {
+            const mouseTilePos = mousePos.floor();
+            if (!mousePos.arrayCheck(levelSize))
+            {
+                dragStartPos = 0;
+            }
+            else if (mouseWasPressed(0) && !dragStartPos)
+            {
+                dragStartPos = mouseTilePos.copy();
+            }
+            else if (mouseIsDown(0) && dragStartPos)
+            {
+                const dx = abs(dragStartPos.x - mouseTilePos.x);
+                const dy = abs(dragStartPos.y - mouseTilePos.y);
+                if (dx == 1 && dy == 0 || dx == 0 && dy == 1)
+                {
+                    const startTile = getTile(dragStartPos);
+                    const endTile   = getTile(mouseTilePos);
+                    if (startTile >= 0 && endTile >= 0)
+                    {
+                        setTile(mouseTilePos, startTile);
+                        setTile(dragStartPos, endTile);
+
+                        clearMatches();
+
+                        // undo if the swap produced no matches
+                        if (!fallTimer.isSet())
+                        {
+                            sound_badMove.play();
+                            setTile(mouseTilePos, endTile);
+                            setTile(dragStartPos, startTile);
+                        }
+                        else
+                            sound_goodMove.play();
+                        dragStartPos = 0;
+                    }
+                }
+            }
+            else
+                dragStartPos = 0;
+        }
+    }
+
+    if (score > bestScore)
+    {
+        bestScore = score;
+        localStorage[highScoreKey] = bestScore;
+    }
+
+    if (keyWasPressed('KeyR'))
+        gameReset();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdatePost() {}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRender()
+{
+    if (!isPlaying) return;
+
+    // playfield bg behind the gems
+    drawRect(cameraPos.subtract(cameraOffset), levelSize, hsl(0, 0, 0));
+
+    const pos = vec2();
+    for (pos.x = levelSize.x; pos.x--;)
+    for (pos.y = levelSize.y; pos.y--;)
+    {
+        const data = getTile(pos);
+        if (data == -1) continue;
+
+        const drawPos = pos.add(vec2(.5));
+
+        // highlight the tile the player has grabbed
+        if (dragStartPos && pos.x == dragStartPos.x && pos.y == dragStartPos.y)
+            drawRect(drawPos, vec2(1.05));
+
+        // animate falling tiles in
+        if (fallTimer.active() && levelFall[pos.x + pos.y * levelSize.x])
+            drawPos.y += 1 - fallTimer.getPercent();
+
+        const color = tileColors[data];
+        drawRect(drawPos, vec2(.95), color);
+
+        // tint the icon a touch darker so it reads on the gem-colored bg
+        const color2 = color.scale(.7, 1);
+        drawTile(drawPos, vec2(.75), gemSprites[data], color2);
+    }
+
+    // mask the column of tiles spawned above the top so they slide in cleanly
+    drawRect(cameraPos.subtract(cameraOffset).add(vec2(0, levelSize.y)),
+        levelSize, backgroundColor);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRenderPost()
+{
+    if (!isPlaying) return;
+    drawText('Score: ' + score,    cameraPos.add(vec2(-3, -3.1)), .9, hsl(), .1);
+    drawText('Best: '  + bestScore, cameraPos.add(vec2( 3, -3.1)), .9, hsl(), .1);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Find and remove all runs of 3+ in any row or column.
+
+function clearMatches()
+{
+    const removeTiles = [], pos = vec2();
+
+    // horizontal runs
+    for (pos.y = levelSize.y; pos.y--;)
+    {
+        let runCount, runData;
+        for (pos.x = levelSize.x; pos.x--;)
+        {
+            const data = getTile(pos);
+            if (data >= 0 && data == runData)
+            {
+                for (let i = ++runCount; runCount >= minMatchCount && i--;)
+                    removeTiles[pos.x + i + pos.y * levelSize.x] = 1;
+            }
+            else
+            {
+                runData = data;
+                runCount = 1;
+            }
+        }
+    }
+
+    // vertical runs
+    for (pos.x = levelSize.x; pos.x--;)
+    {
+        let runCount, runData;
+        for (pos.y = levelSize.y; pos.y--;)
+        {
+            const data = getTile(pos);
+            if (data >= 0 && data == runData)
+            {
+                for (let i = ++runCount; runCount >= minMatchCount && i--;)
+                    removeTiles[pos.x + (pos.y + i) * levelSize.x] = 1;
+            }
+            else
+            {
+                runData = data;
+                runCount = 1;
+            }
+        }
+    }
+
+    // remove all flagged tiles in one pass so L / T shapes resolve cleanly
+    let removedCount = 0;
+    for (pos.x = levelSize.x; pos.x--;)
+    for (pos.y = levelSize.y; pos.y--;)
+    {
+        if (removeTiles[pos.x + pos.y * levelSize.x])
+        {
+            ++removedCount;
+            const data = getTile(pos);
+            setTile(pos, -1);
+
+            const color1 = tileColors[data];
+            const color2 = color1.lerp(hsl(), .5);
+            new ParticleEmitter(
+                pos.add(vec2(.5)), 0,
+                .5, .1, 200, 3.14,
+                0,
+                color1, color2,
+                color1.scale(1, 0), color2.scale(1, 0),
+                .5, .3, .2, .05, .05,
+                .99, 1, 1, 3.14, .05,
+                .5, 0, 1
+            );
+        }
+    }
+
+    if (removedCount)
+    {
+        score += ++comboCount * removedCount;
+        fallTimer.set();
+        levelFall = [];
+    }
+    else
+        comboCount = 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
+</script></body></html>
