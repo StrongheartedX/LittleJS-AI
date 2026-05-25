@@ -518,30 +518,96 @@ const PST_BY_TYPE_END = {
     [PIECE_ROOK]: PST_ROOK, [PIECE_QUEEN]: PST_QUEEN, [PIECE_KING]: PST_KING_ENDGAME,
 };
 
-function evalMaterialAndPST(b, color)
+function evalKingSafety(b, color, endgameWeight)
+{
+    // King safety only matters in the midgame. Folds away in the endgame.
+    if (endgameWeight > 0.8) return 0;
+
+    const king = findKing(b, color);
+    if (!king) return 0;
+
+    // Count own pawns in the three squares directly in front of the king (pawn shield).
+    const dir = color === COLOR_WHITE ? 1 : -1;
+    let shield = 0;
+    for (const dc of [-1, 0, 1]) {
+        const sr = king.row + dir, sc = king.col + dc;
+        if (isInBounds(sr, sc) && b[sr][sc]
+            && b[sr][sc].type === PIECE_PAWN && b[sr][sc].color === color) {
+            shield++;
+        }
+    }
+    // Each shielding pawn is worth ~10 cp, max 30. Scale by (1 - endgameWeight) so it fades smoothly.
+    return shield * 10 * (1 - endgameWeight);
+}
+
+function evalPawnStructure(b, color)
+{
+    // Doubled (-15 each), isolated (-10), passed (+30 + 5 per rank advanced).
+    let score = 0;
+    const startRank = color === COLOR_WHITE ? 1 : 6;
+
+    // Per-file pawn counts (own and opponent)
+    const ownPawnRowsByFile = Array.from({length: BOARD_SIZE}, () => []);
+    const oppPawnRowsByFile = Array.from({length: BOARD_SIZE}, () => []);
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const p = b[r][c];
+            if (!p || p.type !== PIECE_PAWN) continue;
+            if (p.color === color) ownPawnRowsByFile[c].push(r);
+            else oppPawnRowsByFile[c].push(r);
+        }
+    }
+
+    for (let c = 0; c < BOARD_SIZE; c++) {
+        const rows = ownPawnRowsByFile[c];
+        if (rows.length === 0) continue;
+        // Doubled
+        if (rows.length > 1) score -= 15 * (rows.length - 1);
+        // Isolated (no own pawn on adjacent files)
+        const leftHas = c > 0 && ownPawnRowsByFile[c - 1].length > 0;
+        const rightHas = c < BOARD_SIZE - 1 && ownPawnRowsByFile[c + 1].length > 0;
+        if (!leftHas && !rightHas) score -= 10;
+        // Passed: this pawn's most-advanced rank has no opp pawn ahead on this or adjacent files
+        const mostAdvanced = color === COLOR_WHITE ? Math.max(...rows) : Math.min(...rows);
+        let isPassed = true;
+        for (const cc of [c - 1, c, c + 1]) {
+            if (cc < 0 || cc >= BOARD_SIZE) continue;
+            for (const oppRow of oppPawnRowsByFile[cc]) {
+                if (color === COLOR_WHITE ? oppRow > mostAdvanced : oppRow < mostAdvanced) {
+                    isPassed = false; break;
+                }
+            }
+            if (!isPassed) break;
+        }
+        if (isPassed) {
+            const advancement = color === COLOR_WHITE ? mostAdvanced - startRank : startRank - mostAdvanced;
+            score += 30 + 5 * advancement;
+        }
+    }
+    return score;
+}
+
+function evalFull(b, color)
 {
     let score = 0;
     let totalNonKingMaterial = 0;
-    // First pass: count total material (excluding kings) to interpolate king PST
     for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
             const p = b[r][c];
             if (p && p.type !== PIECE_KING) totalNonKingMaterial += PIECE_VALUES[p.type];
         }
     }
-    // Endgame phase: 0 at game start (~7800), 1 once material drops below ~3000
     const ENDGAME_THRESHOLD = 3000;
     const STARTING_MATERIAL = 7800;
     const endgameWeight = totalNonKingMaterial >= STARTING_MATERIAL ? 0
         : totalNonKingMaterial <= ENDGAME_THRESHOLD ? 1
         : 1 - (totalNonKingMaterial - ENDGAME_THRESHOLD) / (STARTING_MATERIAL - ENDGAME_THRESHOLD);
 
+    // Material + PST
     for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
             const p = b[r][c];
             if (!p) continue;
-            // From this piece's color perspective, PST is read at (r, c) for white,
-            // (7 - r, c) for black (mirror vertically).
             const pstRow = p.color === COLOR_WHITE ? r : 7 - r;
             let pst;
             if (p.type === PIECE_KING) {
@@ -556,6 +622,15 @@ function evalMaterialAndPST(b, color)
             else score -= pieceScore;
         }
     }
+
+    // King safety (own + opponent)
+    score += evalKingSafety(b, color, endgameWeight);
+    score -= evalKingSafety(b, opponentColor(color), endgameWeight);
+
+    // Pawn structure (own + opponent)
+    score += evalPawnStructure(b, color);
+    score -= evalPawnStructure(b, opponentColor(color));
+
     return score;
 }
 
@@ -614,7 +689,7 @@ const chessGame = {
             }
             return 0; // any draw
         }
-        return evalMaterialAndPST(state.board, color);
+        return evalFull(state.board, color);
     },
 };
 
