@@ -29,6 +29,7 @@ const RAIL_THICK   = 2.2;               // wood rail outside felt
 const WALL_THICK   = 3;                 // collider thickness (overlaps rail visually)
 const BALL_DIAM    = 1;
 const POCKET_DIAM  = 1.6;
+const POCKET_INSET = -0.1;              // pocket-center distance inward from felt edge (negative pushes pockets outward toward/past the rail)
 const MAX_HIT      = 12;                // max aim length in world units — stretch this far for full power
 const HIT_IMPULSE  = 5;                 // impulse per unit of aim (max impulse = MAX_HIT * HIT_IMPULSE = 60)
 const MIN_IMPULSE  = 2;                 // floor — clicking at 0% power still gives the cue a soft tap
@@ -328,9 +329,10 @@ function buildTable()
     railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2( halfX, 0), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
     railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2(-halfX, 0), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
 
-    // 6 pockets — 4 corners + 2 side
-    const px = TABLE_SIZE.x/2 - .3;
-    const py = TABLE_SIZE.y/2 - .3;
+    // 6 pockets — 4 corners + 2 side. POCKET_INSET (top of file) tunes how
+    // far in/out from the felt edge they sit; negative pushes them outward.
+    const px = TABLE_SIZE.x/2 - POCKET_INSET;
+    const py = TABLE_SIZE.y/2 - POCKET_INSET;
     pockets.push(new Pocket(vec2(-px, -py)));
     pockets.push(new Pocket(vec2( px, -py)));
     pockets.push(new Pocket(vec2(-px,  py)));
@@ -593,7 +595,10 @@ function gameUpdate()
     if (canShoot() && mouseWheel)
         wheelPower = clamp(wheelPower - mouseWheel * WHEEL_STEP, -1, 1);
 
-    if (canShoot() && mouseWasPressed(0))
+    // Touch devices fire on release so the player can press, drag to aim,
+    // then lift to commit. Mouse keeps the click-to-fire feel.
+    const shotInput = isTouchDevice ? mouseWasReleased(0) : mouseWasPressed(0);
+    if (canShoot() && shotInput)
     {
         const {dir, power, len} = getAim();
         // Every click fires — even at 0% power. MIN_IMPULSE keeps it from
@@ -688,8 +693,12 @@ function gameRenderPost()
         drawCueStickAt(cueBall.pos, strike.dir, tipDist);
     }
 
-    // aim preview + cue stick (canShoot is false while a strike is running)
-    if (canShoot())
+    // aim preview + cue stick (canShoot is false while a strike is running).
+    // On touch devices, only show this while the finger is down — press to
+    // aim, drag, release to fire. On mouse, the cursor is always somewhere so
+    // we always show the preview.
+    const showAim = !isTouchDevice || mouseIsDown(0);
+    if (canShoot() && showAim)
     {
         const {dir, power, len} = getAim();
         const tip = cueBall.pos.add(dir.scale(len));
@@ -711,6 +720,12 @@ function gameRenderPost()
         drawPoly([tip, base.add(perp.scale(headWid*.5)), base.subtract(perp.scale(headWid*.5))],
             rgb(1, .95, .6, .8));
 
+        // red sight line — starts at the arrow tip and runs straight out
+        // well past the table edge so it stays visible at any aim. Just a
+        // direction guide; doesn't account for bounces or where the cue
+        // actually stops.
+        drawLine(tip, cueBall.pos.add(dir.scale(80)), .05, rgb(1, 0, 0, .5));
+
         // cue stick on the opposite side
         drawCueStick(cueBall.pos, dir, power);
 
@@ -721,10 +736,11 @@ function gameRenderPost()
     }
 
     // HUD
-    const remaining = balls.length;
-    const hud = `SHOTS  ${shots}        REMAINING  ${remaining}`;
-    drawTextScreen(hud,
-        vec2(mainCanvasSize.x/2, 36),
+    drawTextScreen(`SHOTS  ${shots}`,
+        vec2(mainCanvasSize.x/4, 36),
+        32, WHITE, 4, rgb(0,0,0,.7));
+    drawTextScreen(`REMAINING  ${balls.length}`,
+        vec2(mainCanvasSize.x*3/4, 36),
         32, WHITE, 4, rgb(0,0,0,.7));
 
     if (scratchedThisShot && allStopped())
