@@ -12,8 +12,19 @@
 <body>
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
+
+// engine settings
+debugWatermark = false;
+showEngineVersion = false;
+
+// on-screen touch gamepad (analog stick + face buttons) for mobile
+touchGamepadEnable = true;
+touchGamepadAnalog = true;
+touchGamepadButtonCount = 4;
+touchGamepadAlpha = .35;
 
 // ============================================================
 // Sound (no external assets)
@@ -71,10 +82,13 @@ let ufos = [];
 let ufoBullets = [];
 
 let score = 0;
+let best = 0;
 let lives = 3;
 let level = 1;
 let gameOver = false;
 let nextExtraLifeAt = 10000;
+let isPlaying = false;             // true once the player hits PLAY (menu gates this)
+let gameOverTimer = new Timer;     // delays the GAME OVER menu surfacing
 
 let respawnTimer = new Timer();
 let invulnTimer = new Timer();
@@ -175,16 +189,20 @@ function randEdgeSpawn(minDistanceFromCenter = 4)
     return p;
 }
 
-function resetGame()
+function clearAll()
 {
-    // destroy everything
     engineObjectsDestroy(true);
+    ship = undefined;
     bullets = [];
     rocks = [];
     debris = [];
     ufos = [];
     ufoBullets = [];
+}
 
+function resetGame()
+{
+    clearAll();
     score = 0;
     lives = 3;
     level = 1;
@@ -194,6 +212,46 @@ function resetGame()
 
     spawnShip(true);
     spawnWave(level);
+}
+
+function startGame()
+{
+    resetGame();
+    setPlaying(true);
+}
+
+function quitToTitle()
+{
+    clearAll();
+    score = 0;
+    lives = 3;
+    level = 1;
+    gameOver = false;
+    setPlaying(false);
+    if (typeof clearSubmenuStack === 'function') clearSubmenuStack();
+    if (typeof hideAllMenus === 'function') hideAllMenus();
+    spawnAttractField();
+    if (typeof showMenu === 'function') showMenu('title');
+}
+
+// Title-screen attract: a few rocks tumbling behind the menu
+function spawnAttractField()
+{
+    for (let i = 0; i < 6; i++)
+    {
+        const p = randEdgeSpawn(6);
+        const a = rand(TAU);
+        const v = angleToVec(a).scale(rand(.025, .01));
+        const tier = randInt(3) + 1;
+        new Rock(p, tier, v);
+    }
+}
+
+function setPlaying(p)
+{
+    isPlaying = p;
+    const hud = (typeof getToolbar === 'function') && getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
 }
 
 function spawnShip(centered=false)
@@ -225,6 +283,11 @@ function addScore(points)
         lives++;
         nextExtraLifeAt += 10000;
         sExtraLife.play();
+    }
+    if (score > best)
+    {
+        best = score;
+        try { localStorage.setItem('asteroids.best', best); } catch(e) {}
     }
 }
 
@@ -262,14 +325,20 @@ class Ship extends EngineObject
         if (gameOver) return;
         if (this.dead) return;
 
-        // rotation
-        const left  = keyIsDown('ArrowLeft') || keyIsDown('KeyA');
-        const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
-        if (left)  this.angle -= SHIP_TURN_SPEED;
-        if (right) this.angle += SHIP_TURN_SPEED;
+        // analog stick (touch or physical gamepad merged into the same API)
+        const stick = gamepadStick(0);
 
-        // thrust
-        const thrust = keyIsDown('ArrowUp') || keyIsDown('KeyW');
+        // rotation: keyboard arrows/AD, D-pad, or left-stick X-axis
+        let rot = 0;
+        if (keyIsDown('ArrowLeft')  || keyIsDown('KeyA')) rot -= 1;
+        if (keyIsDown('ArrowRight') || keyIsDown('KeyD')) rot += 1;
+        rot += stick.x;                                        // analog: -1..1
+        rot = clamp(rot, -1, 1);
+        this.angle += SHIP_TURN_SPEED * rot;
+
+        // thrust: keyboard up/W, stick forward (Y > 0 in LittleJS), A button (0)
+        const thrust = keyIsDown('ArrowUp') || keyIsDown('KeyW')
+            || stick.y > .35 || gamepadIsDown(0);
         if (thrust)
         {
             const dir = angleToVec(this.angle);
@@ -297,8 +366,9 @@ class Ship extends EngineObject
         if (sp2 > SHIP_MAX_SPEED*SHIP_MAX_SPEED)
             this.velocity = this.velocity.normalize(SHIP_MAX_SPEED);
 
-        // hyperspace
-        if ((!hyperTimer.isSet() || hyperTimer.elapsed()) && (keyWasPressed('ShiftLeft') || keyWasPressed('KeyX')))
+        // hyperspace: Shift / X / Y-button (3)
+        if ((!hyperTimer.isSet() || hyperTimer.elapsed()) &&
+            (keyWasPressed('ShiftLeft') || keyWasPressed('KeyX') || gamepadWasPressed(3)))
         {
             sZap.play(this.pos, .6);
             this.pos = vec2(
@@ -311,10 +381,10 @@ class Ship extends EngineObject
             explodeAt(this.pos, .25);
         }
 
-        // shooting
+        // shooting: Space / Z / B-button (1)
         if (!shootTimer.isSet() || shootTimer.elapsed())
         {
-            if (keyWasPressed('Space') || keyWasPressed('KeyZ'))
+            if (keyWasPressed('Space') || keyWasPressed('KeyZ') || gamepadWasPressed(1))
             {
                 if (bullets.length < BULLET_MAX)
                 {
@@ -778,30 +848,191 @@ function gameInit()
         stars.push({p, s, tw: rand(3, 1)});
     }
 
-    resetGame();
+    // Load best score
+    try { best = +localStorage.getItem('asteroids.best') || 0; } catch(e) { best = 0; }
+
+    setSoundVolume(.8);
+    if (typeof setMenuVisibilityCallback === 'function')
+        setMenuVisibilityCallback(v => paused = v && isPlaying);
+
+    buildMenus();
+    spawnAttractField();
+}
+
+function buildMenus()
+{
+    if (typeof createMenu !== 'function') return; // menus.js not loaded — fail gracefully
+
+    const sndSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sndActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sndSelect.play(),
+        activate: () => sndActivate.play(),
+    });
+
+    createTitleMenu({
+        title: 'ASTEROIDS',
+        subtitle: 'A LittleJS prototype',
+        onPlay: startGame,
+        canReveal: () => !isPlaying,
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text:`BEST ${best}`},
+        ],
+        items: [
+            {type:'button', label:'OPTIONS',     onClick: () => pushMenu('options')},
+            {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
+        ],
+        onShow: () =>
+        {
+            const m = getMenu('title');
+            if (m) m.getItem('bestLabel')?.setLabel(`BEST ${best}`);
+        },
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider', id:'volume', label:'VOLUME', value:.8, min:0, max:1,
+                persist:'asteroids.volume',
+                onChange: v => setSoundVolume(v)},
+            {type:'separator'},
+            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'HOW TO PLAY',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:
+                'Blast the asteroids and saucers — don\'t crash.\n\n' +
+                'ROTATE with ←/→ (or A/D, or left stick).\n' +
+                'THRUST with ↑ (W, or push stick up, or A button).\n' +
+                'FIRE with Space or Z (or B button).\n' +
+                'HYPERSPACE with Shift or X (or Y button) — random teleport, briefly invulnerable.\n\n' +
+                'Small asteroids score 100, medium 50, large 20.\n' +
+                'Small saucers 1000, large 200. Extra life every 10,000.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
+            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
+            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
+            {
+                showConfirmDialog({
+                    message:'Quit to title?',
+                    onYes: quitToTitle,
+                });
+            }},
+        ],
+    });
+
+    createMenu({
+        id: 'gameOver',
+        title: 'GAME OVER',
+        dismissable: false,
+        onShow: () =>
+        {
+            const m = getMenu('gameOver');
+            if (m)
+            {
+                m.getItem('finalScore')?.setLabel(`SCORE  ${score}`);
+                m.getItem('bestScore')?.setLabel(`BEST   ${best}`);
+                m.getItem('levelReached')?.setLabel(`LEVEL  ${level}`);
+            }
+        },
+        items: [
+            {type:'label', id:'finalScore',   text:'SCORE  0'},
+            {type:'label', id:'bestScore',    text:'BEST   0'},
+            {type:'label', id:'levelReached', text:'LEVEL  0'},
+            {type:'separator'},
+            {type:'button', label:'PLAY AGAIN', onClick: () =>
+            {
+                hideMenu('gameOver');
+                startGame();
+            }},
+            {type:'button', label:'QUIT TO TITLE', onClick: quitToTitle},
+        ],
+    });
+
+    createToolbar({
+        id:'hud',
+        anchor:'top-right',
+        direction:'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen, hideOnTouch:true},
+            {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
+            {
+                if (isMenuVisible())
+                {
+                    clearSubmenuStack();
+                    hideAllMenus();
+                }
+                else showMenu('pause');
+            }},
+        ],
+    });
+    getToolbar('hud')?.hide();
 }
 
 function gameUpdate()
 {
-    // restart
-    if (gameOver && keyWasPressed('Enter'))
-        resetGame();
+    // Pause hotkey: Esc or Start. Gated on isPlaying so it doesn't fire from title.
+    if (isPlaying && !gameOver &&
+        (keyWasPressed('Escape') || gamepadWasPressed(9)))
+    {
+        if (typeof playMenuSound === 'function') playMenuSound('activate');
+        if (typeof showMenu === 'function') showMenu('pause');
+        inputClearKey('Escape');
+        inputClearKey(9, 1, false, true, false);
+        return;
+    }
 
-    // update timers
-    // (LittleJS timers tick automatically; we just read them)
+    // Attract mode: rocks keep tumbling, but no gameplay logic
+    if (!isPlaying) return;
+
+    // Game over: brief on-canvas hold, then surface the menu
+    if (gameOver)
+    {
+        if (gameOverTimer.isSet() && gameOverTimer.elapsed())
+        {
+            gameOverTimer.unset();
+            if (typeof showMenu === 'function') showMenu('gameOver');
+        }
+        return;
+    }
 
     // respawn
-    if (!gameOver && respawnTimer.isSet() && respawnTimer.elapsed() && !ship)
+    if (respawnTimer.isSet() && respawnTimer.elapsed() && !ship)
         spawnShip(false);
 
     // collisions
     handleCollisions();
 
+    // Player just died this frame (lives bottomed out) — start hold timer and bail.
+    if (gameOver)
+    {
+        if (!gameOverTimer.isSet()) gameOverTimer.set(2.0);
+        return;
+    }
+
     // UFO spawning
     maybeSpawnUfo();
 
     // next wave (only when rocks AND ufos cleared, like arcade)
-    if (!gameOver && rocks.length === 0 && ufos.length === 0)
+    if (rocks.length === 0 && ufos.length === 0)
     {
         level++;
         spawnWave(level);
@@ -968,18 +1199,15 @@ function gameRender()
 
 function gameRenderPost()
 {
+    if (!isPlaying) return; // title screen \u2014 menu owns the display
+
     // HUD
     const hud = `SCORE  ${score}\nLIVES  ${Math.max(0,lives)}   LEVEL  ${level}`;
     drawTextScreen(hud, vec2(20, 36), 24, rgb(1,1,1), 3, rgb(0,0,0), 'left', 'monospace');
 
-    const controls = `\u2190/\u2192 rotate   \u2191 thrust   SPACE/Z shoot   SHIFT/X hyperspace   ENTER restart`;
-    drawTextScreen(controls, vec2(mainCanvasSize.x/2, mainCanvasSize.y - 22), 18, rgb(1,1,1,.85), 3, rgb(0,0,0,.7), 'center', 'monospace');
-
-    // game over
     if (gameOver)
     {
         drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 30), 70, rgb(1,1,1), 6, rgb(0,0,0), 'center', 'monospace');
-        drawTextScreen('Press ENTER to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 26), 26, rgb(1,1,1,.9), 4, rgb(0,0,0), 'center', 'monospace');
     }
     else if (!ship && respawnTimer.isSet() && respawnTimer.active())
     {
