@@ -88,15 +88,15 @@ let shots = 0;
 let isPlaying = false;
 let won = false;
 let scratchedThisShot = false;
-let aimAngle = 0;        // remembered for cue stick during motion
 let wheelPower = 0;      // wheel-driven power offset added on top of mouse drag (cleared on each shot)
 
 // strike animation — windup (tip travels toward ball) then follow-through.
 // Set when the player clicks; cleared after the swing finishes. While set,
 // canShoot() returns false so no second click can interrupt the swing.
 let strike = null;
-const STRIKE_WINDUP_S = .10;   // time for the tip to reach the ball
-const STRIKE_FOLLOW_S = .08;   // follow-through after contact
+const STRIKE_PULLBACK_S = .10;   // time to pull the cue back from rest before the strike
+const STRIKE_FORWARD_S  = .06;   // time to drive the cue forward into the ball
+const STRIKE_FOLLOW_S   = .08;   // follow-through after contact
 
 // sounds
 let sfxHit, sfxRail, sfxBreak, sfxPocket, sfxScratch, sfxWin;
@@ -175,10 +175,11 @@ function drawPocket(pos)
     drawCircle(pos, POCKET_DIAM*0.90, rgb(.08,.04,.02,1));
 }
 
-// Aim-time helpers: the cue tip distance from ball center is a function of
-// power (further back for harder shots). Pulled out so the strike animation
-// can interpolate between this distance and "contact."
-function cueRestDist(power) { return BALL_DIAM*.5 + .05 + power * 3.8; }
+// Cue tip distance from ball center at each animation keyframe.
+// While aiming the stick stays at REST (independent of power). The strike
+// animates REST → pullback (scaled by power) → CONTACT → FOLLOW.
+const CUE_REST_DIST    = BALL_DIAM*.5 + .15;  // fixed rest position while aiming
+const CUE_PULL_SCALE   = 4;                   // extra pullback during the strike, scaled by power
 const CUE_CONTACT_DIST = BALL_DIAM*.5;        // tip touches ball surface
 const CUE_FOLLOW_DIST  = BALL_DIAM*.5 - .25;  // tip overshoots into the ball
 
@@ -220,21 +221,29 @@ function drawCueStickBody(ballPos, dir, tipDist)
 
 // Returns the cue stick pose for the current frame, or null if no stick
 // should be drawn. Pure function so both shadow- and body- passes agree.
+//
+// Aiming: stick sits at CUE_REST_DIST (independent of power — power changes
+// the impulse, not the visible rest position).
+// Strike: animates REST → pullback (scaled by power) → CONTACT → FOLLOW.
 function getCueStickPose()
 {
     if (!isPlaying || !cueBall) return null;
     if (strike)
     {
-        const tipDist = !strike.hit
-            ? lerp(strike.startDist, CUE_CONTACT_DIST, strike.t)
-            : lerp(CUE_CONTACT_DIST, CUE_FOLLOW_DIST,  strike.followT);
+        let tipDist;
+        if (strike.pullbackT < 1)
+            tipDist = lerp(CUE_REST_DIST,      strike.pullbackDist, strike.pullbackT);
+        else if (!strike.hit)
+            tipDist = lerp(strike.pullbackDist, CUE_CONTACT_DIST,   strike.strikeT);
+        else
+            tipDist = lerp(CUE_CONTACT_DIST,   CUE_FOLLOW_DIST,     strike.followT);
         return { dir: strike.dir, tipDist };
     }
     const showAim = !isTouchDevice || mouseIsDown(0);
     if (canShoot() && showAim)
     {
-        const { dir, power } = getAim();
-        return { dir, tipDist: cueRestDist(power) };
+        const { dir } = getAim();
+        return { dir, tipDist: CUE_REST_DIST };
     }
     return null;
 }
@@ -691,12 +700,12 @@ function gameUpdate()
         return;
     }
 
-    // Right mouse held = 4x simulation speed. box2d.step(3) advances physics
-    // 3 extra ticks per frame on top of the engine's own step. Rapid-stop
+    // Right mouse held = 5x simulation speed. box2d.step(4) advances physics
+    // 4 extra ticks per frame on top of the engine's own step. Rapid-stop
     // still runs once per frame which is fine — fast-forward is mainly for
     // skipping the long coast at the end of a turn.
     if (mouseIsDown(2) && !paused)
-        box2d.step(3);
+        box2d.step(4);
 
     // Debug: hold D to drag the cue ball to the mouse position. Lets you line
     // it up against pocket mouths to verify the sensor catches it at the right
@@ -740,15 +749,16 @@ function gameUpdate()
         // being a no-op so the swing animation always produces motion.
         strike = {
             dir, power, len,
-            startDist: cueRestDist(power),
-            t: 0,          // 0..1 progress through windup
-            hit: false,    // has the impulse been applied?
-            followT: 0,    // 0..1 progress through follow-through
+            pullbackDist: CUE_REST_DIST + power * CUE_PULL_SCALE,
+            pullbackT: 0,  // 0..1 progress pulling back from REST
+            strikeT:   0,  // 0..1 progress driving forward from pullback to contact
+            hit:    false, // has the impulse been applied?
+            followT:   0,  // 0..1 progress through follow-through after contact
         };
         wheelPower = 0;   // each shot starts from the mouse-drag baseline
     }
 
-    // Advance the strike animation each frame
+    // Advance the strike animation each frame: pullback → forward → follow-through
     if (strike)
     {
         if (!cueBall)
@@ -756,10 +766,14 @@ function gameUpdate()
             // cue ball gone (e.g. quit mid-swing) — bail out
             strike = null;
         }
+        else if (strike.pullbackT < 1)
+        {
+            strike.pullbackT = min(1, strike.pullbackT + timeDelta / STRIKE_PULLBACK_S);
+        }
         else if (!strike.hit)
         {
-            strike.t = min(1, strike.t + timeDelta / STRIKE_WINDUP_S);
-            if (strike.t >= 1)
+            strike.strikeT = min(1, strike.strikeT + timeDelta / STRIKE_FORWARD_S);
+            if (strike.strikeT >= 1)
             {
                 // tip just reached the ball — apply impulse now. Lerps from
                 // MIN_IMPULSE (0% power tap) to the full max impulse.
@@ -777,13 +791,6 @@ function gameUpdate()
             strike.followT = min(1, strike.followT + timeDelta / STRIKE_FOLLOW_S);
             if (strike.followT >= 1) strike = null;
         }
-    }
-
-    // remember aim angle so the cue stick can fade in next time we stop
-    if (cueBall)
-    {
-        const d = mousePos.subtract(cueBall.pos);
-        if (d.lengthSquared() > .01) aimAngle = d.angle();
     }
 }
 
@@ -878,6 +885,12 @@ function gameRenderPost()
             vec2(mainCanvasSize.x/2, mainCanvasSize.y - 36),
             32, WHITE, 4, rgb(0,0,0,.7));
     }
+
+    // Fast-forward indicator while right-mouse is held — confirms the speedup
+    // is active and makes the feature discoverable.
+    if (mouseIsDown(2))
+        drawTextScreen('5× SPEED', vec2(mainCanvasSize.x/2, 80),
+            36, rgb(1, .9, .4), 4, rgb(0,0,0,.7));
 
     // HUD
     drawTextScreen(`SHOTS  ${shots}`,
