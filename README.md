@@ -36,11 +36,13 @@ The most polished prototypes — playable games with menus, sound, and a complet
 | Asteroids | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/asteroids.html) |
 | Centipede | 🚀 | ✅ | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/centipede.html) |
 | Minesweeper | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/minesweeper.html) |
+| Match 3 | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/match3.html) |
 | Flappy Bird | 👾 | | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/flappyBird.html) |
 | Lunar Lander | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/lunarLander.html) |
 | Othello | ♟️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/othello.html) |
 | Connect 4 | ♟️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/connect4.html) |
 | Checkers | ♟️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/checkers.html) |
+| Chess | ♟️ | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/chess.html) |
 | Orbitswarm | 🚀 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/orbitswarm.html) |
 | Snake | 👾 | ✅ | ✅ | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/snake.html) |
 | Columns | 🧩 | | | | [Play](https://killedbyapixel.github.io/LittleJS-AI/games/columns.html) |
