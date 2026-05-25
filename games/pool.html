@@ -87,7 +87,7 @@ const STRIKE_WINDUP_S = .10;   // time for the tip to reach the ball
 const STRIKE_FOLLOW_S = .08;   // follow-through after contact
 
 // sounds
-let sfxHit, sfxBreak, sfxPocket, sfxScratch, sfxWin;
+let sfxHit, sfxRail, sfxBreak, sfxPocket, sfxScratch, sfxWin;
 
 ///////////////////////////////////////////////////////////////////////////////
 // helpers — drawing
@@ -192,10 +192,19 @@ class Ball extends Box2dObject
 
     beginContact(other)
     {
-        // play click on ball-vs-ball / ball-vs-rail (skip sensors)
+        // Pocket sensors are handled by update()/pocketed — no contact sound here.
+        if (other instanceof Pocket) return;
+
         const s = this.getSpeed();
-        if (s > 1)
-            sfxHit.play(this.pos, clamp(s/16, .15, 1), 1 + (this.number ? .02 : 0));
+        if (s <= 1) return;
+        const vol = clamp(s/16, .15, 1);
+
+        if (other instanceof Ball)
+            // sharp click for ball-vs-ball
+            sfxHit.play(this.pos, vol, 1 + (this.number ? .02 : 0));
+        else
+            // softer thud for ball-vs-rail (or any other static body)
+            sfxRail.play(this.pos, vol * .7);
     }
 
     update()
@@ -451,6 +460,8 @@ async function gameInit()
 
     // sounds — short ZzFX clicks for cushion / ball contacts
     sfxHit     = new Sound([,.1, 2e3, , , .01, , , , , , , , 1]);
+    // softer, lower thud for ball-vs-rail contact — placeholder, swap when you have a real sample
+    sfxRail    = new SoundGenerator({volume:.45, frequency:95, attack:0, release:.14, shapeCurve:2.2, slide:-.6, noise:.04});
     sfxPocket  = new SoundGenerator({volume:.8, frequency:180, attack:0, release:.18, shapeCurve:1.2, slide:-2.2, noise:.04});
     sfxScratch = new SoundGenerator({volume:.7, frequency:120, attack:0, release:.30, shapeCurve:1.6, slide:-1.4, noise:.10});
     sfxBreak   = new SoundGenerator({volume:.9, frequency:240, attack:0, release:.20, shapeCurve:1.3, slide:-1.8, noise:.06});
