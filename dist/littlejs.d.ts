@@ -291,7 +291,7 @@ declare module "littlejsengine" {
      *  @param {boolean} [screenSpace]
      *  @memberof Debug */
     export function debugOverlap(posA: Vector2, sizeA: Vector2, posB: Vector2, sizeB: Vector2, color?: Color | string, time?: number, screenSpace?: boolean): void;
-    /** Draw a debug axis aligned bounding box in world space
+    /** Draw debug text in world space
      *  @param {string|number} text
      *  @param {Vector2} pos
      *  @param {number} [size]
@@ -358,7 +358,7 @@ declare module "littlejsengine" {
     export let canvasColorTiles: boolean;
     /** Color to clear the canvas to before render, does not clear if alpha is 0
      *  @type {Color}
-     *  @memberof Draw */
+     *  @memberof Settings */
     export let canvasClearColor: Color;
     /** The max size of the canvas, centered if window is larger
      *  @type {Vector2}
@@ -516,7 +516,8 @@ declare module "littlejsengine" {
      *  @memberof Settings */
     export let touchGamepadEnable: boolean;
     /** True if touch gamepad should have start button in the center
-     *  - Prevents activating if overlappng with virtual stick or buttons if they are enabled
+     *  - Prevents activating within 2*touchGamepadSize of the virtual stick or face buttons
+     *    (one radius for the visible control + one radius of buffer beyond its edge)
      *  - When the game is paused, any touch will press the button
      *  - Set size to enable the center button
      *  @type {number}
@@ -739,6 +740,10 @@ declare module "littlejsengine" {
      *  @param {number} alpha
      *  @memberof Settings */
     export function setTouchGamepadAlpha(alpha: number): void;
+    /** Set how long to display the touch gamepad on screen in seconds, set to 0 to always display
+     *  @param {number} time
+     *  @memberof Settings */
+    export function setTouchGamepadDisplayTime(time: number): void;
     /** Set to allow vibration hardware if it exists
      *  @param {boolean} enable
      *  @memberof Settings */
@@ -1422,7 +1427,8 @@ declare module "littlejsengine" {
         /** Get how long since elapsed, returns 0 if not set (returns negative if currently active)
          * @return {number} */
         get(): number;
-        /** Get percentage elapsed based on time it was set to, returns 0 if not set
+        /** Get percentage elapsed based on time it was set to, returns 0 if not set.
+         *  Zero-duration timers report 1 (already elapsed).
          * @return {number} */
         getPercent(): number;
         /** Get the time this timer was set to, returns 0 if not set
@@ -1499,9 +1505,9 @@ declare module "littlejsengine" {
     /**
      * Check if object is an array
      * @param {any} a
-     * @return {boolean}
+     * @return {a is Array<any>}
      * @memberof Math */
-    export function isArray(a: any): boolean;
+    export function isArray(a: any): a is any[];
     /** Color - White #ffffff
      *  @type {Color}
      *  @memberof Math */
@@ -1580,8 +1586,8 @@ declare module "littlejsengine" {
          *  @param {Vector2} [pos=vec2()] - Top left corner of tile in pixels
          *  @param {Vector2} [size] - Size of tile in pixels
          *  @param {TextureInfo} [textureInfo] - Texture info to use
-         *  @param {number} [padding] - How many pixels padding around tiles
-         *  @param {number} [bleed] - How many pixels smaller to draw tiles
+         *  @param {number} [padding] - How many pixels padding around all sides of each tile (increases grid size, does not affect tile size)
+         *  @param {number} [bleed] - How many pixels smaller to shrink UVS of tiles (does not affect grid size, only UVs)
          */
         constructor(pos?: Vector2, size?: Vector2, textureInfo?: TextureInfo, padding?: number, bleed?: number);
         /** @property {Vector2} - Top left corner of tile in pixels */
@@ -1656,7 +1662,7 @@ declare module "littlejsengine" {
      * - Optimized tile sheet sprite rendering using WebGL batching
      * - Primitive drawing for polygons, ellipses, and lines
      * - Tile-based rendering with TileInfo and TextureInfo classes
-     * - Text rendering with custom fonts and FontImage support
+     * - Text rendering with custom fonts and ImageFont support
      * - Color and additive color blending for effects
      * - Rotation, mirroring, and scaling transformations
      * - Camera system with position, scale, and rotation
@@ -1833,9 +1839,9 @@ declare module "littlejsengine" {
      *  @param {Vector2} [size=vec2(1)]
      *  @param {number}  [sides]
      *  @param {Color}   [color=WHITE]
-     *  @param {number}  [angle]
      *  @param {number}  [lineWidth]
      *  @param {Color}   [lineColor=BLACK]
+     *  @param {number}  [angle]
      *  @param {boolean} [useWebGL=glEnable]
      *  @param {boolean} [screenSpace]
      *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
@@ -1864,7 +1870,20 @@ declare module "littlejsengine" {
      *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
      *  @memberof Draw */
     export function drawCircle(pos: Vector2, size?: number, color?: Color, lineWidth?: number, lineColor?: Color, useWebGL?: boolean, screenSpace?: boolean, context?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void;
-    export function drawCircleGradient(pos: any, size: number, colorInner: Color, colorOuter: Color, useWebGL: boolean, screenSpace: boolean, context: any): void;
+    export function drawEllipseGradient(pos: any, size: Vector2, colorInner: Color, colorOuter: Color, angle: number, useWebGL: boolean, screenSpace: boolean, context: any): void;
+    /** Draw a circle filled with a radial gradient from the center to the rim
+     *  - Best when batched with other untextured polys
+     *  - If drawing mostly textured sprites, bake the gradient into a texture and use drawTile instead
+     *  - Stacking gradients at the exact same position may show a faint vertical artifact
+     *  @param {Vector2} pos
+     *  @param {number}  [size=1] - Diameter
+     *  @param {Color}   [colorInner=WHITE]
+     *  @param {Color}   [colorOuter=CLEAR_WHITE]
+     *  @param {boolean} [useWebGL=glEnable]
+     *  @param {boolean} [screenSpace]
+     *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context]
+     *  @memberof Draw */
+    export function drawCircleGradient(pos: Vector2, size?: number, colorInner?: Color, colorOuter?: Color, useWebGL?: boolean, screenSpace?: boolean, context?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void;
     /**
      * @callback Canvas2DDrawFunction - A function that draws to a 2D canvas context
      * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} context
@@ -1922,11 +1941,11 @@ declare module "littlejsengine" {
      *  @memberof Draw */
     export function combineCanvases(): void;
     /** Engine font image, 8x8 font provided by the engine
-     *  @type {FontImage}
+     *  @type {ImageFont}
      *  @memberof Draw */
-    export let engineFontImage: FontImage;
+    export let engineImageFont: ImageFont;
     /**
-     * Font Image Object - Draw text by using tiles in an image
+     * Image Font Object - Draw text by using tiles in an image
      * - 96 characters (from space to tilde) are stored in an image
      * - A 8x8 default engine font is supplied for general use
      * - This system is WebGL enabled for fast text rendering
@@ -1935,12 +1954,12 @@ declare module "littlejsengine" {
      * @memberof Draw
      * @example
      * // use built in font
-     * const font = engineFontImage;
+     * const font = engineImageFont;
      *
      * // draw text
      * font.drawTextScreen('LittleJS\nHello World!', vec2(200, 50));
      */
-    export class FontImage {
+    export class ImageFont {
         /** Create an image font
          *  @param {TileInfo} tileInfo - Tile info of first character in font
          */
@@ -2087,9 +2106,9 @@ declare module "littlejsengine" {
      *  @memberof WebGL */
     export function glDraw(x: number, y: number, sizeX: number, sizeY: number, angle?: number, uv0X?: number, uv0Y?: number, uv1X?: number, uv1Y?: number, rgba?: number, rgbaAdditive?: number): void;
     /** Add an untextured rect to the gl draw list
-     *  Picks the optimal path: if already in poly mode, emits a tristrip rect
-     *  so it batches with surrounding polys; otherwise uses the instanced path
-     *  with uvs and rgba zeroed so the color falls through the additive slot.
+     *  Zeroes the uvs and rgba so the texture contribution multiplies to 0,
+     *  then carries the real color in the additive slot. Works regardless of
+     *  which texture is currently bound.
      *  @param {number} x
      *  @param {number} y
      *  @param {number} sizeX
@@ -3108,7 +3127,7 @@ declare module "littlejsengine" {
          *  @param {number} [angleDamping]      - How much to dampen particle angular speed
          *  @param {number} [gravityScale]      - How much gravity effect particles
          *  @param {number} [particleConeAngle] - Cone for start particle angle
-         *  @param {number} [fadeRate]          - How quick to fade particles at start/end in percent of life
+         *  @param {number} [fadeRate]          - Fraction of life spent fading: half at fade-in (start), half at fade-out (end). e.g. .2 = 10% fade-in, 80% full opacity, 10% fade-out
          *  @param {number} [randomness]    - Apply extra randomness percent
          *  @param {boolean} [collideTiles] - Do particles collide against tiles
          *  @param {boolean} [additive]     - Should particles use additive blend
@@ -3149,7 +3168,7 @@ declare module "littlejsengine" {
         angleSpeed: number;
         /** @property {number} - Cone for start particle angle */
         particleConeAngle: number;
-        /** @property {number} - How quick to fade in particles at start/end in percent of life */
+        /** @property {number} - Fraction of life spent fading, split half at start and half at end (e.g. .2 = 10% fade-in + 10% fade-out) */
         fadeRate: number;
         /** @property {number} - Apply extra randomness percent */
         randomness: number;
@@ -3249,6 +3268,21 @@ declare module "littlejsengine" {
      *  @default
      *  @memberof Settings */
     export let medalsPreventUnlock: boolean;
+    /** How long to show medals for in seconds
+     *  @type {number}
+     *  @default
+     *  @memberof Settings */
+    export let medalDisplayTime: number;
+    /** How quickly to slide on/off medals in seconds
+     *  @type {number}
+     *  @default
+     *  @memberof Settings */
+    export let medalDisplaySlideTime: number;
+    /** Size of medal display
+     *  @type {Vector2}
+     *  @default Vector2(640,80)
+     *  @memberof Settings */
+    export let medalDisplaySize: Vector2;
     /** Initialize medals with a save name used for storage
      *  - Call this after creating all medals
      *  - Checks if medals are unlocked
@@ -3264,6 +3298,22 @@ declare module "littlejsengine" {
      *  @param {MedalCallbackFunction} callback
      *  @memberof Medals */
     export function medalsForEach(callback: MedalCallbackFunction): void;
+    /** Set how long to show medals for in seconds
+     *  @param {number} time
+     *  @memberof Settings */
+    export function setMedalDisplayTime(time: number): void;
+    /** Set how quickly to slide on/off medals in seconds
+     *  @param {number} time
+     *  @memberof Settings */
+    export function setMedalDisplaySlideTime(time: number): void;
+    /** Set size of medal display
+     *  @param {Vector2} size
+     *  @memberof Settings */
+    export function setMedalDisplaySize(size: Vector2): void;
+    /** Set to stop medals from being unlockable
+     *  @param {boolean} preventUnlock
+     *  @memberof Settings */
+    export function setMedalsPreventUnlock(preventUnlock: boolean): void;
     /**
      * Medal - Tracks an unlockable medal
      * @memberof Medals
@@ -3311,37 +3361,6 @@ declare module "littlejsengine" {
         renderIcon(pos: Vector2, size: number): void;
         storageKey(): string;
     }
-    /** How long to show medals for in seconds
-     *  @type {number}
-     *  @default
-     *  @memberof Settings */
-    export let medalDisplayTime: number;
-    /** How quickly to slide on/off medals in seconds
-     *  @type {number}
-     *  @default
-     *  @memberof Settings */
-    export let medalDisplaySlideTime: number;
-    /** Size of medal display
-     *  @type {Vector2}
-     *  @default Vector2(640,80)
-     *  @memberof Settings */
-    export let medalDisplaySize: Vector2;
-    /** Set how long to show medals for in seconds
-     *  @param {number} time
-     *  @memberof Settings */
-    export function setMedalDisplayTime(time: number): void;
-    /** Set how quickly to slide on/off medals in seconds
-     *  @param {number} time
-     *  @memberof Settings */
-    export function setMedalDisplaySlideTime(time: number): void;
-    /** Set size of medal display
-     *  @param {Vector2} size
-     *  @memberof Settings */
-    export function setMedalDisplaySize(size: Vector2): void;
-    /** Set to stop medals from being unlockable
-     *  @param {boolean} preventUnlock
-     *  @memberof Settings */
-    export function setMedalsPreventUnlock(preventUnlock: boolean): void;
     /**
      * LittleJS Newgrounds Plugin
      * - NewgroundsMedal extends Medal with Newgrounds API functionality
@@ -3498,6 +3517,14 @@ declare module "littlejsengine" {
          */
         playMusic(volume?: number, loop?: boolean): SoundInstance;
     }
+    /** Generate samples for a ZzFM song with given parameters
+     *  @param {Array} instruments - Array of ZzFX sound parameters
+     *  @param {Array} patterns - Array of pattern data
+     *  @param {Array} sequence - Array of pattern indexes
+     *  @param {number} [BPM] - Playback speed of the song in BPM
+     *  @return {Array} - Left and right channel sample data
+     *  @memberof ZzFXM */
+    export function zzfxM(instruments: any[], patterns: any[], sequence: any[], BPM?: number): any[];
     /**
      * LittleJS User Interface Plugin
      * - call new UISystemPlugin() to setup the UI system
@@ -3659,6 +3686,7 @@ declare module "littlejsengine" {
         *  @param {DragAndDropCallback} [onDragLeave] - when a file is dragged off the window
         *  @param {DragAndDropCallback} [onDragOver] - continuously when dragging over */
         setupDragAndDrop(onDrop?: (event: DragEvent) => any, onDragEnter?: (event: DragEvent) => any, onDragLeave?: (event: DragEvent) => any, onDragOver?: (event: DragEvent) => any): void;
+        _dragListeners: any[];
         /** Convert a screen space position to native UI position
          *  @param {Vector2} pos
          *  @return {Vector2} */
@@ -4225,7 +4253,9 @@ declare module "littlejsengine" {
         /** Add a box shape to the body
          *  @param {Vector2} [size]
          *  @param {Vector2} [offset]
-         *  @param {number}  [angle]
+         *  @param {number}  [angle] - LittleJS convention (clockwise positive).
+         *      Negated internally to match Box2D's CCW-positive convention so the
+         *      fixture aligns with the same angle passed to drawRect/drawTile.
          *  @param {number}  [density]
          *  @param {number}  [friction]
          *  @param {number}  [restitution]
