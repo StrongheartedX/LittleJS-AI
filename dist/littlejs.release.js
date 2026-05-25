@@ -35,7 +35,7 @@ const engineName = 'LittleJS';
  *  @type {string}
  *  @default
  *  @memberof Engine */
-const engineVersion = '1.18.14';
+const engineVersion = '1.18.15';
 
 /** Frames per second to update
  *  @type {number}
@@ -168,6 +168,9 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
 {
     showEngineVersion && console.log(`${engineName} Engine v${engineVersion}`);
     ASSERT(!mainContext, 'engine already initialized');
+    // runtime guard so release builds (where the assert is stripped) don't
+    // double-register listeners / double-add canvases on a second call
+    if (mainContext) return;
     ASSERT(isArray(imageSources), 'pass in images as array');
 
     // allow passing in empty functions
@@ -195,6 +198,9 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
     {
         // update time keeping
         let frameTimeDeltaMS = frameTimeMS - frameTimeLastMS;
+        // skip delta on the very first frame so timeReal doesn't jump
+        // by ~page-load-time when RAF starts handing real timestamps
+        if (!frameTimeLastMS) frameTimeDeltaMS = 0;
         frameTimeLastMS = frameTimeMS;
         if (debug || debugWatermark)
             averageFPS = lerp(averageFPS, 1e3/(frameTimeDeltaMS||1), .05);
@@ -671,19 +677,19 @@ const max = Math.max;
  *  @param {number} x
  *  @return {number}
  *  @memberof Math */
-const sign = Math.sign;
+const sign = (x) => Math.sign(x);
 
 /** Returns hypotenuse of values passed in
  *  @param {...number} values
  *  @return {number}
  *  @memberof Math */
-const hypot = Math.hypot;
+const hypot = (...values) => Math.hypot(...values);
 
 /** Returns log2 of value passed in
  *  @param {number} x
  *  @return {number}
  *  @memberof Math */
-const log2 = Math.log2;
+const log2 = (x) => Math.log2(x);
 
 /** Returns sin of value passed in
  *  @param {number} x
@@ -825,7 +831,8 @@ function isOverlapping(posA, sizeA, posB, sizeB=vec2())
     const dy = (posA.y - posB.y)*2;
     const sx = sizeA.x + sizeB.x;
     const sy = sizeA.y + sizeB.y;
-    return dx >= -sx && dx < sx && dy >= -sy && dy < sy;
+    // symmetric so isOverlapping(A,B) === isOverlapping(B,A) at touching edges
+    return abs(dx) < sx && abs(dy) < sy;
 }
 
 /** Returns true if a line segment is intersecting an axis aligned box
@@ -1052,7 +1059,13 @@ function randVec2(length=1) { return new Vector2().setAngle(rand(2*PI), length);
  *  @return {Vector2}
  *  @memberof Random */
 function randInCircle(radius=1, minRadius=0)
-{ return radius > 0 ? randVec2(radius * rand(clamp(minRadius / radius), 1)**.5) : new Vector2; }
+{
+    // r is uniform in area ⇒ r² uniform in [minRadius², radius²]
+    // (the squared inner bound is what makes minRadius the actual exclusion edge)
+    if (radius <= 0) return new Vector2;
+    const ratio = clamp(minRadius / radius);
+    return randVec2(radius * rand(ratio*ratio, 1)**.5);
+}
 
 /** Returns a random color between the two passed in colors, combine components if linear
  *  @param {Color}   [colorA=WHITE]
@@ -1965,15 +1978,20 @@ function shareURL(title, url, callback)
 function readSaveData(saveName, defaultSaveData)
 {
     ASSERT(isStringLike(saveName), 'loadData requires saveName string');
-    
-    // replace undefined values with defaults; tolerate corrupt JSON
-    const data = localStorage[saveName];
+
+    // tolerate localStorage being unavailable (iOS private mode, sandboxed
+    // iframes) and corrupt JSON in stored data
     let loadedData = {};
-    if (data)
+    try
     {
-        try { loadedData = JSON.parse(data); }
-        catch { LOG('readSaveData: corrupt JSON for', saveName, '— using defaults'); }
+        const data = localStorage[saveName];
+        if (data)
+        {
+            try { loadedData = JSON.parse(data); }
+            catch { LOG('readSaveData: corrupt JSON for', saveName, '— using defaults'); }
+        }
     }
+    catch { LOG('readSaveData: localStorage unavailable — using defaults'); }
     return { ...defaultSaveData, ...loadedData };
 }
 
@@ -1984,7 +2002,9 @@ function readSaveData(saveName, defaultSaveData)
 function writeSaveData(saveName, saveData)
 {
     ASSERT(isStringLike(saveName), 'saveData requires saveName string');
-    localStorage[saveName] = JSON.stringify(saveData);
+    // tolerate localStorage being unavailable or quota exceeded
+    try { localStorage[saveName] = JSON.stringify(saveData); }
+    catch { LOG('writeSaveData: failed to write', saveName); }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2692,7 +2712,7 @@ class EngineObject
         this.color = color.copy();
         /** @property {Color} - Additive color to apply when rendered */
         this.additiveColor = undefined;
-        /** @property {boolean} - Should it flip along y axis when rendered */
+        /** @property {boolean} - Should the rendered tile flip along the y axis. Affects rendering and the local→world transform of attached children (a mirrored parent flips its children's localPos.x and localAngle). Does not affect this object's own physics, collision, or localToWorld/worldToLocal. */
         this.mirror = false;
         /** @property {boolean} - Has object been destroyed? */
         this.destroyed = false;
@@ -2778,6 +2798,9 @@ class EngineObject
         // child objects do not have physics
         ASSERT(!this.parent);
 
+        // bail if a collision callback destroyed us mid-frame
+        if (this.destroyed) return;
+
         if (this.clampSpeed)
         {
             // limit max speed to prevent missing collisions
@@ -2833,6 +2856,8 @@ class EngineObject
 
                 // notify objects of collision and check if should be resolved
                 const collide1 = this.collideWithObject(o);
+                // callback may have destroyed us; stop resolving against more objects
+                if (this.destroyed) return;
                 const collide2 = o.collideWithObject(this);
                 if (!collide1 || !collide2) continue;
 
@@ -2928,13 +2953,17 @@ class EngineObject
                     const restitution = max(this.restitution, hitLayer.restitution);
                     if (isBlockedX)
                     {
-                        // try to move up a tiny bit
+                        // try to step over a 1-tile bump (direction follows gravity sign
+                        // so inverted gravity steps down off a ceiling bump instead of up;
+                        // zero gravity defaults to the normal-gravity step-up direction)
                         const epsilon = 1e-3;
-                        const maxMoveUp = .1;
-                        const y = floor(oldPos.y-this.size.y/2+1) +
-                            this.size.y/2 + epsilon;
-                        const delta = y - this.pos.y;
-                        if (delta < maxMoveUp)
+                        const maxMove = .1;
+                        const gravitySign = gravity.y > 0 ? -1 : 1;
+                        const y = gravitySign > 0 ?
+                            floor(oldPos.y-this.size.y/2+1) + this.size.y/2 + epsilon :
+                            ceil( oldPos.y+this.size.y/2-1) - this.size.y/2 - epsilon;
+                        const delta = abs(y - this.pos.y);
+                        if (delta < maxMove)
                         if (!tileCollisionTest(vec2(this.pos.x, y), this.size, this))
                         {
                             this.pos.y = y;
@@ -3074,6 +3103,8 @@ class EngineObject
      *  @return {EngineObject} The child object added */
     addChild(child, localPos=vec2(), localAngle=0)
     {
+        ASSERT(!this.destroyed, 'cannot add child to destroyed object');
+        if (this.destroyed) return child;
         ASSERT(!child.parent && !this.children.includes(child));
         ASSERT(child instanceof EngineObject, 'child must be an EngineObject');
         ASSERT(child !== this, 'cannot add self as child');
@@ -4085,16 +4116,16 @@ function drawTextScreen(text, pos, size, color=WHITE, lineWidth=0, lineColor=BLA
     ASSERT(isStringLike(fontStyle), 'fontStyle must be a string');
     ASSERT(isNumber(angle), 'angle must be a number');
     
+    const lines = (text+'').split('\n');
+    const posY = pos.y - (lines.length-1) * size/2; // center vertically
+    // save before style mutations so caller's context state is preserved
+    context.save();
     context.fillStyle = color.toString();
     context.strokeStyle = lineColor.toString();
     context.lineWidth = lineWidth;
     context.textAlign = textAlign;
     context.font = fontStyle + ' ' + size + 'px '+ font;
     context.textBaseline = 'middle';
-
-    const lines = (text+'').split('\n');
-    const posY = pos.y - (lines.length-1) * size/2; // center vertically
-    context.save();
     context.translate(pos.x, posY);
     context.rotate(-angle);
     let yOffset = 0;
@@ -4254,6 +4285,9 @@ function isOnScreen(pos, size=0)
 {
     ASSERT(isVector2(pos), 'pos must be a vec2');
     ASSERT(isVector2(size) || isNumber(size), 'size must be a vec2 or number');
+
+    // cameraScale of 0 collapses world coords; nothing is visible
+    if (!cameraScale) return false;
 
     // optimized circle on screen test
     // pos = worldToScreen(pos);
@@ -5319,13 +5353,6 @@ function inputUpdate()
                     (gamepadIsDown(15,i)&&1) - (gamepadIsDown(14,i)&&1),
                     (gamepadIsDown(12,i)&&1) - (gamepadIsDown(13,i)&&1));
             }
-            else if (gamepad.axes && gamepad.axes.length >= 2)
-            {
-                // digital style dpad from axes
-                const x = clamp(round(gamepad.axes[0]), -1, 1);
-                const y = clamp(round(gamepad.axes[1]), -1, 1);
-                dpad.set(x, -y);
-            }
 
             // copy dpad to left analog stick when pressed
             if (gamepadDirectionEmulateStick && (dpad.x || dpad.y))
@@ -5623,13 +5650,10 @@ class Sound
     }
 
     /** Get how long this sound is in seconds
-     *  @return {number} - How long the sound is in seconds (undefined if loading)
+     *  @return {number} - How long the sound is in seconds (0 if loading)
      */
     getDuration()
-    {
-        const length = this.sampleChannels?.[0]?.length;
-        return length === undefined ? undefined : length / this.sampleRate;
-    }
+    { return this.sampleChannels?.[0]?.length / this.sampleRate || 0; }
 
     /** Check if sound is loaded, for sounds fetched from a url
      *  @return {boolean} - True if sound is loaded and ready to play
@@ -5784,9 +5808,12 @@ class SoundInstance
             if (fadeTime)
             {
                 // ramp off gain from current volume (not 1, or low-volume
-                // instances would jump back up before fading)
+                // instances would jump back up before fading);
+                // cancel any prior scheduling so stacked stop calls don't
+                // re-anchor partway through a previous fade
                 const startFade = audioContext.currentTime;
                 const endFade = startFade + fadeTime;
+                this.gainNode.gain.cancelScheduledValues(startFade);
                 this.gainNode.gain.setValueAtTime(this.volume, startFade);
                 this.gainNode.gain.linearRampToValueAtTime(0, endFade);
                 this.source.stop(endFade);
@@ -5835,13 +5862,14 @@ class SoundInstance
      */
     getCurrentTime()
     {
-        const deltaTime = mod(audioContext.currentTime - this.startTime, 
-            this.getDuration());
-        return this.isPlaying() ? deltaTime : this.pausedTime;
+        if (!this.isPlaying()) return this.pausedTime;
+        const duration = this.getDuration();
+        // guard mod against 0 duration (rate=0 or sound not loaded)
+        return duration ? mod(audioContext.currentTime - this.startTime, duration) : 0;
     }
 
     /** Get the total duration of this sound
-     *  @return {number} - Total duration in seconds
+     *  @return {number} - Total duration in seconds (0 if loading)
      */
     getDuration() { return this.rate ? this.sound.getDuration() / this.rate : 0; }
 
@@ -5949,9 +5977,14 @@ function playSamples(sampleChannels, volume=1, rate=1, pan=0, loop=false, sample
     const pannerNode = new StereoPannerNode(audioContext, {'pan':clamp(pan, -1, 1)});
     source.connect(pannerNode).connect(gainNode);
 
-    // callback when the sound ends
-    if (onended)
-        source.addEventListener('ended', ()=> onended(source));
+    // disconnect nodes when the sound ends so the audio graph doesn't grow
+    // unbounded across many play() calls (source.stop() also fires 'ended')
+    source.addEventListener('ended', ()=>
+    {
+        gainNode.disconnect();
+        pannerNode.disconnect();
+        if (onended) onended(source);
+    });
 
     // play and return sound
     const startOffset = offset * rate;
@@ -6188,14 +6221,29 @@ function tileCollisionTest(pos, size=vec2(), callbackObject, solidOnly=true)
  *  @memberof TileLayers */
 function tileCollisionRaycast(posStart, posEnd, callbackObject, normal, solidOnly=true)
 {
+    // check every layer and keep the closest hit so a far hit in an
+    // earlier-registered layer doesn't shadow a closer hit in a later one
+    let closestHit, closestDistSq, closestNormal;
+    const scratchNormal = normal && vec2();
     for (const layer of tileCollisionLayers)
     {
         if (!solidOnly || layer.isSolid)
         {
-            const hitPos = layer.collisionRaycast(posStart, posEnd, callbackObject, normal)
-            if (hitPos) return hitPos;
+            const hitPos = layer.collisionRaycast(posStart, posEnd, callbackObject, scratchNormal);
+            if (hitPos)
+            {
+                const d = posStart.distanceSquared(hitPos);
+                if (closestHit === undefined || d < closestDistSq)
+                {
+                    closestHit = hitPos;
+                    closestDistSq = d;
+                    if (normal) closestNormal = scratchNormal.copy();
+                }
+            }
         }
     }
+    if (closestHit && normal) normal.setFrom(closestNormal);
+    return closestHit;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -6369,38 +6417,6 @@ class CanvasLayer extends EngineObject
         drawTile(pos, size, tileInfo, color, angle, mirror, additiveColor, useWebGL, screenSpace, context);
     }
 
-    /** Draw a tile onto the layer canvas in world space
-     *  @param {Vector2}  pos
-     *  @param {Vector2}  [size=vec2(1)]
-     *  @param {TileInfo} [tileInfo]
-     *  @param {Color}    [color=WHITE]
-     *  @param {number}   [angle]
-     *  @param {boolean}  [mirror] */
-    drawTile(pos, size=vec2(1), tileInfo, color=new Color, angle=0, mirror=false)
-    {
-        pos = pos.subtract(this.pos).multiply(this.tileInfo.size);
-        size = size.multiply(this.tileInfo.size);
-        pos.y = this.canvas.height - pos.y;
-
-        // draw the tile onto the layer canvas
-        const oldMainCanvasSize = mainCanvasSize;
-        mainCanvasSize = vec2(this.canvas.width, this.canvas.height);
-        const useWebGL = this.hasWebGL();
-        useWebGL && glSetRenderTarget(this.textureInfo.glTexture);
-        const drawContext = useWebGL ? undefined : this.context;
-        drawTile(pos, size, tileInfo, color, angle, mirror, undefined, useWebGL, true, drawContext);
-        useWebGL && glSetRenderTarget();
-        mainCanvasSize = oldMainCanvasSize;
-    }
-
-    /** Draw a rectangle onto the layer canvas in world space
-     *  @param {Vector2} pos
-     *  @param {Vector2} [size=vec2(1)]
-     *  @param {Color}   [color=WHITE]
-     *  @param {number}  [angle] */
-    drawRect(pos, size, color, angle)
-    { this.drawTile(pos, size, undefined, color, angle); }
-
     /** Create WebGL texture if necessary and copy layer canvas to it */
     updateWebGL()
     { this.textureInfo.createWebGLTexture(); }
@@ -6456,6 +6472,8 @@ class TileLayer extends CanvasLayer
             this.redrawTileData = ()=> {};
             this.drawLayerTile  = ()=> {};
             this.drawLayerRect  = ()=> {};
+            this.drawTile       = ()=> {};
+            this.drawRect       = ()=> {};
             this.clearLayerRect = ()=> {};
             return;
         }
@@ -6498,11 +6516,11 @@ class TileLayer extends CanvasLayer
 
     /** Get data at a given position in the array
      *  @param {Vector2} layerPos - Local position in array
-     *  @return {TileLayerData} */
+     *  @return {TileLayerData|undefined} */
     getData(layerPos)
-    { 
+    {
         ASSERT(isVector2(layerPos), 'layerPos must be a Vector2');
-        return layerPos.arrayCheck(this.size) && this.data[(layerPos.y|0)*this.size.x + (layerPos.x|0)];
+        return layerPos.arrayCheck(this.size) ? this.data[(layerPos.y|0)*this.size.x + (layerPos.x|0)] : undefined;
     }
 
     // Update the tile layer, refresh texture if needed
@@ -6610,7 +6628,7 @@ class TileLayer extends CanvasLayer
 
         // draw the tile if it has layer data
         const d = this.getData(layerPos);
-        if (!d.tile) return;
+        if (!d || !d.tile) return;
 
         const tileInfo = this.tileInfo && this.tileInfo.tile(d.tile);
         this.drawLayerTile(drawPos, drawSize, tileInfo, d.color, d.direction*PI/2, d.mirror);
@@ -6655,6 +6673,38 @@ class TileLayer extends CanvasLayer
      */
     drawLayerRect(pos, size, color, angle=0)
     { this.drawLayerTile(pos, size, undefined, color, angle); }
+
+    /** Draw a tile onto the layer canvas in world space
+     *  @param {Vector2}  pos
+     *  @param {Vector2}  [size=vec2(1)]
+     *  @param {TileInfo} [tileInfo]
+     *  @param {Color}    [color=WHITE]
+     *  @param {number}   [angle]
+     *  @param {boolean}  [mirror] */
+    drawTile(pos, size=vec2(1), tileInfo, color=new Color, angle=0, mirror=false)
+    {
+        pos = pos.subtract(this.pos).multiply(this.tileInfo.size);
+        size = size.multiply(this.tileInfo.size);
+        pos.y = this.canvas.height - pos.y;
+
+        // draw the tile onto the layer canvas
+        const oldMainCanvasSize = mainCanvasSize;
+        mainCanvasSize = vec2(this.canvas.width, this.canvas.height);
+        const useWebGL = this.hasWebGL();
+        useWebGL && glSetRenderTarget(this.textureInfo.glTexture);
+        const drawContext = useWebGL ? undefined : this.context;
+        drawTile(pos, size, tileInfo, color, angle, mirror, undefined, useWebGL, true, drawContext);
+        useWebGL && glSetRenderTarget();
+        mainCanvasSize = oldMainCanvasSize;
+    }
+
+    /** Draw a rectangle onto the layer canvas in world space
+     *  @param {Vector2} pos
+     *  @param {Vector2} [size=vec2(1)]
+     *  @param {Color}   [color=WHITE]
+     *  @param {number}  [angle] */
+    drawRect(pos, size, color, angle)
+    { this.drawTile(pos, size, undefined, color, angle); }
 
     /** Clear a rectangle in layer space
      *  @param {Vector2} pos - position in pixel coordinates
@@ -6774,8 +6824,10 @@ class TileCollisionLayer extends TileLayer
         const posY = pos.y - this.pos.y;
         const minX = max(posX - size.x/2|0, 0);
         const minY = max(posY - size.y/2|0, 0);
-        const maxX = min(posX + size.x/2, this.size.x);
-        const maxY = min(posY + size.y/2, this.size.y);
+        // ensure at least one cell is visited even when size is 0 and pos
+        // lands exactly on an integer boundary (documented point-test mode)
+        const maxX = min(max(posX + size.x/2, minX + 1), this.size.x);
+        const maxY = min(max(posY + size.y/2, minY + 1), this.size.y);
         const hitPos = new Vector2;
         for (let y = minY; y < maxY; ++y)
         for (let x = minX; x < maxX; ++x)
@@ -7442,6 +7494,10 @@ function glInit(rootElement)
         for (const info of glTextureInfos)
             info.glTexture = undefined;
         glActiveTexture = undefined;
+        // drop any partially-filled batch so the next glFlush doesn't
+        // upload stale glBatchCount against fresh empty buffers on restore
+        glBatchCount = 0;
+        glPolyMode = false;
         pluginList.forEach(plugin=>plugin.glContextLost?.());
     });
     glCanvas.addEventListener('webglcontextrestored', ()=>
@@ -8098,7 +8154,8 @@ function glMakeOutline(points, width, wrap=true)
     const strip = [];
     const n = points.length;
     const e = 1e-6;
-    const miterLimit = width*100;
+    // miter ratio cap (dimensionless, matches SVG/Canvas2D convention)
+    const miterLimit = 10;
     for (let i = 0; i < n; i++)
     {
         // for each vertex, calculate normal based on adjacent edges
@@ -8764,8 +8821,20 @@ class NewgroundsPlugin
 
         // get medals
         const medalsResult = this.call('Medal.getList');
+
+        // bail early if the first call failed (offline / bad session /
+        // server error) so we don't block the main thread on more sync
+        // XHRs that are guaranteed to also fail
+        if (!medalsResult || !medalsResult.result || medalsResult.result.error)
+        {
+            debugMedals && LOG('Newgrounds session unavailable; skipping plugin init');
+            this.medals = [];
+            this.scoreboards = [];
+            return;
+        }
+
         /** @property {Array} - Medals fetched from Newgrounds (empty until session is active) */
-        this.medals = medalsResult?.result?.data?.['medals'] || [];
+        this.medals = medalsResult.result.data?.['medals'] || [];
         debugMedals && LOG(this.medals);
         for (const newgroundsMedal of this.medals)
         {
@@ -8785,7 +8854,7 @@ class NewgroundsPlugin
                     medal.description = medal.description + ` (${ medal.value })`;
             }
         }
-    
+
         // get scoreboards
         const scoreboardResult = this.call('ScoreBoard.getBoards');
         /** @property {Array} - Scoreboards fetched from Newgrounds */
@@ -8973,9 +9042,13 @@ class PostProcessPlugin
         function postProcessRender()
         {
             if (headlessMode || !glEnable) return;
-            
+
             // clear out the buffer
             glFlush();
+
+            // ensure we render to the default framebuffer (in case any earlier
+            // caller this frame left a render target bound)
+            glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
 
             // setup shader program to draw a quad
             glContext.useProgram(postProcess.shader);
@@ -13328,7 +13401,7 @@ const Ease =
      *  @param {number} x
      *  @returns {number}
      *  @memberof TweenSystem */
-    EXPO: (x) => 2 ** (10 * x - 10),
+    EXPO: (x) => x === 0 ? 0 : 2 ** (10 * x - 10),
 
     /** Back ease-in: overshoots backward at the start before snapping forward.
      *  @param {number} x
@@ -13341,6 +13414,8 @@ const Ease =
      *  @returns {number}
      *  @memberof TweenSystem */
     ELASTIC: (x) =>
+        x === 0 ? 0 :
+        x === 1 ? 1 :
         -(2 ** (10 * x - 10)) * sin(((37 - 40 * x) * PI) / 6),
 
     /** Spring-like ease-out: oscillates outward after passing the target.
@@ -13860,11 +13935,13 @@ class PathFinder
                 if (dx !== 0 && dy !== 0)
                 {
                     // Diagonal step: refuse if either cardinal neighbor is
-                    // blocked or has cost. Prevents cutting through corners.
+                    // blocked. Prevents cutting through walls at corners.
+                    // (Costed-but-walkable cardinals do not block — diagonal
+                    // movement around expensive terrain is standard A*.)
                     const card1 = this.getNode(current.pos.x + dx, current.pos.y);
-                    if (!card1 || card1.cost > 0 || !card1.walkable) continue;
+                    if (!card1 || !card1.walkable) continue;
                     const card2 = this.getNode(current.pos.x, current.pos.y + dy);
-                    if (!card2 || card2.cost > 0 || !card2.walkable) continue;
+                    if (!card2 || !card2.walkable) continue;
                     stepCost = PATHFINDER_DIAGONAL_COST;
                 }
 

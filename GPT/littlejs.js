@@ -35,7 +35,7 @@ const engineName = 'LittleJS';
  *  @type {string}
  *  @default
  *  @memberof Engine */
-const engineVersion = '1.18.14';
+const engineVersion = '1.18.15';
 
 /** Frames per second to update
  *  @type {number}
@@ -168,6 +168,9 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
 {
     showEngineVersion && console.log(`${engineName} Engine v${engineVersion}`);
     ASSERT(!mainContext, 'engine already initialized');
+    // runtime guard so release builds (where the assert is stripped) don't
+    // double-register listeners / double-add canvases on a second call
+    if (mainContext) return;
     ASSERT(isArray(imageSources), 'pass in images as array');
 
     // allow passing in empty functions
@@ -195,6 +198,9 @@ async function engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, game
     {
         // update time keeping
         let frameTimeDeltaMS = frameTimeMS - frameTimeLastMS;
+        // skip delta on the very first frame so timeReal doesn't jump
+        // by ~page-load-time when RAF starts handing real timestamps
+        if (!frameTimeLastMS) frameTimeDeltaMS = 0;
         frameTimeLastMS = frameTimeMS;
         if (debug || debugWatermark)
             averageFPS = lerp(averageFPS, 1e3/(frameTimeDeltaMS||1), .05);
@@ -3384,7 +3390,7 @@ class EngineObject
         this.color = color.copy();
         /** @property {Color} - Additive color to apply when rendered */
         this.additiveColor = undefined;
-        /** @property {boolean} - Should the rendered tile flip along the y axis. Affects rendering only — collision, physics, and localToWorld/worldToLocal ignore this flag. */
+        /** @property {boolean} - Should the rendered tile flip along the y axis. Affects rendering and the local→world transform of attached children (a mirrored parent flips its children's localPos.x and localAngle). Does not affect this object's own physics, collision, or localToWorld/worldToLocal. */
         this.mirror = false;
         /** @property {boolean} - Has object been destroyed? */
         this.destroyed = false;
@@ -3626,10 +3632,11 @@ class EngineObject
                     if (isBlockedX)
                     {
                         // try to step over a 1-tile bump (direction follows gravity sign
-                        // so inverted gravity steps down off a ceiling bump instead of up)
+                        // so inverted gravity steps down off a ceiling bump instead of up;
+                        // zero gravity defaults to the normal-gravity step-up direction)
                         const epsilon = 1e-3;
                         const maxMove = .1;
-                        const gravitySign = gravity.y < 0 ? 1 : -1;
+                        const gravitySign = gravity.y > 0 ? -1 : 1;
                         const y = gravitySign > 0 ?
                             floor(oldPos.y-this.size.y/2+1) + this.size.y/2 + epsilon :
                             ceil( oldPos.y+this.size.y/2-1) - this.size.y/2 - epsilon;
@@ -6024,13 +6031,6 @@ function inputUpdate()
                     (gamepadIsDown(15,i)&&1) - (gamepadIsDown(14,i)&&1),
                     (gamepadIsDown(12,i)&&1) - (gamepadIsDown(13,i)&&1));
             }
-            else if (gamepad.axes && gamepad.axes.length >= 2)
-            {
-                // digital style dpad from axes
-                const x = clamp(round(gamepad.axes[0]), -1, 1);
-                const y = clamp(round(gamepad.axes[1]), -1, 1);
-                dpad.set(x, -y);
-            }
 
             // copy dpad to left analog stick when pressed
             if (gamepadDirectionEmulateStick && (dpad.x || dpad.y))
@@ -6486,9 +6486,12 @@ class SoundInstance
             if (fadeTime)
             {
                 // ramp off gain from current volume (not 1, or low-volume
-                // instances would jump back up before fading)
+                // instances would jump back up before fading);
+                // cancel any prior scheduling so stacked stop calls don't
+                // re-anchor partway through a previous fade
                 const startFade = audioContext.currentTime;
                 const endFade = startFade + fadeTime;
+                this.gainNode.gain.cancelScheduledValues(startFade);
                 this.gainNode.gain.setValueAtTime(this.volume, startFade);
                 this.gainNode.gain.linearRampToValueAtTime(0, endFade);
                 this.source.stop(endFade);
@@ -6537,9 +6540,10 @@ class SoundInstance
      */
     getCurrentTime()
     {
-        const deltaTime = mod(audioContext.currentTime - this.startTime, 
-            this.getDuration());
-        return this.isPlaying() ? deltaTime : this.pausedTime;
+        if (!this.isPlaying()) return this.pausedTime;
+        const duration = this.getDuration();
+        // guard mod against 0 duration (rate=0 or sound not loaded)
+        return duration ? mod(audioContext.currentTime - this.startTime, duration) : 0;
     }
 
     /** Get the total duration of this sound
@@ -6651,9 +6655,14 @@ function playSamples(sampleChannels, volume=1, rate=1, pan=0, loop=false, sample
     const pannerNode = new StereoPannerNode(audioContext, {'pan':clamp(pan, -1, 1)});
     source.connect(pannerNode).connect(gainNode);
 
-    // callback when the sound ends
-    if (onended)
-        source.addEventListener('ended', ()=> onended(source));
+    // disconnect nodes when the sound ends so the audio graph doesn't grow
+    // unbounded across many play() calls (source.stop() also fires 'ended')
+    source.addEventListener('ended', ()=>
+    {
+        gainNode.disconnect();
+        pannerNode.disconnect();
+        if (onended) onended(source);
+    });
 
     // play and return sound
     const startOffset = offset * rate;
@@ -9490,8 +9499,20 @@ class NewgroundsPlugin
 
         // get medals
         const medalsResult = this.call('Medal.getList');
+
+        // bail early if the first call failed (offline / bad session /
+        // server error) so we don't block the main thread on more sync
+        // XHRs that are guaranteed to also fail
+        if (!medalsResult || !medalsResult.result || medalsResult.result.error)
+        {
+            debugMedals && LOG('Newgrounds session unavailable; skipping plugin init');
+            this.medals = [];
+            this.scoreboards = [];
+            return;
+        }
+
         /** @property {Array} - Medals fetched from Newgrounds (empty until session is active) */
-        this.medals = medalsResult?.result?.data?.['medals'] || [];
+        this.medals = medalsResult.result.data?.['medals'] || [];
         debugMedals && LOG(this.medals);
         for (const newgroundsMedal of this.medals)
         {
@@ -9511,7 +9532,7 @@ class NewgroundsPlugin
                     medal.description = medal.description + ` (${ medal.value })`;
             }
         }
-    
+
         // get scoreboards
         const scoreboardResult = this.call('ScoreBoard.getBoards');
         /** @property {Array} - Scoreboards fetched from Newgrounds */

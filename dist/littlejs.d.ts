@@ -826,17 +826,17 @@ declare module "littlejsengine" {
      *  @param {number} x
      *  @return {number}
      *  @memberof Math */
-    export const sign: any;
+    export function sign(x: number): number;
     /** Returns hypotenuse of values passed in
      *  @param {...number} values
      *  @return {number}
      *  @memberof Math */
-    export const hypot: any;
+    export function hypot(...values: number[]): number;
     /** Returns log2 of value passed in
      *  @param {number} x
      *  @return {number}
      *  @memberof Math */
-    export const log2: any;
+    export function log2(x: number): number;
     /** Returns sin of value passed in
      *  @param {number} x
      *  @return {number}
@@ -2443,7 +2443,7 @@ declare module "littlejsengine" {
          */
         playNote(semitoneOffset?: number, pos?: Vector2, volume?: number): SoundInstance;
         /** Get how long this sound is in seconds
-         *  @return {number} - How long the sound is in seconds (undefined if loading)
+         *  @return {number} - How long the sound is in seconds (0 if loading)
          */
         getDuration(): number;
         /** Check if sound is loaded, for sounds fetched from a url
@@ -2524,7 +2524,7 @@ declare module "littlejsengine" {
          */
         getCurrentTime(): number;
         /** Get the total duration of this sound
-         *  @return {number} - Total duration in seconds
+         *  @return {number} - Total duration in seconds (0 if loading)
          */
         getDuration(): number;
         /** Get source of this sound instance
@@ -2660,7 +2660,7 @@ declare module "littlejsengine" {
         color: Color;
         /** @property {Color} - Additive color to apply when rendered */
         additiveColor: any;
-        /** @property {boolean} - Should it flip along y axis when rendered */
+        /** @property {boolean} - Should the rendered tile flip along the y axis. Affects rendering and the local→world transform of attached children (a mirrored parent flips its children's localPos.x and localAngle). Does not affect this object's own physics, collision, or localToWorld/worldToLocal. */
         mirror: boolean;
         /** @property {boolean} - Has object been destroyed? */
         destroyed: boolean;
@@ -2917,20 +2917,6 @@ declare module "littlejsengine" {
         *  @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} [context] - Canvas 2D context to draw to
         *  @memberof Draw */
         draw(pos: Vector2, size?: Vector2, color?: Color, angle?: number, mirror?: boolean, additiveColor?: Color, screenSpace?: boolean, context?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void;
-        /** Draw a tile onto the layer canvas in world space
-         *  @param {Vector2}  pos
-         *  @param {Vector2}  [size=vec2(1)]
-         *  @param {TileInfo} [tileInfo]
-         *  @param {Color}    [color=WHITE]
-         *  @param {number}   [angle]
-         *  @param {boolean}  [mirror] */
-        drawTile(pos: Vector2, size?: Vector2, tileInfo?: TileInfo, color?: Color, angle?: number, mirror?: boolean): void;
-        /** Draw a rectangle onto the layer canvas in world space
-         *  @param {Vector2} pos
-         *  @param {Vector2} [size=vec2(1)]
-         *  @param {Color}   [color=WHITE]
-         *  @param {number}  [angle] */
-        drawRect(pos: Vector2, size?: Vector2, color?: Color, angle?: number): void;
         /** Create WebGL texture if necessary and copy layer canvas to it */
         updateWebGL(): void;
         /** Check if this layer is using WebGL
@@ -3001,6 +2987,20 @@ declare module "littlejsengine" {
          *  @param {number} [angle] - Angle to rotate by
          */
         drawLayerRect(pos: Vector2, size: Vector2, color?: Color, angle?: number): void;
+        /** Draw a tile onto the layer canvas in world space
+         *  @param {Vector2}  pos
+         *  @param {Vector2}  [size=vec2(1)]
+         *  @param {TileInfo} [tileInfo]
+         *  @param {Color}    [color=WHITE]
+         *  @param {number}   [angle]
+         *  @param {boolean}  [mirror] */
+        drawTile(pos: Vector2, size?: Vector2, tileInfo?: TileInfo, color?: Color, angle?: number, mirror?: boolean): void;
+        /** Draw a rectangle onto the layer canvas in world space
+         *  @param {Vector2} pos
+         *  @param {Vector2} [size=vec2(1)]
+         *  @param {Color}   [color=WHITE]
+         *  @param {number}  [angle] */
+        drawRect(pos: Vector2, size?: Vector2, color?: Color, angle?: number): void;
         /** Clear a rectangle in layer space
          *  @param {Vector2} pos - position in pixel coordinates
          *  @param {Vector2} size
@@ -3017,8 +3017,8 @@ declare module "littlejsengine" {
         clearData(layerPos: Vector2, redraw?: boolean): void;
         /** Get data at a given position in the array
          *  @param {Vector2} layerPos - Local position in array
-         *  @return {TileLayerData} */
-        getData(layerPos: Vector2): TileLayerData;
+         *  @return {TileLayerData|undefined} */
+        getData(layerPos: Vector2): TileLayerData | undefined;
         /** Called after this layer is redrawn, does nothing by default */
         onRedraw(): void;
         /** @type {[CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D, Vector2, Vector2, number, Color]} */
@@ -3399,9 +3399,7 @@ declare module "littlejsengine" {
         host: string;
         /** @property {string|null} - Newgrounds session id from the URL (null when not logged in) */
         session_id: string;
-        /** @property {Array} - Medals fetched from Newgrounds (empty until session is active) */
         medals: any;
-        /** @property {Array} - Scoreboards fetched from Newgrounds */
         scoreboards: any;
         /** Send message to unlock a medal by id
          * @param {number} id - The medal id */
