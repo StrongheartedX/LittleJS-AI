@@ -41,6 +41,15 @@ const STOP_SPEED   = 0.15;
 const RAPID_STOP_THRESHOLD = 1.0;       // below this world-units/sec we squash velocity each frame to end turns faster
 const RAPID_STOP_FACTOR    = 0.95;      // velocity multiplier applied each frame while in the rapid-stop band
 
+// Visual tuning
+const SHADOW_ALPHA  = .5;              // shared shadow opacity for balls + cue stick (0 = invisible, 1 = solid black)
+const OUTLINE_WIDTH = .025;              // extra radius past the ball edge for the black outline ring (0 = no outline)
+
+// Cue stick dimensions (world units)
+const CUE_LENGTH  = 14;                 // length from leather tip to butt
+const CUE_TIP_HW  = .07;                // shaft half-width at the tip (full width = 2x this)
+const CUE_BUTT_HW = .14;                // shaft half-width at the butt (taper grows from tip to butt)
+
 // Ball physics — adjust these to change the feel
 const BALL_RESTITUTION  = .92;          // bounciness on ball/rail contacts (0 = dead, 1 = perfect bounce)
 const BALL_FRICTION     = .18;          // contact friction; higher = more spin transfer on collisions
@@ -178,27 +187,35 @@ const CUE_FOLLOW_DIST  = BALL_DIAM*.5 - .25;  // tip overshoots into the ball
 // gameRenderPost). Same pose is used by both — see getCueStickPose.
 function drawCueStickShadow(ballPos, dir, tipDist)
 {
-    const back = dir.scale(-1);
-    const tip  = ballPos.add(back.scale(tipDist));
-    const butt = ballPos.add(back.scale(tipDist + 8));
-    drawLine(tip.add(vec2(.12,-.12)), butt.add(vec2(.12,-.12)), .18, rgb(0,0,0,.35));
+    const back   = dir.scale(-1);
+    const offset = vec2(.12, -.12);
+    const tip    = ballPos.add(back.scale(tipDist)).add(offset);
+    const butt   = ballPos.add(back.scale(tipDist + CUE_LENGTH)).add(offset);
+    tapPoly(tip, butt, dir, CUE_TIP_HW, CUE_BUTT_HW, rgb(0, 0, 0, SHADOW_ALPHA));
 }
 
 function drawCueStickBody(ballPos, dir, tipDist)
 {
-    const back  = dir.scale(-1);
-    const tip   = ballPos.add(back.scale(tipDist));
-    const butt  = ballPos.add(back.scale(tipDist + 8));
-    // shaft (light wood)
-    drawLine(tip, butt, .14, rgb(.86,.72,.42));
-    // wrap near butt
-    const wrapA = ballPos.add(back.scale(tipDist + 5.5));
-    const wrapB = ballPos.add(back.scale(tipDist + 7));
-    drawLine(wrapA, wrapB, .18, rgb(.18,.08,.04));
-    // ferrule + leather tip
+    const back = dir.scale(-1);
+    const tip  = ballPos.add(back.scale(tipDist));
+    const butt = ballPos.add(back.scale(tipDist + CUE_LENGTH));
+
+    // tapered shaft (light wood)
+    tapPoly(tip, butt, dir, CUE_TIP_HW, CUE_BUTT_HW, rgb(.86,.72,.42));
+
+    // wrap section near the butt — same width as the shaft at that position
+    // (just a darker color band on the same trapezoid)
+    const wrapT0 = .72, wrapT1 = .93;
+    const wrapA  = ballPos.add(back.scale(tipDist + CUE_LENGTH * wrapT0));
+    const wrapB  = ballPos.add(back.scale(tipDist + CUE_LENGTH * wrapT1));
+    const wrapHW0 = lerp(CUE_TIP_HW, CUE_BUTT_HW, wrapT0);
+    const wrapHW1 = lerp(CUE_TIP_HW, CUE_BUTT_HW, wrapT1);
+    tapPoly(wrapA, wrapB, dir, wrapHW0, wrapHW1, rgb(.18, .08, .04));
+
+    // ferrule + leather tip (at the front)
     const ferB = ballPos.add(back.scale(tipDist + .25));
-    drawLine(tip, ferB, .16, rgb(.95,.95,.90));
-    drawCircle(tip, .14, rgb(.30,.18,.55));
+    drawLine(tip, ferB, CUE_TIP_HW * 2 + .02, rgb(.95,.95,.90));
+    drawCircle(tip, CUE_TIP_HW * 2, rgb(.30,.18,.55));
 }
 
 // Returns the cue stick pose for the current frame, or null if no stick
@@ -224,7 +241,28 @@ function getCueStickPose()
 
 function drawBallShadow(pos)
 {
-    drawCircle(pos.add(vec2(.10,-.12)), BALL_DIAM*1.02, rgb(0,0,0,.35));
+    drawCircle(pos.add(vec2(.10,-.12)), BALL_DIAM*1.02, rgb(0,0,0, SHADOW_ALPHA));
+}
+
+// Black backplate drawn just behind the ball tile so a thin dark ring shows
+// past the ball's pixel edge — reads as an inked outline and separates balls
+// from the felt + each other. Drawn in the pre-pass with the shadows.
+function drawBallOutline(pos)
+{
+    drawCircle(pos, BALL_DIAM + OUTLINE_WIDTH*2, rgb(0,0,0,1));
+}
+
+// Tapered-trapezoid quad. Used for the cue shaft + its shadow so the stick
+// reads as wider at the butt than at the tip.
+function tapPoly(start, end, dir, startHW, endHW, color)
+{
+    const perp = vec2(-dir.y, dir.x);
+    drawPoly([
+        start.add(perp.scale(startHW)),
+        start.subtract(perp.scale(startHW)),
+        end.subtract(perp.scale(endHW)),
+        end.add(perp.scale(endHW)),
+    ], color);
 }
 
 // Paint one ball's flat sprite into a 500×500 tile. Includes everything that
@@ -780,6 +818,13 @@ function gameRender()
     // would stamp their shadows over earlier balls.
     for (const b of balls) drawBallShadow(b.pos);
     if (cueBall) drawBallShadow(cueBall.pos);
+
+    // Black outline backplate — sits just behind each ball tile so a thin
+    // ring of black peeks out around the ball edge. Drawn after shadows so
+    // outlines visually trump any shadow that fell into the outline's footprint.
+    for (const b of balls) drawBallOutline(b.pos);
+    if (cueBall) drawBallOutline(cueBall.pos);
+
     const pose = getCueStickPose();
     if (pose) drawCueStickShadow(cueBall.pos, pose.dir, pose.tipDist);
 }
