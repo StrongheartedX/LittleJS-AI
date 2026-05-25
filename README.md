@@ -59,7 +59,7 @@ The most polished prototypes. Playable games with menus, sound, and a complete l
 - [Missile Command](https://killedbyapixel.github.io/LittleJS-AI/games/missileCommand.html) 🎯
 - [Mini Golf](https://killedbyapixel.github.io/LittleJS-AI/games/miniGolf.html) 🎯 📦
 - [Robotron](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) 🚀 👆 🎮
-- [Pool](https://killedbyapixel.github.io/LittleJS-AI/games/pool.html) 🎯 📦
+- [Pool](https://killedbyapixel.github.io/LittleJS-AI/games/pool.html) 🎯 👆 📦
 - [Space Invaders](https://killedbyapixel.github.io/LittleJS-AI/games/spaceInvaders.html) 🚀 👆 🎮
 - [Pac-Man](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) 👾 👆 🎮
 - [Asteroids](https://killedbyapixel.github.io/LittleJS-AI/games/asteroids.html) 🚀 👆 🎮
