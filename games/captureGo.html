@@ -288,10 +288,34 @@ const captureGoGame = {
     getLegalMoves(state, player)
     {
         const moves = [];
+        const opponent = player === STONE_BLACK ? STONE_WHITE : STONE_BLACK;
         for (let row = 0; row < BOARD_SIZE; row++)
         {
             for (let col = 0; col < BOARD_SIZE; col++)
             {
+                if (state.board[row][col] !== STONE_EMPTY) continue;
+
+                // Fast path: an empty cell with an empty neighbor AND no enemy
+                // neighbor has a liberty, captures nothing, and can't violate
+                // ko. Skip the full simulation for these — they're always legal.
+                let hasEmptyNeighbor = false;
+                let hasEnemyNeighbor = false;
+                for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]])
+                {
+                    const nr = row + dr, nc = col + dc;
+                    if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) continue;
+                    const v = state.board[nr][nc];
+                    if (v === STONE_EMPTY) hasEmptyNeighbor = true;
+                    else if (v === opponent) hasEnemyNeighbor = true;
+                }
+                if (hasEmptyNeighbor && !hasEnemyNeighbor)
+                {
+                    moves.push({row, col});
+                    continue;
+                }
+
+                // Slow path: full simulation for cells touching enemy stones
+                // (capture/ko possible) or fully surrounded (suicide possible).
                 if (isLegalMoveForState(state.board, row, col, player, state.previousBoardHash))
                     moves.push({row, col});
             }
@@ -327,7 +351,17 @@ function strategyForDifficulty(d)
 {
     if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
     if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
-    return (game, state, opts) => alphaBetaAI(game, state, 5, opts); // 'hard' — depth 5
+    // HARD: adaptive depth based on board fill. Branching shrinks as the
+    // board fills, so we can afford deeper search later in the game.
+    return (game, state, opts) =>
+    {
+        let empties = 0;
+        for (let r = 0; r < BOARD_SIZE; r++)
+            for (let c = 0; c < BOARD_SIZE; c++)
+                if (state.board[r][c] === STONE_EMPTY) empties++;
+        const depth = empties > 60 ? 3 : empties > 30 ? 4 : 5;
+        return alphaBetaAI(game, state, depth, opts);
+    };
 }
 
 function findBestAIMove(opts = {})
@@ -696,7 +730,7 @@ async function gameInit()
             {type:'grid', id:'difficultyGrid', columns:3, cells: [
                 {label:'EASY',   title:'Random moves',               onClick: () => setDifficulty('easy')},
                 {label:'MEDIUM', title:'Greedy 1-ply',               onClick: () => setDifficulty('medium')},
-                {label:'HARD',   title:'Alpha-beta search depth 5',  onClick: () => setDifficulty('hard')},
+                {label:'HARD',   title:'Adaptive depth (3-5) by board fill', onClick: () => setDifficulty('hard')},
             ]},
             {type:'separator'},
             {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
