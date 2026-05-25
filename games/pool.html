@@ -28,11 +28,11 @@ const TABLE_SIZE   = vec2(30, 16);      // inner felt
 const RAIL_THICK   = 2.2;               // wood rail outside felt
 const WALL_THICK   = 3;                 // collider thickness (overlaps rail visually)
 const BALL_DIAM    = 1;
-const POCKET_DIAM  = 1.6;
+const RACK_SPACING = 1.01;              // ball-center spacing in the rack as a multiple of BALL_DIAM. 1.0 = touching (Box2D doesn't like this — forces cascade weirdly). Try 1.02–1.08 to taste.
+const POCKET_DIAM  = 1.9;
 const POCKET_INSET = -0.1;              // pocket-center distance inward from felt edge (negative pushes pockets outward toward/past the rail)
 const MAX_HIT      = 12;                // max aim length in world units — stretch this far for full power
 const HIT_IMPULSE  = 5;                 // impulse per unit of aim (max impulse = MAX_HIT * HIT_IMPULSE = 60)
-const BREAK_IMPULSE = 10;               // impulse per unit of aim before the cue has touched any ball (the break shot)
 const MIN_IMPULSE  = 2;                 // floor — clicking at 0% power still gives the cue a soft tap
 const AIM_DEADZONE = BALL_DIAM;         // mouse within this radius of cue ball = 0 power (free direction aiming)
 const WHEEL_STEP   = .08;               // wheel ticks per unit of added power (≈12 ticks across full range)
@@ -78,7 +78,6 @@ let shots = 0;
 let isPlaying = false;
 let won = false;
 let scratchedThisShot = false;
-let breakShot = true;    // true until the cue ball touches any other ball — toggles BREAK_IMPULSE → HIT_IMPULSE
 let aimAngle = 0;        // remembered for cue stick during motion
 let wheelPower = 0;      // wheel-driven power offset added on top of mouse drag (cleared on each shot)
 
@@ -195,11 +194,6 @@ class Ball extends Box2dObject
 
     beginContact(other)
     {
-        // First time the cue ball touches another ball, leave "break mode" so
-        // subsequent shots use the regular HIT_IMPULSE.
-        if (this === cueBall && other instanceof Ball)
-            breakShot = false;
-
         // Pocket sensors are handled by update()/pocketed — no contact sound here.
         if (other instanceof Pocket) return;
 
@@ -360,7 +354,7 @@ function rackBalls()
         [11, 4, 12, 5],
         [6, 13, 7, 14, 15],
     ];
-    const dy = BALL_DIAM * 1.02;
+    const dy = BALL_DIAM * RACK_SPACING;
     const dx = dy * Math.cos(Math.PI/6);
     for (let row = 0; row < rackNumbers.length; row++)
     {
@@ -398,7 +392,6 @@ function newGame()
     shots = 0;
     won = false;
     scratchedThisShot = false;
-    breakShot = true;
     strike = null;
     wheelPower = 0;
 }
@@ -647,7 +640,7 @@ function gameUpdate()
                 // tip just reached the ball — apply impulse now. Lerps from
                 // MIN_IMPULSE (0% power tap) to the full max impulse.
                 strike.hit = true;
-                const impulseMax = MAX_HIT * (breakShot ? BREAK_IMPULSE : HIT_IMPULSE);
+                const impulseMax = MAX_HIT * HIT_IMPULSE;
                 const impulse = lerp(MIN_IMPULSE, impulseMax, strike.power);
                 cueBall.applyImpulse(strike.dir.scale(impulse));
                 shots++;
