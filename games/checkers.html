@@ -46,7 +46,7 @@ let winner = null;
 let redCount = 12;
 let blackCount = 12;
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai'
-let difficulty = 'medium'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let isPlaying = false;
 let selectedCell = null;
 let allPlayerMoves = [];   // all legal moves for currentPlayer
@@ -880,7 +880,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(720, 900));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
-    difficulty = localStorage.getItem('checkers.difficulty') || 'medium';
+    difficulty = localStorage.getItem('checkers.difficulty') || 'hard';
 
     // One callback drives `paused` for every menu (including dialogs).
     setMenuVisibilityCallback(v => paused = v);

@@ -42,7 +42,7 @@ let blackScore = 2;
 let whiteScore = 2;
 let validMoves = [];
 let gameMode = 'pvp'; // 'pvp' | 'ai' | 'aivai' — set on startGame
-let difficulty = 'medium'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
+let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let passCount = 0;
 let moveHistory = [];
 let lastMove = null; // {row, col} for highlighting
@@ -799,7 +799,7 @@ async function gameInit()
     setCanvasFixedSize(vec2(720, 900));
     cameraPos = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
-    difficulty = localStorage.getItem('othello.difficulty') || 'medium';
+    difficulty = localStorage.getItem('othello.difficulty') || 'hard';
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu (including dialogs).
