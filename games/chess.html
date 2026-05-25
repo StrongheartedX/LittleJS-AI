@@ -71,6 +71,7 @@ let aiThinkTimer = 0;
 let aiSearching = false;
 let aiProgress = '';
 let aiGeneration = 0;
+let moveHistory = []; // stack of pre-move states for undo
 const AI_THINK_DELAY = 0.6;
 const AI_VS_AI_DELAY = 0.8;
 
@@ -115,6 +116,7 @@ function initBoard()
     aiGeneration++;
     aiSearching = false;
     aiProgress = '';
+    moveHistory = [];
 }
 
 function isInBounds(r, c) { return r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE; }
@@ -796,6 +798,20 @@ function detectGameEnd()
 function makeMove(move)
 {
     // Applies the move to globals, updates state, plays sounds, detects game end.
+    // Snapshot the pre-move state so undoMove can restore it.
+    moveHistory.push({
+        board: cloneBoard(board),
+        currentPlayer: currentPlayer,
+        castlingRights: {...castlingRights},
+        enPassantTarget: enPassantTarget ? {...enPassantTarget} : null,
+        halfmoveClock: halfmoveClock,
+        fullmoveNumber: fullmoveNumber,
+        positionHistory: positionHistory.slice(),
+        gameOver: gameOver,
+        result: result,
+        winner: winner,
+        lastMove: lastMove ? {from: {...lastMove.from}, to: {...lastMove.to}} : null,
+    });
     const wasCapture = !!move.captured;
     const newState = applyMoveOnState(getCurrentState(), move);
     board = newState.board;
@@ -826,6 +842,39 @@ function makeMove(move)
     if (gameOver && result !== 'checkmate' && gameMode === 'aivai') {
         sfxSelect && sfxSelect.play();
     }
+}
+
+function undoMove()
+{
+    if (moveHistory.length === 0) return false;
+    // In PvAI, undo BOTH the AI's last move AND the player's prior move so
+    // the player gets their position back, not the AI's mid-turn state.
+    const undoCount = (gameMode === 'ai' && moveHistory.length >= 2) ? 2 : 1;
+    for (let i = 0; i < undoCount && moveHistory.length > 0; i++) {
+        const s = moveHistory.pop();
+        board = s.board;
+        currentPlayer = s.currentPlayer;
+        castlingRights = s.castlingRights;
+        enPassantTarget = s.enPassantTarget;
+        halfmoveClock = s.halfmoveClock;
+        fullmoveNumber = s.fullmoveNumber;
+        positionHistory = s.positionHistory;
+        gameOver = s.gameOver;
+        result = s.result;
+        winner = s.winner;
+        lastMove = s.lastMove;
+    }
+    selectedSquare = null;
+    legalMovesForSelected = [];
+    promotingMove = null;
+    // Abort any in-flight AI search so its stale move can't land on the
+    // restored state.
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
+    aiThinkTimer = 0;
+    sfxSelect && sfxSelect.play();
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -955,7 +1004,10 @@ function drawUI()
         drawTextScreen('Press R to restart or ESC to pause', vec2(screenSize.x / 2, screenSize.y / 2 + 60), 22, rgb(0.7,0.7,0.7), 2, BLACK);
     }
 
-    drawTextScreen('R: Restart | ESC: Pause', vec2(screenSize.x / 2, screenSize.y - 30), 18, rgb(0.7, 0.7, 0.7), 2, BLACK);
+    const hintText = moveHistory.length > 0
+        ? 'U: Undo | R: Restart | ESC: Pause'
+        : 'R: Restart | ESC: Pause';
+    drawTextScreen(hintText, vec2(screenSize.x / 2, screenSize.y - 30), 18, rgb(0.7, 0.7, 0.7), 2, BLACK);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1066,7 +1118,7 @@ function quitToTitle()
 
 async function gameInit()
 {
-    setCanvasFixedSize(vec2(1280, 720));
+    setCanvasFixedSize(vec2(600, 720));
     canvasClearColor = new Color().setHex('#0d0d14');
     difficulty = localStorage.getItem('chess.difficulty') || 'hard';
     setSoundVolume(.8);
@@ -1172,6 +1224,7 @@ async function gameInit()
         anchor: 'top-right',
         direction: 'horizontal',
         items: [
+            {type:'button', id:'undo', label:'↶', title:'Undo last move', onClick: () => undoMove()},
             {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', hideOnTouch:true, onClick: toggleFullscreen},
             {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
             {
@@ -1196,6 +1249,10 @@ function gameUpdate()
     if (!isPlaying) return;
 
     if (keyWasPressed('KeyR')) { initBoard(); aiThinkTimer = 0; }
+    if (keyWasPressed('KeyU')) undoMove();
+
+    // Show the undo button only when there's a move to take back.
+    getToolbar('hud')?.getItem('undo')?.setVisible(moveHistory.length > 0);
 
     hoverSquare = worldPosToSquare(mousePos);
 

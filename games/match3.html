@@ -31,9 +31,13 @@ tilesPixelated = false;
 
 const fallTime = .2;
 const cameraOffset = vec2(0, -.5);
+const arenaSize = vec2(12.5, 8); // grid (12x6) + space for score line below
 const backgroundColor = hsl(0, 0, .12);
 const minMatchCount = 3;
 const highScoreKey = 'match3BestScore';
+
+const fitCamera = () => cameraScale =
+    min(mainCanvasSize.x / arenaSize.x, mainCanvasSize.y / arenaSize.y);
 
 // zzfx sound params from the LittleJS examples puzzle — already tuned
 const sound_goodMove = new Sound([.4,.2,250,.04,,.04,,,1,,,,,3]);
@@ -93,13 +97,15 @@ function paintStar(ctx)
 
 function paintHeart(ctx)
 {
-    const cx = 250, cy = 200;
+    // cy=120 centers the shape in the 500x500 region — the bezier extends
+    // from cy-40 (top of lobes) to cy+300 (bottom point), so range [80, 420].
+    const cx = 250, cy = 120, w = 100;
     ctx.beginPath();
-    ctx.moveTo(cx, cy + 40);
-    ctx.bezierCurveTo(cx - 60, cy - 100, cx - 230, cy - 60, cx - 230, cy + 70);
-    ctx.bezierCurveTo(cx - 230, cy + 200, cx - 60, cy + 280, cx, cy + 380);
-    ctx.bezierCurveTo(cx + 60, cy + 280, cx + 230, cy + 200, cx + 230, cy + 70);
-    ctx.bezierCurveTo(cx + 230, cy - 60, cx + 60, cy - 100, cx, cy + 40);
+    ctx.moveTo(cx, cy + w * .4);
+    ctx.bezierCurveTo(cx, cy - w * .4, cx - w * 2, cy - w * .4, cx - w * 2, cy + w * .3);
+    ctx.bezierCurveTo(cx - w * 2, cy + w * 1.1, cx, cy + w * 2.2, cx, cy + w * 3);
+    ctx.bezierCurveTo(cx, cy + w * 2.2, cx + w * 2, cy + w * 1.1, cx + w * 2, cy + w * .3);
+    ctx.bezierCurveTo(cx + w * 2, cy - w * .4, cx, cy - w * .4, cx, cy + w * .4);
     ctx.closePath();
     ctx.fillStyle = '#fff'; ctx.fill();
     ctx.strokeStyle = '#000'; ctx.lineWidth = 28; ctx.stroke();
@@ -188,11 +194,14 @@ async function gameInit()
 
     levelSize = vec2(12, 6);
     cameraPos = levelSize.scale(.5).add(cameraOffset);
-    cameraScale = 150;
+    fitCamera();
     gravity = vec2(0, -.004);
     canvasClearColor = backgroundColor;
 
     bestScore = +(localStorage[highScoreKey] || 0);
+
+    // Populate the board now so the title screen has gems behind it.
+    gameReset();
 
     setSoundVolume(.7);
     setMenuVisibilityCallback(v => paused = v);
@@ -214,7 +223,9 @@ async function gameInit()
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
         ],
-        canReveal: () => !isPlaying,
+        // Show the title immediately instead of waiting for a click. Audio
+        // is still gated by browser policy until the first user interaction.
+        revealOnClick: false,
         onShow: () => getMenu('title').getItem('bestLabel').setLabel('Best: ' + bestScore),
         onPlay: () => { gameReset(); isPlaying = true; },
     });
@@ -262,11 +273,17 @@ async function gameInit()
                         clearSubmenuStack();
                         hideAllMenus();
                         isPlaying = false;
+                        // Reset before showing title so the menu backdrop
+                        // doesn't reveal a half-cleared board mid-cascade.
+                        gameReset();
                         showMenu('title');
                     },
                 })},
         ],
     });
+
+    // No attachClickToReveal — surface the title menu right away.
+    showMenu('title');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -274,11 +291,24 @@ function gameReset()
 {
     engineObjectsDestroy();
 
+    // Fill the board avoiding any starting 3-in-a-row, so the title-screen
+    // backdrop sits still and the first move belongs to the player.
     level = [];
     const pos = vec2();
-    for (pos.x = levelSize.x; pos.x--;)
-    for (pos.y = levelSize.y; pos.y--;)
-        setTile(pos, randInt(tileTypeCount));
+    for (pos.y = 0; pos.y < levelSize.y; ++pos.y)
+    for (pos.x = 0; pos.x < levelSize.x; ++pos.x)
+    {
+        let t;
+        do {
+            t = randInt(tileTypeCount);
+        } while (
+            pos.x >= 2 && getTile(vec2(pos.x-1, pos.y)) === t
+                       && getTile(vec2(pos.x-2, pos.y)) === t
+         || pos.y >= 2 && getTile(vec2(pos.x, pos.y-1)) === t
+                       && getTile(vec2(pos.x, pos.y-2)) === t
+        );
+        setTile(pos, t);
+    }
 
     comboCount = score = 0;
     fallTimer = new Timer;
@@ -394,7 +424,8 @@ function gameUpdatePost() {}
 ///////////////////////////////////////////////////////////////////////////////
 function gameRender()
 {
-    if (!isPlaying) return;
+    // Re-fit every frame so resizing the window keeps the grid in view.
+    fitCamera();
 
     // playfield bg behind the gems
     drawRect(cameraPos.subtract(cameraOffset), levelSize, hsl(0, 0, 0));
