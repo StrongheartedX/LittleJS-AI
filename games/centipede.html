@@ -15,8 +15,20 @@
   <script src="../dist/littlejs.js?1.18.12"></script>
   <script src="../templates/soundGenerator.js"></script>
   <script src="../templates/textureGenerator.js"></script>
+  <script src="../templates/menus.js"></script>
   <script>
   'use strict';
+
+  // engine settings
+  debugWatermark = false;
+  showEngineVersion = false;
+
+  // Touch gamepad: analog stick + 1 face button (fire). Player needs free 2D
+  // movement (not just 4-dir), so analog is the right call.
+  touchGamepadEnable = true;
+  touchGamepadAnalog = true;
+  touchGamepadButtonCount = 2;
+  touchGamepadAlpha = .35;
 
 // SFX
   const sShoot = new SoundGenerator({volume:.35, frequency:900, release:.05, shapeCurve:1.8, slide:-2});
@@ -64,10 +76,13 @@
   let centipedes;         // Array<CentipedeChain>
   let segmentLookup;      // Map<key, {chain, index}>
   let score, lives, level;
+  let bestScore = 0;
   let gameOver, gameWon, winTimer;
   let spider;             // current Spider instance or null
   let spiderSpawnTimer;   // seconds until next spider
   let nextBonusLifeAt;    // score threshold for next free life
+  let isPlaying = false;
+  let gameOverHoldTimer = 0; // seconds before the GAME OVER menu surfaces
 
   // bottom-zone state: once the centipede touches the player area, reinforcement heads start spawning from the top-right
   let bottomReached;
@@ -444,19 +459,27 @@
       }
       update()
       {
-          // movement (keyboard, or mouse-follow when cursor is over the canvas)
+          // movement: keyboard 8-dir, OR analog stick (gamepad/touch), OR mouse-follow
           const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
           const left  = keyIsDown('ArrowLeft')  || keyIsDown('KeyA');
           const up    = keyIsDown('ArrowUp')    || keyIsDown('KeyW');
           const down  = keyIsDown('ArrowDown')  || keyIsDown('KeyS');
 
-          const move = vec2((right?1:0) - (left?1:0), (up?1:0) - (down?1:0));
-          const keyboardActive = move.lengthSquared() > 0;
+          let move = vec2((right?1:0) - (left?1:0), (up?1:0) - (down?1:0));
 
-          if (keyboardActive)
+          // Stick adds in — preserves analog magnitude so a half-pushed stick
+          // moves at half speed.
+          const stick = gamepadStick(0);
+          if (stick.lengthSquared() > .15*.15)
+              move = move.add(stick);
+
+          const movingByKeyOrStick = move.lengthSquared() > .05;
+
+          if (movingByKeyOrStick)
           {
-              // keyboard movement
-              this.pos = this.pos.add(move.normalize().scale(playerSpeed * timeDelta));
+              // Cap the input vector to length 1 so diagonal + stick can't exceed playerSpeed.
+              if (move.lengthSquared() > 1) move = move.normalize();
+              this.pos = this.pos.add(move.scale(playerSpeed * timeDelta));
           }
           else
           {
@@ -479,9 +502,9 @@
           this.pos.x = clamp(this.pos.x, .6, levelSize.x - .6);
           this.pos.y = clamp(this.pos.y, playerMinY + .5, playerMaxY + .5);
 
-          // shooting (hold to keep firing)
+          // shooting (hold to keep firing) — Space, mouse, or A button (0)
           this.cooldown = max(0, this.cooldown - timeDelta);
-          const shooting = keyIsDown('Space') || mouseIsDown(0);
+          const shooting = keyIsDown('Space') || mouseIsDown(0) || gamepadIsDown(0);
           if (!gameOver && !gameWon && shooting && this.cooldown <= 0)
           {
               this.cooldown = .12;
@@ -489,11 +512,10 @@
               sShoot.play(this.pos, 1);
           }
 
-          // restart: R any time, or Enter/Space/Click on game over
-          if (keyWasPressed('KeyR'))
-              resetGame();
-          else if ((gameOver || gameWon) && (keyWasPressed('Enter') || keyWasPressed('Space') || mouseWasPressed(0)))
-              resetGame();
+          // restart hotkey during gameplay only — game-over no longer restarts
+          // on click/Enter/Space; the gameOver menu handles that.
+          if (isPlaying && !gameOver && !gameWon && keyWasPressed('KeyR'))
+              startGame();
       }
 
       render()
@@ -1000,6 +1022,7 @@
       if (lives <= 0)
       {
           gameOver = true;
+          gameOverHoldTimer = 1.5;
           return;
       }
 
@@ -1027,11 +1050,149 @@
       buildSpriteAtlas();
       useAtlasImage('centipede.png');
 
+      try { bestScore = +localStorage.getItem('centipede.best') || 0; } catch(e) { bestScore = 0; }
+
+      setSoundVolume(.8);
+      if (typeof setMenuVisibilityCallback === 'function')
+          setMenuVisibilityCallback(v => paused = v && isPlaying);
+
       resetGame();
+      buildMenus();
+  }
+
+  function startGame()
+  {
+      resetGame();
+      isPlaying = true;
+      getToolbar('hud')?.show();
+  }
+
+  function quitToTitle()
+  {
+      if (typeof clearSubmenuStack === 'function') clearSubmenuStack();
+      if (typeof hideAllMenus === 'function') hideAllMenus();
+      resetGame();
+      isPlaying = false;
+      getToolbar('hud')?.hide();
+      if (typeof showMenu === 'function') showMenu('title');
+  }
+
+  function buildMenus()
+  {
+      if (typeof createMenu !== 'function') return;
+
+      const sndSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+      const sndActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+      setMenuSounds({
+          select:   () => sndSelect.play(),
+          activate: () => sndActivate.play(),
+      });
+
+      createTitleMenu({
+          title: 'CENTIPEDE',
+          subtitle: 'Shoot the centipede',
+          onPlay: startGame,
+          canReveal: () => !isPlaying,
+          itemsBefore: [
+              {type:'label', id:'bestLabel', text:`BEST ${bestScore}`},
+          ],
+          items: [
+              {type:'button', label:'OPTIONS',     onClick: () => pushMenu('options')},
+              {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
+          ],
+          onShow: () => {
+              const m = getMenu('title');
+              if (m) m.getItem('bestLabel')?.setLabel(`BEST ${bestScore}`);
+          },
+      });
+
+      createMenu({
+          id: 'options', title: 'OPTIONS', onHide: popMenu,
+          items: [
+              {type:'slider', id:'volume', label:'VOLUME', value:.8, min:0, max:1,
+                  persist:'centipede.volume',
+                  onChange: v => setSoundVolume(v)},
+              {type:'separator'},
+              {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
+              {type:'separator'},
+              {type:'button', label:'BACK', onClick: () => hideMenu('options')},
+          ],
+      });
+
+      createMenu({
+          id: 'about', title: 'HOW TO PLAY', onHide: popMenu,
+          items: [
+              {type:'text', text:
+                  'Shoot the centipede before it reaches you.\n\n' +
+                  'MOVE with arrow keys, WASD, mouse, or left stick.\n' +
+                  'FIRE with Space, click, or A button (hold to keep firing).\n\n' +
+                  'Head segments are 100, body segments are 10. Shooting a middle ' +
+                  'segment splits the chain and grows a mushroom field. Spiders ' +
+                  'eat mushrooms and are worth bonus points. Stay in the bottom ' +
+                  'zone — don\'t get touched. Esc pauses.'},
+              {type:'separator'},
+              {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+          ],
+      });
+
+      createMenu({
+          id: 'pause', title: 'PAUSED', initialItemId: 'resume',
+          items: [
+              {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
+              {type:'button', id:'restart', label:'RESTART',       onClick: () => { hideMenu('pause'); startGame(); }},
+              {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
+              {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () => {
+                  showConfirmDialog({ message:'Quit to title?', onYes: quitToTitle });
+              }},
+          ],
+      });
+
+      createMenu({
+          id: 'gameOver', title: 'GAME OVER', dismissable: false,
+          onShow: () => {
+              const m = getMenu('gameOver');
+              if (!m) return;
+              m.getItem('finalScore')?.setLabel(`SCORE  ${score}`);
+              m.getItem('bestScore')?.setLabel(`BEST   ${bestScore}`);
+              m.getItem('levelReached')?.setLabel(`LEVEL  ${level}`);
+          },
+          items: [
+              {type:'label', id:'finalScore',   text:'SCORE  0'},
+              {type:'label', id:'bestScore',    text:'BEST   0'},
+              {type:'label', id:'levelReached', text:'LEVEL  0'},
+              {type:'separator'},
+              {type:'button', label:'PLAY AGAIN',    onClick: () => { hideMenu('gameOver'); startGame(); }},
+              {type:'button', label:'QUIT TO TITLE', onClick: quitToTitle},
+          ],
+      });
+
+      createToolbar({
+          id:'hud', anchor:'top-right', direction:'horizontal',
+          items: [
+              {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen, hideOnTouch:true},
+              {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () => {
+                  if (isMenuVisible()) { clearSubmenuStack(); hideAllMenus(); }
+                  else showMenu('pause');
+              }},
+          ],
+      });
+      getToolbar('hud')?.hide();
   }
 
   function gameUpdate()
   {
+      // Pause hotkey: Esc / gamepad Start. Skipped if gameOver menu is up.
+      const endMenuShowing = (typeof getTopMenu === 'function') && getTopMenu()?.id === 'gameOver';
+      if (isPlaying && !endMenuShowing &&
+          (keyWasPressed('Escape') || gamepadWasPressed(9)))
+      {
+          if (typeof playMenuSound === 'function') playMenuSound('activate');
+          if (typeof showMenu === 'function') showMenu('pause');
+          inputClearKey('Escape');
+          inputClearKey(9, 1, false, true, false);
+          return;
+      }
+
       // atlas tools: P saves atlas + prompt, L reloads centipede.png from disk
       if (keyWasPressed('KeyP'))
       {
@@ -1040,6 +1201,24 @@
       }
       if (keyWasPressed('KeyL'))
           useAtlasImage('centipede.png');
+
+      // Attract mode: nothing animates on the title (no centipedes spawned yet),
+      // and the game-over menu surfaces after a brief on-canvas hold.
+      if (!isPlaying) return;
+
+      if (gameOver && !endMenuShowing)
+      {
+          gameOverHoldTimer -= timeDelta;
+          if (gameOverHoldTimer <= 0)
+          {
+              if (score > bestScore)
+              {
+                  bestScore = score;
+                  try { localStorage.setItem('centipede.best', bestScore); } catch(e) {}
+              }
+              if (typeof showMenu === 'function') showMenu('gameOver');
+          }
+      }
 
       // update centipedes and collisions
       if (!gameOver && !gameWon)
@@ -1157,6 +1336,8 @@
 
   function gameRenderPost()
   {
+      if (!isPlaying) return; // title screen — menu owns the display
+
       // HUD
       const left = 18;
       const top = 16;
@@ -1164,8 +1345,9 @@
       drawTextScreen(`Lives ${lives}`, vec2(left, top+26), 22, rgb(1,1,1), 4, rgb(0,0,0), 'left');
       drawTextScreen(`Level ${level}`, vec2(left, top+52), 22, rgb(1,1,1), 4, rgb(0,0,0), 'left');
 
-      if (gameOver)
-          drawTextScreen('GAME OVER\nPress R / Enter / Space / Click', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2), 52, rgb(1,.35,.35), 8, rgb(0,0,0));
+      // Brief on-canvas banner before the gameOver menu surfaces.
+      if (gameOver && gameOverHoldTimer > 0)
+          drawTextScreen('GAME OVER', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2), 52, rgb(1,.35,.35), 8, rgb(0,0,0));
       else if (gameWon)
           drawTextScreen('CLEARED!  Next wave…', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2), 52, rgb(.35,1,.55), 8, rgb(0,0,0));
   }
