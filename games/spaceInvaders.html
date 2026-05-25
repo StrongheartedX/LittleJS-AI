@@ -71,7 +71,7 @@ const sfxShoot    = new SoundGenerator({volume:.22, frequency:520, release:.02, 
 const sfxExplode  = new SoundGenerator({volume:.35, frequency:120, release:.22, noise:.2, shapeCurve:1.6, slide:-.4});
 const sfxHit      = new SoundGenerator({volume:.28, frequency:280, release:.08, shapeCurve:1.2});
 const sfxLoseLife = new SoundGenerator({volume:.40, frequency:180, release:.25, shapeCurve:1.8, slide:-.2});
-const sfxUFO      = new SoundGenerator({volume:.25, frequency:350, release:.2, shapeCurve:.6, slide:.15});
+const sfxUFO      = new SoundGenerator({volume:.22, frequency:350, release:.08, shapeCurve:.6, slide:.15});
 const sfxBonusLife = new SoundGenerator({volume:.45, frequency:440, release:.35, shapeCurve:.5, pitchJump:220, pitchJumpTime:.1});
 const sfxAlienDeath = new SoundGenerator({volume:.32, frequency:380, release:.12, shapeCurve:1.4, slide:-.3, pitchJump:-80, pitchJumpTime:.05});
 // Marching sounds - 4 alternating notes (higher frequency so they're audible)
@@ -98,6 +98,134 @@ function aabbOverlap(a, b)
 function randIntInclusive(a, b)
 {
     return (rand(a, b+1) | 0);
+}
+
+// ------------------------------------------------------------
+// Sprite bitmaps — each '#' is a lit pixel, drawn on a uniform grid
+
+const SPRITE_PIXEL = 0.19; // world units per pixel
+
+const SPRITE_SQUID_A = [
+    '...##...',
+    '..####..',
+    '.######.',
+    '##.##.##',
+    '########',
+    '.#.##.#.',
+    '#.#..#.#',
+    '.#....#.'
+];
+const SPRITE_SQUID_B = [
+    '...##...',
+    '..####..',
+    '.######.',
+    '##.##.##',
+    '########',
+    '..#..#..',
+    '.#.##.#.',
+    '#.#..#.#'
+];
+
+const SPRITE_CRAB_A = [
+    '..#.....#..',
+    '...#...#...',
+    '..#######..',
+    '.##.###.##.',
+    '###########',
+    '#.#######.#',
+    '#.#.....#.#',
+    '...##.##...'
+];
+const SPRITE_CRAB_B = [
+    '..#.....#..',
+    '#..#...#..#',
+    '#.#######.#',
+    '###.###.###',
+    '###########',
+    '.#########.',
+    '..#...#..#.',
+    '.#.#...#.#.'
+];
+
+const SPRITE_OCTOPUS_A = [
+    '....####....',
+    '.##########.',
+    '############',
+    '###.####.###',
+    '############',
+    '..##.##.##..',
+    '.##..##..##.',
+    '##........##'
+];
+const SPRITE_OCTOPUS_B = [
+    '....####....',
+    '.##########.',
+    '############',
+    '###.####.###',
+    '############',
+    '...##..##...',
+    '..##.##.##..',
+    '.##......##.'
+];
+
+const SPRITE_PLAYER = [
+    '......#......',
+    '.....###.....',
+    '.....###.....',
+    '.###########.',
+    '#############',
+    '#############',
+    '#############',
+    '#############'
+];
+
+const SPRITE_UFO = [
+    '....########....',
+    '.##############.',
+    '################',
+    '##.##.##.##.##.#',
+    '################',
+    '.###.######.###.',
+    '..##........##..',
+    '...#..####..#...'
+];
+
+function drawSpriteBitmap(centerPos, bitmap, pixelSize, color)
+{
+    const rows = bitmap.length;
+    const cols = bitmap[0].length;
+    const startX = centerPos.x - (cols - 1) * pixelSize * 0.5;
+    const startY = centerPos.y + (rows - 1) * pixelSize * 0.5;
+    const cellSize = vec2(pixelSize, pixelSize);
+    for (let y = 0; y < rows; y++)
+    {
+        const row = bitmap[y];
+        for (let x = 0; x < cols; x++)
+        {
+            if (row[x] !== '.')
+                drawRect(vec2(startX + x * pixelSize, startY - y * pixelSize), cellSize, color);
+        }
+    }
+}
+
+function drawSpriteBitmapScreen(centerScreenX, centerScreenY, bitmap, pixelSize, color)
+{
+    const rows = bitmap.length;
+    const cols = bitmap[0].length;
+    // Snap to integer pixel grid so cell edges don't anti-alias into stripes
+    const px = Math.round(pixelSize);
+    const startX = Math.round(centerScreenX - cols * px * 0.5);
+    const startY = Math.round(centerScreenY - rows * px * 0.5);
+    mainContext.fillStyle = color.toString();
+    for (let y = 0; y < rows; y++)
+    {
+        const row = bitmap[y];
+        for (let x = 0; x < cols; x++)
+        {
+            if (row[x] !== '.')
+                mainContext.fillRect(startX + x * px, startY + y * px, px, px);
+        }
+    }
 }
 
 function createExplosion(pos, color, count = 10)
@@ -284,15 +412,8 @@ class Player extends RectObject
         // Don't draw if hidden (dead, waiting to respawn)
         if (playerHidden)
             return;
-        
-        // Classic player ship sprite
-        const p = this.pos;
-        const s = .22;
-        
-        drawRect(p.add(vec2(0,.3)), vec2(s,s*2), this.color); // cannon
-        drawRect(p, vec2(s*7,s*3), this.color); // main body
-        drawRect(p.add(vec2(-1.1,-.3)), vec2(s*2,s), this.color); // left wing
-        drawRect(p.add(vec2(1.1,-.3)), vec2(s*2,s), this.color); // right wing
+
+        drawSpriteBitmap(this.pos, SPRITE_PLAYER, SPRITE_PIXEL, this.color);
     }
 }
 
@@ -318,101 +439,20 @@ class Alien extends RectObject
     render()
     {
         const frame = ((invaderAnimTick + this.animOffset) >> 3) & 1;
-        
-        // Draw pixelated alien sprites based on row type
-        if (this.row === 0) {
-            // Top row - squid
-            this.renderSquid(frame);
-        } else if (this.row === 1 || this.row === 2) {
-            // Middle rows - crab
-            this.renderCrab(frame);
-        } else {
-            // Bottom rows - octopus
-            this.renderOctopus(frame);
-        }
+        let bitmap;
+        if (this.row === 0)
+            bitmap = frame === 0 ? SPRITE_SQUID_A : SPRITE_SQUID_B;
+        else if (this.row === 1 || this.row === 2)
+            bitmap = frame === 0 ? SPRITE_CRAB_A : SPRITE_CRAB_B;
+        else
+            bitmap = frame === 0 ? SPRITE_OCTOPUS_A : SPRITE_OCTOPUS_B;
+
+        drawSpriteBitmap(this.pos, bitmap, SPRITE_PIXEL, this.color);
 
         if (this.flash)
         {
             drawRect(this.pos, this.size.add(vec2(.2,.2)), rgb(1,1,1,.55));
             this.flash--;
-        }
-    }
-    
-    renderSquid(frame)
-    {
-        const p = this.pos;
-        const s = .22; // pixel size
-        
-        if (frame === 0) {
-            // Frame 1
-            drawRect(p.add(vec2(0,.6)), vec2(s*3,s), this.color); // top
-            drawRect(p.add(vec2(-.6,.3)), vec2(s,s*3), this.color); // left antenna
-            drawRect(p.add(vec2(.6,.3)), vec2(s,s*3), this.color); // right antenna
-            drawRect(p.add(vec2(0,0)), vec2(s*6,s*4), this.color); // body
-            drawRect(p.add(vec2(-0.8,-.5)), vec2(s,s*2), this.color); // legs
-            drawRect(p.add(vec2(-0.3,-.5)), vec2(s,s*2), this.color);
-            drawRect(p.add(vec2(0.3,-.5)), vec2(s,s*2), this.color);
-            drawRect(p.add(vec2(0.8,-.5)), vec2(s,s*2), this.color);
-        } else {
-            // Frame 2
-            drawRect(p.add(vec2(0,.6)), vec2(s*3,s), this.color);
-            drawRect(p.add(vec2(-.6,.3)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(.6,.3)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(0,0)), vec2(s*6,s*4), this.color);
-            drawRect(p.add(vec2(-0.8,-.4)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(0.8,-.4)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(-0.3,-.6)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(0.3,-.6)), vec2(s*2,s), this.color);
-        }
-    }
-    
-    renderCrab(frame)
-    {
-        const p = this.pos;
-        const s = .22;
-        
-        if (frame === 0) {
-            drawRect(p.add(vec2(-.8,.5)), vec2(s,s*2), this.color); // claws up
-            drawRect(p.add(vec2(.8,.5)), vec2(s,s*2), this.color);
-            drawRect(p.add(vec2(0,.3)), vec2(s*7,s*2), this.color); // top
-            drawRect(p.add(vec2(0,0)), vec2(s*5,s*3), this.color); // body
-            drawRect(p.add(vec2(-0.9,-.3)), vec2(s*2,s), this.color); // legs
-            drawRect(p.add(vec2(-0.4,-.5)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(0.4,-.5)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(0.9,-.3)), vec2(s*2,s), this.color);
-        } else {
-            drawRect(p.add(vec2(-.8,.3)), vec2(s,s*2), this.color);
-            drawRect(p.add(vec2(.8,.3)), vec2(s,s*2), this.color);
-            drawRect(p.add(vec2(0,.3)), vec2(s*7,s*2), this.color);
-            drawRect(p.add(vec2(0,0)), vec2(s*5,s*3), this.color);
-            drawRect(p.add(vec2(-0.6,-.4)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(-0.9,-.5)), vec2(s,s), this.color);
-            drawRect(p.add(vec2(0.6,-.4)), vec2(s*2,s), this.color);
-            drawRect(p.add(vec2(0.9,-.5)), vec2(s,s), this.color);
-        }
-    }
-    
-    renderOctopus(frame)
-    {
-        const p = this.pos;
-        const s = .22;
-        
-        if (frame === 0) {
-            drawRect(p.add(vec2(0,.4)), vec2(s*5,s*3), this.color); // head
-            drawRect(p.add(vec2(-.8,0)), vec2(s,s*3), this.color); // arms
-            drawRect(p.add(vec2(-.3,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(.3,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(.8,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(-0.6,-.4)), vec2(s,s), this.color); // legs bent out
-            drawRect(p.add(vec2(0.6,-.4)), vec2(s,s), this.color);
-        } else {
-            drawRect(p.add(vec2(0,.4)), vec2(s*5,s*3), this.color);
-            drawRect(p.add(vec2(-.8,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(-.3,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(.3,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(.8,0)), vec2(s,s*3), this.color);
-            drawRect(p.add(vec2(-0.4,-.4)), vec2(s,s), this.color); // legs bent in
-            drawRect(p.add(vec2(0.4,-.4)), vec2(s,s), this.color);
         }
     }
 }
@@ -472,9 +512,9 @@ class Bomb extends RectObject
 
 class BarrierBlock extends RectObject
 {
-    constructor(pos)
+    constructor(pos, size)
     {
-        super(pos, vec2(.95,.95), rgb(.95,.25,.25));
+        super(pos, vec2(size, size), rgb(.95,.25,.25));
         this.renderOrder = 8;
     }
 }
@@ -519,28 +559,20 @@ class UFO extends RectObject
     
     render()
     {
-        const p = this.pos;
-        const s = .22;
-        const t = time * 5; // animation timer
-        
-        // Main saucer body - layered for depth
-        drawRect(p.add(vec2(0,.3)), vec2(s*6, s*2), this.color);
-        drawRect(p, vec2(s*12, s*2), this.color);
-        drawRect(p.add(vec2(0,-.2)), vec2(s*8, s*2), rgb(.7,.15,.15));
-        
-        // Flashing lights around the edge
+        const t = time * 5;
+
+        // Saucer body
+        drawSpriteBitmap(this.pos, SPRITE_UFO, SPRITE_PIXEL, this.color);
+
+        // Flashing lights inset along the equator (overdraw single body pixels)
         const lightColors = [rgb(1,1,0), rgb(0,1,1), rgb(1,0,1), rgb(0,1,0)];
+        const lightSize = vec2(SPRITE_PIXEL, SPRITE_PIXEL);
         for (let i = 0; i < 4; i++)
         {
-            const offset = (i - 1.5) * 0.55;
-            const flash = Math.sin(t + i * 1.5) > 0 ? 1 : 0.3;
-            const col = lightColors[i].scale(flash, 1);
-            drawRect(p.add(vec2(offset, -.15)), vec2(s*1.2, s*1.2), col);
+            const offset = (i - 1.5) * SPRITE_PIXEL * 2;
+            const flash = Math.sin(t + i * 1.5) > 0 ? 1 : 0.4;
+            drawRect(this.pos.add(vec2(offset, 0)), lightSize, lightColors[i].scale(flash, 1));
         }
-        
-        // Bottom glow/beam effect
-        const beamAlpha = 0.3 + Math.sin(t * 2) * 0.15;
-        drawRect(p.add(vec2(0,-.4)), vec2(s*4, s), new Color(.2,.8,1,beamAlpha));
     }
 }
 
@@ -563,32 +595,46 @@ function createAliens()
     }
 }
 
+// Shield bitmap — '#' is a block. Read visually top-down; rounded dome on top,
+// arched bottom opening so the player can shoot up through the centre.
+const SHIELD_TEMPLATE = [
+    '.....######.....',
+    '...##########...',
+    '..############..',
+    '.##############.',
+    '################',
+    '################',
+    '################',
+    '################',
+    '####........####',
+    '###..........###'
+];
+const SHIELD_BLOCK = 0.5;
+
 function createBarriers()
 {
     const barrierCount = 4;
     const gap = levelSize.x/(barrierCount+1);
+    const tmplH = SHIELD_TEMPLATE.length;
+    const tmplW = SHIELD_TEMPLATE[0].length;
 
     for (let i=1; i<=barrierCount; i++)
     {
         const cx = gap*i;
         const cy = barrierY;
 
-        // blocky classic shield shape - arch at top
-        const w = 8;
-        const h = 5;
-        for (let y=0; y<h; y++)
-        for (let x=0; x<w; x++)
+        for (let ty=0; ty<tmplH; ty++)
         {
-            // carve arch at the TOP (flipped vertically)
-            const notch = (y===h-1 && (x===0||x===w-1)) ||
-                          (y===h-2 && (x===0||x===w-1)) ||
-                          (y<=1 && (x===3 || x===4) && y===0);
-            if (notch) continue;
-
-            const px = cx + (x - (w-1)/2)*1.0;
-            const py = cy + (y - (h-1)/2)*1.0;
-            const b = new BarrierBlock(vec2(px, py));
-            barriers.push(b);
+            const row = SHIELD_TEMPLATE[ty];
+            for (let x=0; x<tmplW; x++)
+            {
+                if (row[x] !== '#') continue;
+                // Template row 0 is visual top; world Y is up-positive so flip.
+                const y = tmplH - 1 - ty;
+                const px = cx + (x - (tmplW-1)/2) * SHIELD_BLOCK;
+                const py = cy + (y - (tmplH-1)/2) * SHIELD_BLOCK;
+                barriers.push(new BarrierBlock(vec2(px, py), SHIELD_BLOCK * .95));
+            }
         }
     }
 }
@@ -770,14 +816,7 @@ function gameRenderPost()
     for (let i = 0; i < lives - 1 && i < 5; i++)
     {
         const px = 50 + i * 45;
-        const py = livesY;
-        // Draw mini player ships using filled rectangles via canvas
-        const shipColor = rgb(.2,.9,.95);
-        mainContext.fillStyle = shipColor.toString();
-        mainContext.fillRect(px - 2, py - 8, 4, 6); // cannon
-        mainContext.fillRect(px - 12, py - 2, 24, 8); // body
-        mainContext.fillRect(px - 16, py + 2, 6, 4); // left wing
-        mainContext.fillRect(px + 10, py + 2, 6, 4); // right wing
+        drawSpriteBitmapScreen(px, livesY, SPRITE_PLAYER, 3, rgb(.2,.9,.95));
     }
     
     // Level indicator at bottom right (cyan like player)
@@ -826,48 +865,66 @@ function renderTitleScreen()
         ctx.fillRect(sx, sy, 2, 2);
     }
     
-    // Planet ring (back half - drawn before planet)
-    ctx.strokeStyle = '#96c896';
-    ctx.lineWidth = 6;
+    // Planet ring — wide Saturn-style annulus (filled band)
+    const ringCX = w * 0.8, ringCY = h * 0.55;
+    const ringTilt = -0.3;
+    const ringOuterRX = 215, ringOuterRY = 48;
+    const ringInnerRX = 92,  ringInnerRY = 20;
+    // Cassini gap (thin dark stripe roughly 2/3 of the way out)
+    const gapRX = 165, gapRY = 36;
+    // Overlap each half slightly past the major-axis seam to hide the join
+    const ringSeamEps = 0.06;
+
+    // Back half — drawn before planet
+    ctx.fillStyle = '#96c896';
     ctx.beginPath();
-    ctx.ellipse(w * 0.8, h * 0.55, 110, 25, -0.3, PI, PI * 2); // back arc
+    ctx.ellipse(ringCX, ringCY, ringOuterRX, ringOuterRY, ringTilt, PI - ringSeamEps, PI * 2 + ringSeamEps);
+    ctx.ellipse(ringCX, ringCY, ringInnerRX, ringInnerRY, ringTilt, PI * 2 + ringSeamEps, PI - ringSeamEps, true);
+    ctx.closePath();
+    ctx.fill();
+    // Gap stripe on back half
+    ctx.strokeStyle = '#284';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(ringCX, ringCY, gapRX, gapRY, ringTilt, PI - ringSeamEps, PI * 2 + ringSeamEps);
     ctx.stroke();
-    
+
     // Planet in background (right side)
-    const gradient = ctx.createRadialGradient(w * 0.8, h * 0.55, 0, w * 0.8, h * 0.55, 100);
+    const gradient = ctx.createRadialGradient(ringCX, ringCY, 0, ringCX, ringCY, 100);
     gradient.addColorStop(0, '#4a6');
     gradient.addColorStop(0.5, '#284');
     gradient.addColorStop(1, '#051');
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(w * 0.8, h * 0.55, 80, 0, PI * 2);
+    ctx.arc(ringCX, ringCY, 80, 0, PI * 2);
     ctx.fill();
-    
-    // Planet ring (front half - drawn after planet)
-    ctx.strokeStyle = '#96c896';
-    ctx.lineWidth = 6;
+
+    // Front half — drawn after planet
+    ctx.fillStyle = '#96c896';
     ctx.beginPath();
-    ctx.ellipse(w * 0.8, h * 0.55, 110, 25, -0.3, 0, PI); // front arc
+    ctx.ellipse(ringCX, ringCY, ringOuterRX, ringOuterRY, ringTilt, -ringSeamEps, PI + ringSeamEps);
+    ctx.ellipse(ringCX, ringCY, ringInnerRX, ringInnerRY, ringTilt, PI + ringSeamEps, -ringSeamEps, true);
+    ctx.closePath();
+    ctx.fill();
+    // Gap stripe on front half
+    ctx.strokeStyle = '#284';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(ringCX, ringCY, gapRX, gapRY, ringTilt, -ringSeamEps, PI + ringSeamEps);
     ctx.stroke();
     
-    // Player ship in foreground (large, bottom left)
+    // Player ship in foreground (large, bottom left) — same bitmap as in-game
     const shipX = w * 0.22;
     const shipY = h * 0.72;
     const shipBob = Math.sin(t * 2) * 5;
-    
-    ctx.fillStyle = '#3ee';
-    // Cannon
-    ctx.fillRect(shipX - 5, shipY - 50 + shipBob, 10, 30);
-    // Main body
-    ctx.fillRect(shipX - 55, shipY - 20 + shipBob, 110, 35);
-    // Wings
-    ctx.fillRect(shipX - 75, shipY + 5 + shipBob, 28, 14);
-    ctx.fillRect(shipX + 47, shipY + 5 + shipBob, 28, 14);
-    // Engine glow
+    const shipPx = 12; // pixel size — sprite is 13x8 → 156x96 image
+    drawSpriteBitmapScreen(shipX, shipY + shipBob, SPRITE_PLAYER, shipPx, rgb(.2,.9,.95));
+    // Engine glow under the base
     const glowAlpha = 0.5 + Math.sin(t * 8) * 0.3;
     ctx.fillStyle = `rgba(100,200,255,${glowAlpha})`;
-    ctx.fillRect(shipX - 35, shipY + 18 + shipBob, 22, 10);
-    ctx.fillRect(shipX + 13, shipY + 18 + shipBob, 22, 10);
+    const glowY = Math.round(shipY + shipBob + 4 * shipPx + 2);
+    ctx.fillRect(Math.round(shipX - 4 * shipPx), glowY, shipPx * 2, shipPx);
+    ctx.fillRect(Math.round(shipX + 2 * shipPx), glowY, shipPx * 2, shipPx);
     
     // Title text with glow
     const titleY = 90;
@@ -1080,15 +1137,26 @@ function updateCollisions()
 
         if (b.destroyed) continue;
 
-        // vs barriers
+        // vs barriers — swept AABB so a fast bullet hits the FIRST block in its
+        // path this frame instead of skipping past blocks into a hole behind them.
+        const sweptCenter = b.pos.subtract(b.vel.scale(.5));
+        const sweptSize = vec2(b.size.x + abs(b.vel.x), b.size.y + abs(b.vel.y));
+        let firstHit = null;
         for (const br of barriers)
         {
             if (br.destroyed) continue;
-            if (!aabbOverlap(b, br)) continue;
+            if (!isOverlapping(sweptCenter, sweptSize, br.pos, br.size)) continue;
+            // The bullet hits the block closest to its previous position.
+            // Upward bullet (vel.y > 0): lowest y; downward: highest y.
+            if (!firstHit ||
+                (b.vel.y > 0 ? br.pos.y < firstHit.pos.y : br.pos.y > firstHit.pos.y))
+                firstHit = br;
+        }
+        if (firstHit)
+        {
             b.destroy();
-            br.destroy();
-            sfxHit.play(br.pos);
-            break;
+            firstHit.destroy();
+            sfxHit.play(firstHit.pos);
         }
     }
 
@@ -1152,8 +1220,8 @@ function loseLife()
 
 function doRespawn()
 {
-    // Reset UFO timer
-    ufoSpawnTimer = randIntInclusive(300, 600);
+    // Push next UFO out a full 10-20s after death so it doesn't pile right back in
+    ufoSpawnTimer = randIntInclusive(600, 1200);
     
     // Reset all remaining aliens to their original spawn positions
     for (const a of aliens)
