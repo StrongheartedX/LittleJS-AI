@@ -1,6 +1,6 @@
 # 🚂🤖 LittleJS AI
 
-*40+ classic arcade games rebuilt in pure HTML5 — each one a single self-contained file, AI-assisted.*
+*50+ classic arcade games rebuilt in pure HTML5 — each one a single self-contained file, AI-assisted.*
 
 [LittleJS](https://github.com/KilledByAPixel/LittleJS) is a fast, lightweight, and fully open source HTML5 game engine designed for simplicity and performance.
 
@@ -97,6 +97,7 @@ Playable but still need iteration and polish to take them to the next level. Did
 - [Plinko](https://killedbyapixel.github.io/LittleJS-AI/games/plinko.html) 🎯 👆 🎮 📦
 - [Micro Racer](https://killedbyapixel.github.io/LittleJS-AI/games/microRacer.html) 🏎️ 📦
 - [Spy Hunter](https://killedbyapixel.github.io/LittleJS-AI/games/spyhunter.html) 🏎️
+- [Pool](https://killedbyapixel.github.io/LittleJS-AI/games/pool.html) 🎯 📦
 
 ### 🧪 Prototypes & Experiments
 
