@@ -44,7 +44,7 @@ Mix in helper scripts to add features: `menus.js` (DOM menus), `soundGenerator.j
 
 ## 🕹️ Games Made With AI
 
-Playable demos you can fork as starting points for your own games.
+Playable demos you can fork as starting points for your own games. Did you make a game you think should be included? Send a pull request!
 
 **Genre:** 🧩 Puzzle · 👾 Arcade · 🚀 Shooter · 🎯 Aim · ♟️ Board · 🏎️ Racing · 🏃 Platformer · ⚽ Sports · 🗺️ Adventure
 
@@ -67,7 +67,7 @@ The most polished prototypes. Playable games with menus, sound, and a complete l
 
 ### 🕹️ The Arcade
 
-Polished, complete games that didn't quite make the top cut.
+Polished, complete games that didn't quite make the top list.
 
 - [Sokoban](https://killedbyapixel.github.io/LittleJS-AI/games/sokoban.html) 🧩
 - [Minesweeper](https://killedbyapixel.github.io/LittleJS-AI/games/minesweeper.html) 🧩
@@ -86,7 +86,7 @@ Polished, complete games that didn't quite make the top cut.
 
 ### 🚧 Works in Progress
 
-Playable but still need iteration and polish to take them to the next level. Did you make a game you think should be included? Send a pull request!
+Playable but still need iteration and polish to take them to the next level.
 
 - [Skiing](https://killedbyapixel.github.io/LittleJS-AI/games/skiing.html) 🏎️
 - [Mario](https://killedbyapixel.github.io/LittleJS-AI/games/mario.html) 🏃 👆
