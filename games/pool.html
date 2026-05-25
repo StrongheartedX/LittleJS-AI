@@ -998,14 +998,14 @@ function gameRenderPost()
 
     // HUD
     drawTextScreen(`SHOTS  ${shots}`,
-        vec2(mainCanvasSize.x/4, 36),
+        vec2(mainCanvasSize.x/4, 46),
         32, WHITE, 4, rgb(0,0,0,.7));
     if (bestShots)
         drawTextScreen(`BEST  ${bestShots}`,
-            vec2(mainCanvasSize.x/2, 36),
+            vec2(mainCanvasSize.x/2, 46),
             32, rgb(1,.9,.4), 4, rgb(0,0,0,.7));
-    drawTextScreen(`REMAINING  ${balls.length}`,
-        vec2(mainCanvasSize.x*3/4, 36),
+    drawTextScreen(`BALLS  ${balls.length}`,
+        vec2(mainCanvasSize.x*3/4, 46),
         32, WHITE, 4, rgb(0,0,0,.7));
 
     if (scratchedThisShot && allStopped())
