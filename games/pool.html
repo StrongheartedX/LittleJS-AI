@@ -29,8 +29,8 @@ const RAIL_THICK   = 2.2;               // wood rail outside felt
 const WALL_THICK   = 3;                 // collider thickness (overlaps rail visually)
 const BALL_DIAM    = 1;
 const POCKET_DIAM  = 1.6;
-const MAX_HIT      = 6;                 // max aim length in world units
-const HIT_IMPULSE  = 8;                 // impulse scale per unit of aim
+const MAX_HIT      = 12;                // max aim length in world units — stretch this far for full power
+const HIT_IMPULSE  = 5;                 // impulse per unit of aim (max impulse = MAX_HIT * HIT_IMPULSE = 60)
 const STOP_SPEED   = 0.15;
 
 // pool ball colors (index = ball number)
@@ -126,7 +126,7 @@ function drawPocket(pos)
 // Aim-time helpers: the cue tip distance from ball center is a function of
 // power (further back for harder shots). Pulled out so the strike animation
 // can interpolate between this distance and "contact."
-function cueRestDist(power) { return BALL_DIAM*.5 + .05 + power * 2.5; }
+function cueRestDist(power) { return BALL_DIAM*.5 + .05 + power * 3.8; }
 const CUE_CONTACT_DIST = BALL_DIAM*.5;        // tip touches ball surface
 const CUE_FOLLOW_DIST  = BALL_DIAM*.5 - .25;  // tip overshoots into the ball
 
@@ -256,6 +256,10 @@ class Ball extends Box2dObject
             ctx.beginPath();
             ctx.arc(0, 0, .17, 0, Math.PI*2);
             ctx.fill();
+            // drawCanvas2D applies scale(., -size.y) to convert world-y-up to
+            // canvas-y-down. Symmetric shapes don't notice, but glyphs land
+            // upside-down — undo the Y flip locally before drawing the digit.
+            ctx.scale(1, -1);
             ctx.fillStyle = '#000';
             ctx.font = 'bold 0.22px sans-serif';
             ctx.textAlign = 'center';
@@ -532,7 +536,7 @@ function gameUpdate()
     if (canShoot() && mouseWasPressed(0))
     {
         const {dir, power, len} = getAim();
-        if (power > .04 && len > .25)
+        if (len > .1)   // tiny dead-zone so click-on-ball doesn't fire
         {
             strike = {
                 dir, power, len,
