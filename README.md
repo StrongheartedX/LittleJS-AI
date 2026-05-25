@@ -53,14 +53,14 @@ Mix in helper scripts to add features: `menus.js` (DOM menus), `soundGenerator.j
 The most polished prototypes. Playable games with menus, sound, and a complete loop.
 
 - [Tetris](https://killedbyapixel.github.io/LittleJS-AI/games/tetris.html) 🧩 👆 🎮
-- [Frogger](https://killedbyapixel.github.io/LittleJS-AI/games/frogger.html) 👾
+- [Frogger](https://killedbyapixel.github.io/LittleJS-AI/games/frogger.html) 👾 👆 🎮
 - [Missile Command](https://killedbyapixel.github.io/LittleJS-AI/games/missileCommand.html) 🎯
 - [Mini Golf](https://killedbyapixel.github.io/LittleJS-AI/games/miniGolf.html) 🎯 📦
-- [Robotron](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) 🚀 👆
-- [Space Invaders](https://killedbyapixel.github.io/LittleJS-AI/games/spaceInvaders.html) 🚀
-- [Pac-Man](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) 👾
-- [Centipede](https://killedbyapixel.github.io/LittleJS-AI/games/centipede.html) 🚀 👆
-- [Asteroids](https://killedbyapixel.github.io/LittleJS-AI/games/asteroids.html) 🚀
+- [Robotron](https://killedbyapixel.github.io/LittleJS-AI/games/robotron.html) 🚀 👆 🎮
+- [Space Invaders](https://killedbyapixel.github.io/LittleJS-AI/games/spaceInvaders.html) 🚀 👆 🎮
+- [Pac-Man](https://killedbyapixel.github.io/LittleJS-AI/games/pacman.html) 👾 👆 🎮
+- [Centipede](https://killedbyapixel.github.io/LittleJS-AI/games/centipede.html) 🚀 👆 🎮
+- [Asteroids](https://killedbyapixel.github.io/LittleJS-AI/games/asteroids.html) 🚀 👆 🎮
 - [Checkers](https://killedbyapixel.github.io/LittleJS-AI/games/checkers.html) ♟️
 
 ### 🕹️ The Arcade
