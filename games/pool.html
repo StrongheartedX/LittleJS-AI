@@ -43,7 +43,7 @@ const RAPID_STOP_FACTOR    = 0.95;      // velocity multiplier applied each fram
 
 // Visual tuning
 const SHADOW_ALPHA  = .5;              // shared shadow opacity for balls + cue stick (0 = invisible, 1 = solid black)
-const OUTLINE_WIDTH = .025;              // extra radius past the ball edge for the black outline ring (0 = no outline)
+const OUTLINE_WIDTH = .03;              // extra radius past the ball edge for the black outline ring (0 = no outline)
 
 // Cue stick dimensions (world units)
 const CUE_LENGTH  = 14;                 // length from leather tip to butt
@@ -249,7 +249,10 @@ function drawBallShadow(pos)
 // from the felt + each other. Drawn in the pre-pass with the shadows.
 function drawBallOutline(pos)
 {
-    drawCircle(pos, BALL_DIAM + OUTLINE_WIDTH*2, rgb(0,0,0,1));
+    // Render via drawTile (WebGL) tinted black instead of canvas-2D drawCircle.
+    // Any ball tile works since they're all circular — using tile 0 (cue ball)
+    // because its interior is uniformly opaque so the BLACK tint covers it fully.
+    drawTile(pos, vec2(BALL_DIAM + OUTLINE_WIDTH*2), ballTiles[0], BLACK);
 }
 
 // Tapered-trapezoid quad. Used for the cue shaft + its shadow so the stick
