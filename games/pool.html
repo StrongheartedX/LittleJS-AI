@@ -35,8 +35,18 @@ const MIN_IMPULSE  = 2;                 // floor — clicking at 0% power still 
 const AIM_DEADZONE = BALL_DIAM;         // mouse within this radius of cue ball = 0 power (free direction aiming)
 const WHEEL_STEP   = .08;               // wheel ticks per unit of added power (≈12 ticks across full range)
 const STOP_SPEED   = 0.15;
-const RAPID_STOP_THRESHOLD = 1.5;       // below this world-units/sec we squash velocity each frame to end turns faster
-const RAPID_STOP_FACTOR    = 0.90;      // velocity multiplier applied each frame while in the rapid-stop band
+const RAPID_STOP_THRESHOLD = 1.0;       // below this world-units/sec we squash velocity each frame to end turns faster
+const RAPID_STOP_FACTOR    = 0.95;      // velocity multiplier applied each frame while in the rapid-stop band
+
+// Ball physics — adjust these to change the feel
+const BALL_RESTITUTION  = .92;          // bounciness on ball/rail contacts (0 = dead, 1 = perfect bounce)
+const BALL_FRICTION     = .18;          // contact friction; higher = more spin transfer on collisions
+const BALL_LIN_DAMP     = .5;           // linear damping — rolling resistance from the felt
+const BALL_ANG_DAMP     = .3;           // angular damping — how fast spin dies off
+
+// Rail physics — controls how cushions feel separately from the balls
+const RAIL_RESTITUTION  = .85;
+const RAIL_FRICTION     = .15;
 
 // pool ball colors (index = ball number)
 const ballColors = [
@@ -120,9 +130,8 @@ function drawTable()
 
 function drawPocket(pos)
 {
-    // soft outer shadow
-    drawCircle(pos, POCKET_DIAM*2.0, rgb(0,0,0,.25));
-    drawCircle(pos, POCKET_DIAM*1.55, rgb(0,0,0,.55));
+    // soft outer shadow as a single radial gradient (black at center → transparent)
+    drawCircleGradient(pos, POCKET_DIAM*2, rgb(0,0,0,.65), rgb(0,0,0,0));
     // black hole
     drawCircle(pos, POCKET_DIAM*1.10, rgb(0,0,0,1));
     // tiny rim highlight
@@ -171,12 +180,13 @@ class Ball extends Box2dObject
         super(pos, vec2(BALL_DIAM), 0, 0, ballColor(number));
         this.number = number;
 
-        // pool ball physics — bouncy off rails, low rolling damping. Friction
-        // bumped from .04 → .18 so ball-vs-ball / ball-vs-rail contacts actually
-        // transfer angular momentum (visible as spin on the number/stripe).
-        this.addCircle(BALL_DIAM, vec2(), 1, .18, .92);
-        this.setLinearDamping(.5);
-        this.setAngularDamping(.3);    // light so spin lingers a bit after impact
+        // pool ball physics — see the BALL_* constants at the top of the file.
+        // friction transfers angular momentum on contact (spin on number/stripe);
+        // restitution controls how bouncy ball-vs-ball / ball-vs-rail is;
+        // damping controls how quickly motion and spin decay over time.
+        this.addCircle(BALL_DIAM, vec2(), 1, BALL_FRICTION, BALL_RESTITUTION);
+        this.setLinearDamping(BALL_LIN_DAMP);
+        this.setAngularDamping(BALL_ANG_DAMP);
         this.setBullet(true);          // continuous collision so balls don't tunnel through walls at speed
     }
 
@@ -225,10 +235,12 @@ class Ball extends Box2dObject
 
         if (this.number === 0)
         {
-            // cue ball — plain white with fixed-light shading (no spin marker)
+            // cue ball — white body with a radial-gradient highlight in the
+            // upper-left and a soft darker gradient in the lower-right to
+            // suggest a fixed light source from above-left.
             drawCircle(this.pos, BALL_DIAM, rgb(1,1,1));
-            drawCircle(this.pos.add(vec2(-.18,.18)), BALL_DIAM*.40, rgb(1,1,1,.55));
-            drawCircle(this.pos.add(vec2(.20,-.20)), BALL_DIAM*.25, rgb(.75,.75,.78,.5));
+            drawCircleGradient(this.pos.add(vec2(-.2,.2)), BALL_DIAM*.5, rgb(1,1,1,.7),     rgb(1,1,1,0));
+            drawCircleGradient(this.pos.add(vec2(.2,-.2)), BALL_DIAM*.5,  rgb(0,0,0,.3), rgb(0,0,0,0));
             return;
         }
 
@@ -245,7 +257,7 @@ class Ball extends Box2dObject
                 ctx.arc(0, 0, .5, 0, Math.PI*2);
                 ctx.clip();
                 ctx.fillStyle = c.toString();
-                ctx.fillRect(-.5, -.24, 1, .48);
+                ctx.fillRect(-1, -.24, 2, .48);
             });
         }
         else
@@ -273,8 +285,8 @@ class Ball extends Box2dObject
             ctx.fillText(''+this.number, 0, 0);
         });
 
-        // top-left specular highlight (fixed, not rotated)
-        drawCircle(this.pos.add(vec2(-.22,.22)), BALL_DIAM*.18, rgb(1,1,1,.55));
+        // top-left specular highlight as a soft radial gradient (fixed, not rotated)
+        drawCircleGradient(this.pos.add(vec2(-.2,.2)), BALL_DIAM*.5, rgb(1,1,1,.6), rgb(1,1,1,0));
     }
 }
 
@@ -302,11 +314,10 @@ function buildTable()
     railObj.render = () => {};
     const halfX = TABLE_SIZE.x/2 + WALL_THICK/2;
     const halfY = TABLE_SIZE.y/2 + WALL_THICK/2;
-    const restitution = .85, friction = .15;
-    railObj.addBox(vec2(TABLE_SIZE.x + WALL_THICK*2, WALL_THICK), vec2(0,  halfY), 0, 0, friction, restitution);
-    railObj.addBox(vec2(TABLE_SIZE.x + WALL_THICK*2, WALL_THICK), vec2(0, -halfY), 0, 0, friction, restitution);
-    railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2( halfX, 0), 0, 0, friction, restitution);
-    railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2(-halfX, 0), 0, 0, friction, restitution);
+    railObj.addBox(vec2(TABLE_SIZE.x + WALL_THICK*2, WALL_THICK), vec2(0,  halfY), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
+    railObj.addBox(vec2(TABLE_SIZE.x + WALL_THICK*2, WALL_THICK), vec2(0, -halfY), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
+    railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2( halfX, 0), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
+    railObj.addBox(vec2(WALL_THICK, TABLE_SIZE.y),                 vec2(-halfX, 0), 0, 0, RAIL_FRICTION, RAIL_RESTITUTION);
 
     // 6 pockets — 4 corners + 2 side
     const px = TABLE_SIZE.x/2 - .3;
