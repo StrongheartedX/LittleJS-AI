@@ -536,6 +536,41 @@ function clampToFelt(pos)
     );
 }
 
+// Is `pos` a safe spot to drop the cue ball? Buffers a small extra distance
+// off the rails, away from every other ball, and far enough from every pocket
+// that the sensor won't immediately fire.
+function isValidPlacement(pos)
+{
+    // Felt boundary with a small extra gap past the ball radius
+    const railM = BALL_DIAM*.5 + .05;
+    if (Math.abs(pos.x) > TABLE_SIZE.x/2 - railM) return false;
+    if (Math.abs(pos.y) > TABLE_SIZE.y/2 - railM) return false;
+
+    // Pockets — keep enough distance that the sensor radius doesn't overlap
+    const minPocketDist = BALL_DIAM*.5 + POCKET_DIAM*.5 + .1;
+    for (const p of pockets)
+        if (pos.distance(p.pos) < minPocketDist) return false;
+
+    // Other balls — small extra gap past tangent
+    const minBallDist = BALL_DIAM * 1.05;
+    for (const b of balls)
+        if (pos.distance(b.pos) < minBallDist) return false;
+
+    return true;
+}
+
+// Draws the cue-ball ghost while in-hand placement is active. Tinted red
+// when the target spot is invalid so the player can see WHY they can't drop.
+function drawCueBallPreview(pos, valid)
+{
+    drawBallShadow(pos);
+    drawBallOutline(pos);
+    const tint = valid ? WHITE : rgb(1, .35, .35);
+    drawTile(pos, vec2(BALL_DIAM), ballTiles[0], tint);
+    drawCircleGradient(pos.add(vec2(-.2, .2)), BALL_DIAM*.5, rgb(1,1,1,.7), rgb(1,1,1,0));
+    drawCircleGradient(pos.add(vec2( .2,-.2)), BALL_DIAM*.5, rgb(0,0,0,.3), rgb(0,0,0,0));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // aim / shoot
 
@@ -719,30 +754,25 @@ function gameUpdate()
     // Esc / Start opens pause
     if (bindPauseKey({when: () => isPlaying})) return;
 
-    // Respawn cue ball after a scratch once everything has stopped. In hand
-    // spawns at the clamped mouse position so the placement starts where the
-    // player is already looking; otherwise default to the head spot.
-    if (!cueBall && allStopped() && !won)
-    {
-        const spawn = inHand ? clampToFelt(mousePos) : vec2(-TABLE_SIZE.x/4, 0);
-        cueBall = new Ball(spawn, 0);
-    }
+    // Auto-respawn cue ball at the head spot — skipped during ball-in-hand
+    // (placement is committed manually in the inHand block below).
+    if (!cueBall && allStopped() && !won && !inHand)
+        spawnCueBall();
 
-    // Ball-in-hand placement — cue ball follows the mouse, click/release commits.
-    // Returns early so no shot can fire on the same frame as the commit.
-    if (inHand && cueBall)
+    // Ball-in-hand placement — no physics object exists yet, we just preview
+    // a ghost ball at the cursor. Commit (click on mouse / release on touch)
+    // creates the real cue ball, but ONLY if the spot is valid (clear of
+    // rails, other balls, and pockets) and everything else has stopped.
+    if (inHand)
     {
-        // On touch, only follow while the finger is down (otherwise the ball
-        // would stick at the last touch position).
-        const follow = !isTouchDevice || mouseIsDown(0);
-        if (follow)
-        {
-            cueBall.setTransform(clampToFelt(mousePos), 0);
-            cueBall.setLinearVelocity(vec2());
-            cueBall.setAngularVelocity(0);
-        }
+        const targetPos = clampToFelt(mousePos);
+        const valid = isValidPlacement(targetPos);
         const commitInput = isTouchDevice ? mouseWasReleased(0) : mouseWasPressed(0);
-        if (commitInput) inHand = false;
+        if (commitInput && valid && allStopped())
+        {
+            cueBall = new Ball(targetPos, 0);
+            inHand = false;
+        }
         return;
     }
 
@@ -891,6 +921,15 @@ function gameRender()
 
     const pose = getCueStickPose();
     if (pose) drawCueStickShadow(cueBall.pos, pose.dir, pose.tipDist);
+
+    // Ball-in-hand preview ghost — drawn in the pre-pass so shadow/outline
+    // land in the same layer as the real balls do.
+    if (inHand)
+    {
+        const previewPos = clampToFelt(mousePos);
+        const valid = isValidPlacement(previewPos);
+        drawCueBallPreview(previewPos, valid);
+    }
 }
 
 function gameRenderPost()
@@ -946,13 +985,15 @@ function gameRenderPost()
         drawTextScreen('5× SPEED', vec2(mainCanvasSize.x - 130, mainCanvasSize.y - 40),
             32, rgb(1, .9, .4), 4, rgb(0,0,0,.7));
 
-    // Ball-in-hand placement hint
-    if (inHand && cueBall)
+    // Ball-in-hand placement hint — placed below SCRATCH (which lives at y=80
+    // during the same window, since scratchedThisShot stays true through
+    // placement) so the two don't pile on top of each other.
+    if (inHand)
     {
         const tap = isTouchDevice ? 'RELEASE' : 'CLICK';
         drawTextScreen(`PLACE CUE BALL — ${tap} TO SET`,
-            vec2(mainCanvasSize.x/2, 80),
-            34, rgb(.6,.95,1), 5, rgb(0,0,0,.8));
+            vec2(mainCanvasSize.x/2, 140),
+            32, rgb(.6,.95,1), 5, rgb(0,0,0,.8));
     }
 
     // HUD
