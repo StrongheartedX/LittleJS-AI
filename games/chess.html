@@ -37,11 +37,10 @@ const PIECE_KING   = 'K';
 const COLOR_WHITE = 'w';
 const COLOR_BLACK = 'b';
 
-// Unicode glyphs for rendering (filled)
-const PIECE_GLYPHS = {
-    w: { P:'♙', N:'♘', B:'♗', R:'♖', Q:'♕', K:'♔' },
-    b: { P:'♟', N:'♞', B:'♝', R:'♜', Q:'♛', K:'♚' },
-};
+// Use the filled (solid) Unicode glyphs for both colors — the outlined
+// "white" glyphs render thin and inconsistent next to the solid black ones.
+// The fillColor / outlineColor on drawText distinguishes white from black.
+const PIECE_GLYPHS = { P:'♟', N:'♞', B:'♝', R:'♜', Q:'♛', K:'♚' };
 
 // Square colors
 const LIGHT_SQUARE = hsl(.1, .35, .75);
@@ -69,6 +68,9 @@ let isPlaying = false;
 let gameMode = 'pvp';            // 'pvp' | 'ai' | 'aivai' — set on startGame
 let difficulty = 'hard';         // 'easy' | 'medium' | 'hard' — loaded from localStorage in gameInit
 let aiThinkTimer = 0;
+let aiSearching = false;
+let aiProgress = '';
+let aiGeneration = 0;
 const AI_THINK_DELAY = 0.6;
 const AI_VS_AI_DELAY = 0.8;
 
@@ -110,6 +112,9 @@ function initBoard()
     selectedSquare = null;
     legalMovesForSelected = [];
     promotingMove = null;
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
 }
 
 function isInBounds(r, c) { return r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE; }
@@ -695,14 +700,14 @@ const chessGame = {
 
 function strategyForDifficulty(d)
 {
-    if (d === 'easy')   return randomAI;
-    if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 5); // 'hard'
+    if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
+    if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
+    return (game, state, opts) => alphaBetaAI(game, state, 5, opts); // 'hard'
 }
 
-function findBestAIMove()
+function findBestAIMove(opts = {})
 {
-    return strategyForDifficulty(difficulty)(chessGame, getCurrentState());
+    return Promise.resolve(strategyForDifficulty(difficulty)(chessGame, getCurrentState(), opts));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -898,7 +903,7 @@ function drawBoard()
             const p = board[r][c];
             if (!p) continue;
             const pos = getSquareWorldPos(r, c);
-            const glyph = PIECE_GLYPHS[p.color][p.type];
+            const glyph = PIECE_GLYPHS[p.type];
             const fillColor = p.color === COLOR_WHITE ? hsl(0, 0, 0.95) : hsl(0, 0, 0.1);
             const outlineColor = p.color === COLOR_WHITE ? hsl(0, 0, 0.1) : hsl(0, 0, 0.95);
             drawText(glyph, pos, SQUARE_SIZE * 0.95, fillColor, 0.08, outlineColor);
@@ -924,9 +929,15 @@ function drawUI()
     if (!gameOver) {
         let playerText;
         if (gameMode === 'ai') {
-            playerText = currentPlayer === COLOR_WHITE ? "Your Turn (White)" : "AI Thinking...";
+            if (currentPlayer === COLOR_WHITE) playerText = "Your Turn (White)";
+            else playerText = aiProgress || "AI Thinking...";
         } else if (gameMode === 'aivai') {
-            playerText = currentPlayer === COLOR_WHITE ? "AI White Thinking..." : "AI Black Thinking...";
+            if (aiProgress) {
+                const side = currentPlayer === COLOR_WHITE ? "White" : "Black";
+                playerText = `AI ${side} — ${aiProgress.replace('AI Thinking... ', '').replace('AI Thinking...', 'thinking...')}`;
+            } else {
+                playerText = currentPlayer === COLOR_WHITE ? "AI White Thinking..." : "AI Black Thinking...";
+            }
         } else {
             playerText = currentPlayer === COLOR_WHITE ? "White's Turn" : "Black's Turn";
         }
@@ -1041,6 +1052,9 @@ function startGame(mode)
 
 function quitToTitle()
 {
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
     setPlaying(false);
     clearSubmenuStack();
     hideAllMenus();
@@ -1187,15 +1201,24 @@ function gameUpdate()
 
     // AI move — covers 'ai' mode (AI is BLACK) and 'aivai' mode (AI plays both sides)
     const isAITurn = (gameMode === 'ai' && currentPlayer === COLOR_BLACK) || gameMode === 'aivai';
-    if (isAITurn && !gameOver && !promotingMove) {
+    if (isAITurn && !aiSearching && !gameOver && !promotingMove) {
         const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
         if (aiThinkTimer >= delay) {
-            const move = findBestAIMove();
-            if (move) {
-                makeMove(move);
+            aiSearching = true;
+            aiProgress = 'AI Thinking...';
+            const myGen = aiGeneration;
+            findBestAIMove({
+                onProgress: (d, n) => {
+                    if (myGen === aiGeneration) aiProgress = `AI Thinking... ${d}/${n}`;
+                }
+            }).then(move => {
+                if (myGen !== aiGeneration) { aiSearching = false; aiProgress = ''; return; }
+                if (move) makeMove(move);
+                aiSearching = false;
+                aiProgress = '';
                 aiThinkTimer = 0;
-            }
+            });
         }
     }
 

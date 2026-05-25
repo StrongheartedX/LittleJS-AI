@@ -120,6 +120,9 @@ function initBoard()
     movingPiece = null;
 
     updateAllPlayerMoves();
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
 }
 
 function getPieceMoves(row, col)
@@ -608,16 +611,15 @@ const checkersGame = {
 
 function strategyForDifficulty(d)
 {
-    if (d === 'easy')   return randomAI;
-    if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 6); // 'hard' — depth 6
+    if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
+    if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
+    return (game, state, opts) => alphaBetaAI(game, state, 6, opts); // 'hard' — depth 6
 }
 
-function findBestAIMove()
+function findBestAIMove(opts = {})
 {
-    if (allPlayerMoves.length === 0) return null;
-    const strategy = strategyForDifficulty(difficulty);
-    return strategy(checkersGame, getCurrentState());
+    if (allPlayerMoves.length === 0) return Promise.resolve(null);
+    return Promise.resolve(strategyForDifficulty(difficulty)(checkersGame, getCurrentState(), opts));
 }
 
 function setDifficulty(d)
@@ -798,9 +800,19 @@ function drawUI()
     {
         let playerText;
         if (gameMode === 'ai')
-            playerText = currentPlayer === PLAYER_HUMAN ? 'Your Turn' : 'AI Thinking...';
+        {
+            if (currentPlayer === PLAYER_HUMAN) playerText = 'Your Turn';
+            else playerText = aiProgress || 'AI Thinking...';
+        }
         else if (gameMode === 'aivai')
-            playerText = currentPlayer === PLAYER_RED ? 'AI Red Thinking...' : 'AI Black Thinking...';
+        {
+            if (aiProgress) {
+                const side = currentPlayer === PLAYER_RED ? 'Red' : 'Black';
+                playerText = `AI ${side} — ${aiProgress.replace('AI Thinking... ', '').replace('AI Thinking...', 'thinking...')}`;
+            } else {
+                playerText = currentPlayer === PLAYER_RED ? 'AI Red Thinking...' : 'AI Black Thinking...';
+            }
+        }
         else
             playerText = currentPlayer === PLAYER_RED ? "Red's Turn" : "Black's Turn";
         const color = currentPlayer === PLAYER_RED ? rgb(1, 0.4, 0.4) : rgb(0.9, 0.9, 0.9);
@@ -857,6 +869,9 @@ function drawUI()
 // GAME LOOP
 
 let aiThinkTimer = 0;
+let aiSearching = false;
+let aiProgress = '';
+let aiGeneration = 0;
 const AI_THINK_DELAY = 0.5;
 const AI_VS_AI_DELAY = 0.6;
 
@@ -984,6 +999,9 @@ function setPlaying(p)
 
 function quitToTitle()
 {
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
     setPlaying(false);
     clearSubmenuStack();
     hideAllMenus();
@@ -1031,18 +1049,27 @@ function gameUpdate()
 
     // AI turn
     const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
-    if (isAITurn)
+    if (isAITurn && aiSearching) return;
+    if (isAITurn && !aiSearching)
     {
         const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
         if (aiThinkTimer >= delay)
         {
-            const move = findBestAIMove();
-            if (move)
-            {
-                makeMove(move);
+            aiSearching = true;
+            aiProgress = 'AI Thinking...';
+            const myGen = aiGeneration;
+            findBestAIMove({
+                onProgress: (d, n) => {
+                    if (myGen === aiGeneration) aiProgress = `AI Thinking... ${d}/${n}`;
+                }
+            }).then(move => {
+                if (myGen !== aiGeneration) { aiSearching = false; aiProgress = ''; return; }
+                if (move) makeMove(move);
+                aiSearching = false;
+                aiProgress = '';
                 aiThinkTimer = 0;
-            }
+            });
         }
         return;
     }

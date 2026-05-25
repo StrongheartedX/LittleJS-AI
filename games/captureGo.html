@@ -61,6 +61,9 @@ let difficulty = 'hard'; // 'easy' | 'medium' | 'hard' — loaded from localStor
 
 // AI timing
 let aiThinkTimer = 0;
+let aiSearching = false;
+let aiProgress = '';
+let aiGeneration = 0;
 const AI_THINK_DELAY = 0.6;
 const AI_VS_AI_DELAY = 0.6;
 
@@ -94,6 +97,9 @@ function initBoard()
     boardHashBeforeMove = null;
     placingStone  = null;
     hoverIntersection = null;
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
 }
 
 function getOpponent(player)
@@ -319,14 +325,14 @@ const captureGoGame = {
 
 function strategyForDifficulty(d)
 {
-    if (d === 'easy')   return randomAI;
-    if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 5); // 'hard' — depth 5
+    if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
+    if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
+    return (game, state, opts) => alphaBetaAI(game, state, 5, opts); // 'hard' — depth 5
 }
 
-function findBestAIMove()
+function findBestAIMove(opts = {})
 {
-    return strategyForDifficulty(difficulty)(captureGoGame, getCurrentState());
+    return Promise.resolve(strategyForDifficulty(difficulty)(captureGoGame, getCurrentState(), opts));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -532,9 +538,19 @@ function drawUI()
     {
         let turnText;
         if (gameMode === 'ai')
-            turnText = currentPlayer === PLAYER_HUMAN ? "Your Turn" : "AI Thinking...";
+        {
+            if (currentPlayer === PLAYER_HUMAN) turnText = "Your Turn";
+            else turnText = aiProgress || "AI Thinking...";
+        }
         else if (gameMode === 'aivai')
-            turnText = currentPlayer === STONE_BLACK ? "AI Black Thinking..." : "AI White Thinking...";
+        {
+            if (aiProgress) {
+                const side = currentPlayer === STONE_BLACK ? "Black" : "White";
+                turnText = `AI ${side} — ${aiProgress.replace('AI Thinking... ', '').replace('AI Thinking...', 'thinking...')}`;
+            } else {
+                turnText = currentPlayer === STONE_BLACK ? "AI Black Thinking..." : "AI White Thinking...";
+            }
+        }
         else
             turnText = currentPlayer === STONE_BLACK ? "Black's Turn" : "White's Turn";
         const turnColor = currentPlayer === STONE_BLACK ? rgb(0.85, 0.85, 0.85) : rgb(1, 1, 1);
@@ -618,6 +634,9 @@ function refreshDifficultyUI()
 
 function quitToTitle()
 {
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
     setPlaying(false);
     clearSubmenuStack();
     hideAllMenus();
@@ -764,18 +783,26 @@ function gameUpdate()
 
     // AI move — covers 'ai' mode (AI is white) and 'aivai' mode (AI plays both sides).
     const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
-    if (isAITurn)
+    if (isAITurn && !aiSearching)
     {
         const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
         if (aiThinkTimer >= delay)
         {
-            const move = findBestAIMove();
-            if (move)
-            {
-                makeMove(move.row, move.col);
+            aiSearching = true;
+            aiProgress = 'AI Thinking...';
+            const myGen = aiGeneration;
+            findBestAIMove({
+                onProgress: (d, n) => {
+                    if (myGen === aiGeneration) aiProgress = `AI Thinking... ${d}/${n}`;
+                }
+            }).then(move => {
+                if (myGen !== aiGeneration) { aiSearching = false; aiProgress = ''; return; }
+                if (move) makeMove(move.row, move.col);
+                aiSearching = false;
+                aiProgress = '';
                 aiThinkTimer = 0;
-            }
+            });
         }
     }
 

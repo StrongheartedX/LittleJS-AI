@@ -77,6 +77,9 @@ function initBoard()
     winningCells = [];
     moveHistory = [];
     droppingDisc = null;
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
 }
 
 function getOpponent(player)
@@ -376,17 +379,16 @@ const connect4Game = {
 
 function strategyForDifficulty(d)
 {
-    if (d === 'easy')   return randomAI;
-    if (d === 'medium') return greedyAI;
-    return (game, state) => alphaBetaAI(game, state, 9); // 'hard' (depth 9 with ID + TT)
+    if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
+    if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
+    return (game, state, opts) => alphaBetaAI(game, state, 9, opts); // 'hard' (depth 9 with ID + TT)
 }
 
-function findBestAIMove()
+function findBestAIMove(opts = {})
 {
     const validCols = getValidColumns();
-    if (validCols.length === 0) return -1;
-    const move = strategyForDifficulty(difficulty)(connect4Game, getCurrentState());
-    return move ? move.col : -1;
+    if (validCols.length === 0) return Promise.resolve(null);
+    return Promise.resolve(strategyForDifficulty(difficulty)(connect4Game, getCurrentState(), opts));
 }
 
 function setDifficulty(d)
@@ -536,9 +538,19 @@ function drawUI()
     {
         let playerText;
         if (gameMode === 'ai')
-            playerText = currentPlayer === PLAYER_HUMAN ? "Your Turn (Red)" : "AI Thinking...";
+        {
+            if (currentPlayer === PLAYER_HUMAN) playerText = "Your Turn (Red)";
+            else playerText = aiProgress || "AI Thinking...";
+        }
         else if (gameMode === 'aivai')
-            playerText = currentPlayer === DISC_RED ? "AI Red Thinking..." : "AI Yellow Thinking...";
+        {
+            if (aiProgress) {
+                const side = currentPlayer === DISC_RED ? "Red" : "Yellow";
+                playerText = `AI ${side} — ${aiProgress.replace('AI Thinking... ', '').replace('AI Thinking...', 'thinking...')}`;
+            } else {
+                playerText = currentPlayer === DISC_RED ? "AI Red Thinking..." : "AI Yellow Thinking...";
+            }
+        }
         else
             playerText = currentPlayer === DISC_RED ? "Red's Turn" : "Yellow's Turn";
 
@@ -599,6 +611,9 @@ function drawUI()
 // GAME LOOP
 
 let aiThinkTimer = 0;
+let aiSearching = false;
+let aiProgress = '';
+let aiGeneration = 0;
 const AI_THINK_DELAY = 0.6;
 const AI_VS_AI_DELAY = 0.5;
 
@@ -722,6 +737,9 @@ function setPlaying(p)
 
 function quitToTitle()
 {
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
     setPlaying(false);
     clearSubmenuStack();
     hideAllMenus();
@@ -774,18 +792,26 @@ function gameUpdate()
 
     // AI turn — covers both 'ai' mode (AI is yellow only) and 'aivai' mode (AI plays both sides).
     const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
-    if (isAITurn && !droppingDisc)
+    if (isAITurn && !aiSearching && !droppingDisc)
     {
         const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
         if (aiThinkTimer >= delay)
         {
-            const col = findBestAIMove();
-            if (col >= 0)
-            {
-                makeMove(col, currentPlayer);
+            aiSearching = true;
+            aiProgress = 'AI Thinking...';
+            const myGen = aiGeneration;
+            findBestAIMove({
+                onProgress: (d, n) => {
+                    if (myGen === aiGeneration) aiProgress = `AI Thinking... ${d}/${n}`;
+                }
+            }).then(move => {
+                if (myGen !== aiGeneration) { aiSearching = false; aiProgress = ''; return; }
+                if (move && move.col >= 0) makeMove(move.col, currentPlayer);
+                aiSearching = false;
+                aiProgress = '';
                 aiThinkTimer = 0;
-            }
+            });
         }
     }
 

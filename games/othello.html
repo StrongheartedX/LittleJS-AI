@@ -90,8 +90,11 @@ function initBoard()
     moveHistory = [];
     lastMove = null;
     placingDisc = null;
-    
+
     updateValidMoves();
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
 }
 
 function getOpponent(player)
@@ -356,9 +359,9 @@ const othelloGame = {
 
 function strategyForDifficulty(d)
 {
-    if (d === 'easy')   return randomAI;
-    if (d === 'medium') return greedyAI;
-    return (game, state) =>
+    if (d === 'easy')   return (game, state, opts) => randomAI(game, state);
+    if (d === 'medium') return (game, state, opts) => greedyAI(game, state);
+    return (game, state, opts) =>
     {
         // Count empty squares — switch to perfect endgame search when ≤10 remain.
         // Each move fills one cell, so depth = empties searches to game end.
@@ -367,7 +370,7 @@ function strategyForDifficulty(d)
             for (let c = 0; c < BOARD_SIZE; c++)
                 if (state.board[r][c] === DISC_EMPTY) empties++;
         const depth = empties <= 10 ? empties : 6;
-        return alphaBetaAI(game, state, depth);
+        return alphaBetaAI(game, state, depth, opts);
     };
 }
 
@@ -533,11 +536,10 @@ function endGame()
 ///////////////////////////////////////////////////////////////////////////////
 // AI
 
-function findBestAIMove()
+function findBestAIMove(opts = {})
 {
-    if (validMoves.length === 0) return null;
-    const strategy = strategyForDifficulty(difficulty);
-    return strategy(othelloGame, getCurrentState());
+    if (validMoves.length === 0) return Promise.resolve(null);
+    return Promise.resolve(strategyForDifficulty(difficulty)(othelloGame, getCurrentState(), opts));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -714,9 +716,19 @@ function drawUI()
     {
         let playerText;
         if (gameMode === 'ai')
-            playerText = currentPlayer === DISC_BLACK ? "Your Turn" : "AI Thinking...";
+        {
+            if (currentPlayer === DISC_BLACK) playerText = "Your Turn";
+            else playerText = aiProgress || "AI Thinking...";
+        }
         else if (gameMode === 'aivai')
-            playerText = currentPlayer === DISC_BLACK ? "AI Black Thinking..." : "AI White Thinking...";
+        {
+            if (aiProgress) {
+                const side = currentPlayer === DISC_BLACK ? "Black" : "White";
+                playerText = `AI ${side} — ${aiProgress.replace('AI Thinking... ', '').replace('AI Thinking...', 'thinking...')}`;
+            } else {
+                playerText = currentPlayer === DISC_BLACK ? "AI Black Thinking..." : "AI White Thinking...";
+            }
+        }
         else
             playerText = currentPlayer === DISC_BLACK ? "Black's Turn" : "White's Turn";
 
@@ -776,6 +788,9 @@ function drawUI()
 // GAME LOOP
 
 let aiThinkTimer = 0;
+let aiSearching = false;
+let aiProgress = '';
+let aiGeneration = 0;
 const AI_THINK_DELAY = 0.8;
 const AI_VS_AI_DELAY = 0.5;
 
@@ -923,6 +938,9 @@ function setPlaying(p)
 
 function quitToTitle()
 {
+    aiGeneration++;
+    aiSearching = false;
+    aiProgress = '';
     setPlaying(false);
     clearSubmenuStack();
     hideAllMenus();
@@ -980,18 +998,26 @@ function gameUpdate()
     
     // AI move — covers both 'ai' mode (AI is white only) and 'aivai' mode (AI plays both sides).
     const isAITurn = (gameMode === 'ai' && currentPlayer === PLAYER_AI) || gameMode === 'aivai';
-    if (isAITurn && flippingDiscs.length === 0)
+    if (isAITurn && !aiSearching && flippingDiscs.length === 0)
     {
         const delay = gameMode === 'aivai' ? AI_VS_AI_DELAY : AI_THINK_DELAY;
         aiThinkTimer += timeDelta;
         if (aiThinkTimer >= delay)
         {
-            const move = findBestAIMove();
-            if (move)
-            {
-                makeMove(move.row, move.col, currentPlayer);
+            aiSearching = true;
+            aiProgress = 'AI Thinking...';
+            const myGen = aiGeneration;
+            findBestAIMove({
+                onProgress: (d, n) => {
+                    if (myGen === aiGeneration) aiProgress = `AI Thinking... ${d}/${n}`;
+                }
+            }).then(move => {
+                if (myGen !== aiGeneration) { aiSearching = false; aiProgress = ''; return; }
+                if (move) makeMove(move.row, move.col, currentPlayer);
+                aiSearching = false;
+                aiProgress = '';
                 aiThinkTimer = 0;
-            }
+            });
         }
     }
 
