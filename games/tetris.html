@@ -4,6 +4,7 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.12"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
 
@@ -11,7 +12,7 @@
 debugWatermark = false;
 showEngineVersion = false;
 paused = false;
-setDebugKey('Backquote'); // Use tilde key instead of Escape for debug
+// (menus.js auto-moves the debug-overlay key off Escape to ` on first createMenu)
 
 gravity = vec2(0, 0);
 cameraPos = vec2(0, 0);
@@ -130,11 +131,9 @@ const KICKS = [vec2(0,0), vec2(-1,0), vec2(1,0), vec2(0,1), vec2(-2,0), vec2(2,0
 
 let gameState = 'menu'; // 'menu' or 'playing'
 let gameMode = 'vs';    // 'single' or 'vs'
+let bestScore = 0;      // single-player high score (persisted)
 
-// Menu UI elements (title drawn manually for animation)
-let btnSinglePlayer, btnVsAI, btnAiVsAi, menuInstructions;
-
-// Menu background animation
+// Menu background animation (canvas-drawn, behind the DOM menu panel)
 let menuBgPieces = [];
 let menuSpawnTimer = 0;
 const MENU_SPAWN_RATE = 0.4; // seconds between spawns
@@ -1382,17 +1381,10 @@ function humanUpdate(p, dt)
 
 async function gameInit()
 {
-    setCanvasFixedSize(vec2(1440, 1080));
-
-    // Enable touch gamepad for mobile devices
+    // Enable touch gamepad for mobile devices (8-way dpad + 4 face buttons)
     setTouchGamepadEnable(true);
-    setTouchGamepadAnalog(false);  // Use 8-way dpad instead of analog
-    setTouchGamepadButtonCount(4); // 4 buttons: rotate CW, rotate CCW, hold, hard drop
-
-    // Initialize UI system
-    new UISystemPlugin();
-    uiSystem.defaultCornerRadius = 8;
-    uiSystem.defaultLineWidth = 3;
+    setTouchGamepadAnalog(false);
+    setTouchGamepadButtonCount(4);
 
     // sounds
     sMove   = new SoundGenerator({frequency:330, release:.01, volume:.35});
@@ -1405,94 +1397,233 @@ async function gameInit()
     sGarbage = new SoundGenerator({frequency:90,  release:.14, noise:.1, volume:.45, slide:.15});
     sSelect = new SoundGenerator({frequency:440, release:.08, volume:.3});
 
-    // Create menu UI
-    createMenuUI();
+    try { bestScore = +localStorage.getItem('tetris.best') || 0; } catch(e) { bestScore = 0; }
 
+    setSoundVolume(.8);
+    if (typeof setMenuVisibilityCallback === 'function')
+        setMenuVisibilityCallback(v => paused = v && gameState === 'playing');
+
+    applyCanvasSize();
+    window.addEventListener('resize', applyCanvasSize);
+
+    buildMenus();
+    spawnMenuBackground();
     gameState = 'menu';
-    
-    // Warm up menu background
-    showMenuUI(true);
 }
 
-function createMenuUI()
+// True when the displayed viewport is taller than it is wide. Updates with
+// rotation because we recompute from window.innerWidth/Height each call.
+function isPortrait()
 {
-    // UI positions are relative to canvas center (anchor system)
-    const cx = 0;
-    const cy = 0;
-
-    // Title is drawn manually in renderMenuTitle() for animation effect
-
-    // Single Player button
-    btnSinglePlayer = new UIButton(vec2(cx, cy), vec2(560, 120), 'SINGLE PLAYER');
-    btnSinglePlayer.color = hsl(.55, .7, .35);
-    btnSinglePlayer.hoverColor = hsl(.55, .8, .5);
-    btnSinglePlayer.textColor = WHITE;
-    btnSinglePlayer.textLineColor = BLACK;
-    btnSinglePlayer.textLineWidth = 6;
-    btnSinglePlayer.soundClick = sSelect;
-    btnSinglePlayer.navigationIndex = 1;
-    btnSinglePlayer.onClick = () => startGame('single');
-
-    // VS AI button
-    btnVsAI = new UIButton(vec2(cx, cy + 140), vec2(560, 100), 'VS AI');
-    btnVsAI.color = hsl(.02, .7, .4);
-    btnVsAI.hoverColor = hsl(.02, .8, .55);
-    btnVsAI.textColor = WHITE;
-    btnVsAI.textLineColor = BLACK;
-    btnVsAI.textLineWidth = 6;
-    btnVsAI.soundClick = sSelect;
-    btnVsAI.navigationIndex = 2;
-    btnVsAI.onClick = () => startGame('vs');
-
-    // AI vs AI button
-    btnAiVsAi = new UIButton(vec2(cx, cy + 270), vec2(560, 100), 'AI VS AI');
-    btnAiVsAi.color = hsl(.75, .7, .4);
-    btnAiVsAi.hoverColor = hsl(.75, .8, .55);
-    btnAiVsAi.textColor = WHITE;
-    btnAiVsAi.textLineColor = BLACK;
-    btnAiVsAi.textLineWidth = 6;
-    btnAiVsAi.soundClick = sSelect;
-    btnAiVsAi.navigationIndex = 3;
-    btnAiVsAi.onClick = () => startGame('aivs');
-
-    // Instructions
-    menuInstructions = new UIText(vec2(cx, cy + 400), vec2(1000, 80), 'Made by LittleJS AI');
-    menuInstructions.textColor = WHITE;
-    menuInstructions.textLineWidth = 0;
+    return window.innerWidth < window.innerHeight;
 }
 
-function showMenuUI(visible)
+// Choose canvas internal resolution based on game state + orientation.
+// Single-player in portrait gets a tall narrow board; everything else
+// (menu, VS modes, single-player in landscape) uses the wide 1440x1080.
+function applyCanvasSize()
 {
-    btnSinglePlayer.visible = visible;
-    btnVsAI.visible = visible;
-    btnAiVsAi.visible = visible;
-    menuInstructions.visible = visible;
-    
-    // Reset and warm up background pieces when showing menu
-    if (visible)
+    const singlePortrait = gameState === 'playing' && gameMode === 'single' && isPortrait();
+    if (singlePortrait)
     {
-
-        // VS modes use wide canvas for two boards
-        setCanvasFixedSize(vec2(1440, 1080));
-        cameraPos = vec2();
-
-        menuBgPieces = [];
-        // Spawn initial pieces scattered across the screen
-        for (let i = 0; i < 15; i++)
-        {
-            const type = randInt(PIECES.length);
-            const rot = randInt(4);
-            menuBgPieces.push({
-                type,
-                rot,
-                x: frand(-12, 12),
-                y: frand(-14, 14),
-                fallSpeed: MENU_FALL_SPEED + frand(-0.5, 1),
-                alpha: frand(0.15, 0.35),
-                scale: frand(0.7, 1.1),
-            });
-        }
+        setCanvasFixedSize(vec2(720, 1080));
+        cameraPos = vec2(-2, -2);
     }
+    else
+    {
+        setCanvasFixedSize(vec2(1440, 1080));
+        cameraPos = vec2(0, 0);
+    }
+}
+
+function spawnMenuBackground()
+{
+    menuBgPieces = [];
+    for (let i = 0; i < 15; i++)
+    {
+        const type = randInt(PIECES.length);
+        const rot = randInt(4);
+        menuBgPieces.push({
+            type, rot,
+            x: frand(-12, 12),
+            y: frand(-14, 14),
+            fallSpeed: MENU_FALL_SPEED + frand(-0.5, 1),
+            alpha: frand(0.15, 0.35),
+            scale: frand(0.7, 1.1),
+        });
+    }
+}
+
+function buildMenus()
+{
+    if (typeof createMenu !== 'function') return;
+
+    const sndSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sndActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sndSelect.play(),
+        activate: () => sndActivate.play(),
+    });
+
+    // Title — canvas draws the animated TETRIS word, so we suppress the DOM title.
+    createTitleMenu({
+        title: '',
+        subtitle: '',
+        playLabel: 'SINGLE PLAYER',
+        onPlay: () => startGame('single'),
+        canReveal: () => gameState === 'menu',
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text:`BEST ${bestScore}`},
+        ],
+        items: [
+            {type:'button', label:'VS AI',       onClick: () => startGame('vs')},
+            {type:'button', label:'AI VS AI',    onClick: () => startGame('aivs')},
+            {type:'button', label:'OPTIONS',     onClick: () => pushMenu('options')},
+            {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
+        ],
+        onShow: () =>
+        {
+            const m = getMenu('title');
+            if (m) m.getItem('bestLabel')?.setLabel(`BEST ${bestScore}`);
+        },
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider', id:'volume', label:'VOLUME', value:.8, min:0, max:1,
+                persist:'tetris.volume',
+                onChange: v => setSoundVolume(v)},
+            {type:'separator'},
+            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'HOW TO PLAY',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:
+                'Stack tetrominoes — clear lines, survive.\n\n' +
+                'MOVE with ←/→ or A/D (or D-pad).\n' +
+                'ROTATE with ↑/X (CW) or Z (CCW), or B/Y buttons.\n' +
+                'SOFT DROP with ↓/S; HARD DROP with Space (or A button).\n' +
+                'HOLD with C or Shift (or X button).\n' +
+                'R restarts, Esc pauses.\n\n' +
+                'VS mode: clearing 2+ lines sends garbage to the AI. ' +
+                'Topping out is game over.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
+            {type:'button', id:'restart', label:'RESTART',       onClick: () =>
+            {
+                hideMenu('pause');
+                doRestart();
+            }},
+            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
+            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
+            {
+                showConfirmDialog({
+                    message:'Quit to title?',
+                    onYes: quitToTitle,
+                });
+            }},
+        ],
+    });
+
+    createMenu({
+        id: 'gameOver',
+        title: 'GAME OVER',
+        dismissable: false,
+        onShow: () =>
+        {
+            const m = getMenu('gameOver');
+            if (!m) return;
+            const banner = gameOverBannerText();
+            m.getItem('result')?.setLabel(banner);
+            // Score line is only meaningful in single-player.
+            const showScore = gameMode === 'single';
+            m.getItem('finalScore')?.setVisible(showScore);
+            m.getItem('bestScore')?.setVisible(showScore);
+            if (showScore)
+            {
+                m.getItem('finalScore')?.setLabel(`SCORE  ${players[0].score}`);
+                m.getItem('bestScore')?.setLabel(`BEST   ${bestScore}`);
+            }
+        },
+        items: [
+            {type:'label', id:'result',     text:'GAME OVER'},
+            {type:'label', id:'finalScore', text:'SCORE  0'},
+            {type:'label', id:'bestScore',  text:'BEST   0'},
+            {type:'separator'},
+            {type:'button', label:'PLAY AGAIN', onClick: () =>
+            {
+                hideMenu('gameOver');
+                doRestart();
+            }},
+            {type:'button', label:'QUIT TO TITLE', onClick: quitToTitle},
+        ],
+    });
+
+    createToolbar({
+        id:'hud',
+        anchor:'top-right',
+        direction:'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen, hideOnTouch:true},
+            {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
+            {
+                if (isMenuVisible())
+                {
+                    clearSubmenuStack();
+                    hideAllMenus();
+                }
+                else showMenu('pause');
+            }},
+        ],
+    });
+    getToolbar('hud')?.hide();
+}
+
+function gameOverBannerText()
+{
+    const hKO = players[0]?.gameOver;
+    const aKO = (gameMode === 'vs' || gameMode === 'aivs') ? players[1]?.gameOver : false;
+    if (gameMode === 'single')   return 'GAME OVER';
+    if (gameMode === 'aivs')     return hKO && aKO ? 'DOUBLE KO' : hKO ? 'AI 2 WINS' : 'AI 1 WINS';
+    return hKO && aKO ? 'DOUBLE KO' : hKO ? 'YOU LOSE' : 'YOU WIN';
+}
+
+function quitToTitle()
+{
+    if (typeof clearSubmenuStack === 'function') clearSubmenuStack();
+    if (typeof hideAllMenus === 'function') hideAllMenus();
+    gameState = 'menu';
+    applyCanvasSize();
+    spawnMenuBackground();
+    getToolbar('hud')?.hide();
+    if (typeof showMenu === 'function') showMenu('title');
+}
+
+function doRestart()
+{
+    particles = [];
+    pieceSeed = randInt(2147483647);
+    resetPlayer(players[0]);
+    if (gameMode === 'vs' || gameMode === 'aivs') resetPlayer(players[1]);
 }
 
 function updateMenuBackground(dt)
@@ -1550,7 +1681,7 @@ function renderMenuBackground()
 function renderMenuTitle()
 {
     const t = time * 1.5; // animation speed
-    const baseY = 5; // world Y position for title
+    const baseY = 9; // world Y position for title (above the DOM menu panel)
     
     // Animated layers orbiting around the center
     const numLayers = 6;
@@ -1574,15 +1705,14 @@ function startGame(mode)
     gameMode = mode;
     gameState = 'playing';
     particles = [];
-    showMenuUI(false);
 
-    // Set canvas size based on mode
-    if (mode === 'single' && isTouchDevice)
-    {
-        // Single player uses narrow canvas
-        setCanvasFixedSize(vec2(720, 1080));
-        cameraPos = vec2(-2, -2);
-    }
+    // Hide menus and the title attract field
+    if (typeof clearSubmenuStack === 'function') clearSubmenuStack();
+    if (typeof hideAllMenus === 'function') hideAllMenus();
+    getToolbar('hud')?.show();
+
+    // Canvas adapts to game mode + orientation (single+portrait = narrow board)
+    applyCanvasSize();
 
     // Generate a shared seed for piece generation so both players get same pieces
     pieceSeed = randInt(2147483647);
@@ -1621,27 +1751,27 @@ function gameUpdate()
 {
     if (gameState === 'menu')
     {
-        // Animate menu background
+        // Animate menu background even when no menu DOM panel is showing
         updateMenuBackground(timeDelta);
         return;
     }
 
     // Playing state
-    // restart / return to menu
-    if (keyWasPressed('KeyR'))
+    // Pause hotkey: Esc or gamepad Start. Skipped if the gameOver menu is up,
+    // or while a clear animation is running so a fresh Esc doesn't bury it.
+    const gameOverShowing = (typeof getTopMenu === 'function') && getTopMenu()?.id === 'gameOver';
+    if (!gameOverShowing &&
+        (keyWasPressed('Escape') || gamepadWasPressed(9)))
     {
-        particles = [];
-        // Generate new shared seed for fair restart
-        pieceSeed = randInt(2147483647);
-        resetPlayer(players[0]);
-        if (gameMode === 'vs' || gameMode === 'aivs') resetPlayer(players[1]);
-    }
-    if (keyWasPressed('Escape'))
-    {
-        gameState = 'menu';
-        showMenuUI(true);
+        if (typeof playMenuSound === 'function') playMenuSound('activate');
+        if (typeof showMenu === 'function') showMenu('pause');
+        inputClearKey('Escape');
+        inputClearKey(9, 1, false, true, false);
         return;
     }
+
+    if (keyWasPressed('KeyR'))
+        doRestart();
 
     // DEBUG: press G to send garbage to AI (only in vs mode)
     if (gameMode === 'vs' && keyWasPressed('KeyG'))
@@ -1666,9 +1796,21 @@ function gameUpdate()
     if (human.clearAnim) stepClearAnim(human, ai, timeDelta);
     if (ai && ai.clearAnim) stepClearAnim(ai, human, timeDelta);
 
-    // If someone is KO'd, pause ALL gameplay input/AI
+    // If someone is KO'd, pause ALL gameplay input/AI and surface the menu.
     if (human.gameOver || (ai && ai.gameOver))
+    {
+        if (!gameOverShowing)
+        {
+            // Best score: only count human-driven single-player runs.
+            if (gameMode === 'single' && human.score > bestScore)
+            {
+                bestScore = human.score;
+                try { localStorage.setItem('tetris.best', bestScore); } catch(e) {}
+            }
+            if (typeof showMenu === 'function') showMenu('gameOver');
+        }
         return;
+    }
 
     if (!human.clearAnim)
     {
@@ -1720,36 +1862,14 @@ function gameRender()
 
     renderParticles();
 
-    // bottom help
-    const helpText = 'Arrows/A-D move, Up/X rotate,\nZ CCW, Space drop, C/Shift hold, R restart, ESC menu';
-    if (!isTouchDevice)
-        drawText(helpText, vec2(0,-11.5), .6, hsl(0,0,.7), .12, BLACK);
-
-    // win/lose banner
-    const hKO = players[0].gameOver;
-    const aKO = (gameMode === 'vs' || gameMode === 'aivs') ? players[1].gameOver : false;
-    if (hKO || aKO)
+    // bottom help (skip on portrait/single-board layouts where space is tight)
+    if (!isTouchDevice && !isPortrait())
     {
-        drawRect(vec2(0,0), getCameraSize(), rgb(0,0,0,.55));
-        let msg, msgColor;
-        if (gameMode === 'single')
-        {
-            msg = 'GAME OVER';
-            msgColor = WHITE;
-        }
-        else if (gameMode === 'aivs')
-        {
-            msg = hKO && aKO ? 'DOUBLE KO' : hKO ? 'AI 2 WINS' : 'AI 1 WINS';
-            msgColor = WHITE;
-        }
-        else
-        {
-            msg = hKO && aKO ? 'DOUBLE KO' : hKO ? 'YOU LOSE' : 'YOU WIN';
-            msgColor = hKO && !aKO ? RED : (aKO && !hKO ? hsl(.33,.9,.6) : WHITE);
-        }
-        drawText(msg, vec2(0,2.5), 3.2, msgColor, .4, BLACK);
-        drawText('Press R to restart, ESC for menu', vec2(0,-1.0), 1.2, WHITE, .25, BLACK);
+        const helpText = 'Arrows/A-D move, Up/X rotate,\nZ CCW, Space drop, C/Shift hold, R restart, ESC pause';
+        drawText(helpText, vec2(0,-11.5), .6, hsl(0,0,.7), .12, BLACK);
     }
+
+    // The gameOver menu (DOM) now owns the win/lose banner.
 }
 
 function gameRenderPost(){}
