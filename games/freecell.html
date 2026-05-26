@@ -1,0 +1,92 @@
+<!DOCTYPE html><head>
+<title>Freecell</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Override any CSS variable on #littlejs-menus to re-skin all menus
+   and toolbars. Uncomment to try a different look — the helper itself
+   never needs to change. */
+/*
+#littlejs-menus {
+    --menu-bg:           rgba(20, 0, 30, 0.92);
+    --menu-fg:           #fff;
+    --menu-accent:       #f0a;
+    --menu-font:         sans-serif;
+    --menu-border-width: 4px;
+    --menu-radius:       18px;
+}
+*/
+</style>
+</head><body style="background:#000">
+<script src="../dist/littlejs.js?1.18.15"></script>
+<script src="../templates/menus.js"></script>
+<script src="../templates/soundGenerator.js"></script>
+<script>
+'use strict';
+
+// engine settings, do not remove
+debugWatermark = false;
+showEngineVersion = false;
+paused = false;
+
+// engine settings, customize if necessary
+gravity = vec2(0, 0);
+cameraPos = vec2(0, 0);
+cameraScale = 32;          // overridden in gameInit
+// Default LittleJS canvas cap is 1920x1080 — raise it so the canvas
+// fills modern high-res monitors instead of letterboxing.
+canvasMaxSize = vec2(2048, 2048);
+canvasClearColor = new Color().setHex('#264d40');   // felt green
+
+///////////////////////////////////////////////////////////////////////////////
+// FREECELL
+
+// HUD toolbar is only meaningful during gameplay. Tracked separately
+// because "in a menu" doesn't tell us whether the game has started yet
+// (title screen is also a menu, but the HUD shouldn't be available there).
+let isPlaying = false;
+function setPlaying(p)
+{
+    isPlaying = p;
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
+
+async function gameInit()
+{
+    // Match the engine's master volume to whatever the options slider starts at,
+    // so the very first menu sound plays at the user-visible volume.
+    setSoundVolume(.8);
+
+    // One callback drives `paused` for every menu, including dialogs.
+    setMenuVisibilityCallback(v => paused = v);
+
+    // ----- global UI sounds (LittleJS Sound class wraps zzfx params and
+    //       routes through the engine's audio system, so master volume,
+    //       muting, and user-gesture gating all just work). -----
+    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sound_select.play(),
+        activate: () => sound_activate.play(),
+    });
+
+    // ----- title menu -----
+    const playFromTitle = () => { setPlaying(true); hideMenu('title'); };
+    createTitleMenu({
+        id: 'title',
+        title: 'FREECELL',
+        onPlay: playFromTitle,
+        canReveal: () => !isPlaying,
+    });
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdate() {}
+function gameUpdatePost() {}
+function gameRender() {}
+function gameRenderPost() {}
+
+///////////////////////////////////////////////////////////////////////////////
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
+</script></body></html>
