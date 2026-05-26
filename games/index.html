@@ -399,6 +399,19 @@
     overflow: hidden;
   }
 
+  /* About blurb at the bottom of the welcome screen */
+  #about {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+  }
+  #about a { color: var(--accent); text-decoration: none; }
+  #about a:hover { text-decoration: underline; }
+
   @keyframes splat {
     0%   { transform: scale(0) rotate(-6deg); opacity: 0; }
     60%  { transform: scale(1.12) rotate(2deg); opacity: 1; }
@@ -670,6 +683,14 @@ function buildWelcome() {
     const games = GAMES.filter(g => g.category === cat.key);
     if (games.length) welcomeEl.appendChild(buildRow(cat.label, cat.emoji, games, false, cat));
   }
+
+  // One-line "about" footer.
+  const about = document.createElement('div');
+  about.id = 'about';
+  about.innerHTML =
+    'Built with <a href="https://github.com/KilledByAPixel/LittleJS" target="_blank" rel="noopener">LittleJS</a>' +
+    ' — a tiny, fast, open-source HTML5 game engine.';
+  welcomeEl.appendChild(about);
 }
 
 function buildRow(label, rowEmoji, games, isTop, cat) {
@@ -725,28 +746,33 @@ function buildRow(label, rowEmoji, games, isTop, cat) {
   new ResizeObserver(update).observe(tiles);
 
   // ---- Click-and-drag to scroll (mouse only — touch keeps native scroll) ----
-  let downX = 0, downScroll = 0, dragging = false, moved = false;
+  // Capture the pointer ONLY after a real drag is detected (>4px). Capturing
+  // on pointerdown would redirect the click event from the tile to the row
+  // container, so plain clicks would never reach the tile's launch handler.
+  let downX = 0, downScroll = 0, pointerId = 0, isDown = false, moved = false;
   tiles.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'mouse' || e.button !== 0) return;
     if (e.target.closest('.edge-scroll')) return; // let arrow clicks work
-    dragging = true;
+    isDown = true;
     moved = false;
     downX = e.clientX;
     downScroll = tiles.scrollLeft;
-    tiles.setPointerCapture(e.pointerId);
+    pointerId = e.pointerId;
   });
   tiles.addEventListener('pointermove', e => {
-    if (!dragging) return;
+    if (!isDown) return;
     const dx = e.clientX - downX;
     if (!moved && Math.abs(dx) > 4) {
       moved = true;
       tiles.classList.add('dragging');
+      // Only now do we need capture — to keep tracking past the row edges.
+      tiles.setPointerCapture(pointerId);
     }
     if (moved) tiles.scrollLeft = downScroll - dx;
   });
   const endDrag = e => {
-    if (!dragging) return;
-    dragging = false;
+    if (!isDown) return;
+    isDown = false;
     tiles.classList.remove('dragging');
     if (tiles.hasPointerCapture(e.pointerId)) tiles.releasePointerCapture(e.pointerId);
   };

@@ -102,6 +102,9 @@ const PADDLE_WIDEN_MAX = 12;
 
 const STICKY_DURATION = 10;
 const LASER_DURATION = 10;
+const FIREBALL_DURATION = 8;
+const SLOW_DURATION = 10;
+const SLOW_FACTOR = 0.65;
 
 // game state
 let paddlePos, paddleSize;
@@ -123,6 +126,8 @@ let state = 'serve'; // serve | lose (otherwise playing)
 let stickyTimer = 0;
 let laserTimer = 0;
 let laserCooldown = 0;
+let fireballTimer = 0;
+let slowTimer = 0;
 
 // sounds
 let sfxBounce, sfxBrick, sfxLose, sfxWin, sfxPower, sfxLaser;
@@ -205,17 +210,24 @@ function resolveBallRect(ball, rectPos, rectSize)
 
 function powerupColor(type)
 {
-    return type === 'W' ? hsl(.58, .9, .6) :
-           type === 'M' ? hsl(.32, .9, .6) :
-           type === 'T' ? hsl(.12, .9, .62) :
-                          hsl(0, .9, .65);
+    switch (type)
+    {
+        case 'W': return hsl(.58, .9, .6);   // blue
+        case 'M': return hsl(.32, .9, .6);   // green
+        case 'T': return hsl(.12, .9, .62);  // yellow
+        case 'L': return hsl(0,   .9, .65);  // red
+        case 'F': return hsl(.07, 1,  .55);  // orange
+        case 'S': return hsl(.50, .85, .6);  // cyan
+        case '1': return hsl(.85, .9, .65);  // pink (1UP — drawn as "1UP")
+        default:  return hsl(0, 0, .8);
+    }
 }
 
 function drawPowerLetter(pos, type, scale = 1)
 {
-    const size = .8 * scale;
-    const lineWidth = .25; // hairline outline
-    drawText(type, pos, size, hsl(0, 0, 1), lineWidth, hsl(0, 0, 0), 'center');
+    const text = type === '1' ? '1UP' : type;
+    const size = (type === '1' ? .5 : .8) * scale;
+    drawText(text, pos, size, hsl(0, 0, 1), .25, hsl(0, 0, 0), 'center');
 }
 
 function resetPaddle()
@@ -305,8 +317,15 @@ function buildLevel()
     {
         const b = bricks[idx[k]];
         b.special = true;
-        const r = rand();
-        b.dropType = r < .45 ? 'W' : r < .75 ? 'M' : r < .92 ? 'T' : 'L';
+        const r = rand(100);
+        b.dropType =
+            r < 28 ? 'W' :
+            r < 46 ? 'M' :
+            r < 60 ? 'T' :
+            r < 74 ? 'L' :
+            r < 84 ? 'F' :
+            r < 94 ? 'S' :
+                    '1';
     }
 }
 
@@ -375,6 +394,9 @@ function applyPowerup(type)
         laserTimer = LASER_DURATION;
         laserCooldown = 0;
     }
+    else if (type === 'F') fireballTimer = FIREBALL_DURATION;
+    else if (type === 'S') slowTimer = SLOW_DURATION;
+    else if (type === '1') lives++;
 }
 
 function resetRunState()
@@ -384,6 +406,8 @@ function resetRunState()
     stickyTimer = 0;
     laserTimer = 0;
     laserCooldown = 0;
+    fireballTimer = 0;
+    slowTimer = 0;
 }
 
 function advanceLevel()
@@ -458,6 +482,8 @@ function gameUpdate()
     if (stickyTimer > 0) stickyTimer = max(0, stickyTimer - dt);
     if (laserTimer  > 0) laserTimer  = max(0, laserTimer  - dt);
     if (laserCooldown > 0) laserCooldown = max(0, laserCooldown - dt);
+    if (fireballTimer > 0) fireballTimer = max(0, fireballTimer - dt);
+    if (slowTimer     > 0) slowTimer     = max(0, slowTimer     - dt);
 
     // serve state keeps ball attached to paddle
     if (state === 'serve')
@@ -559,6 +585,10 @@ function updateBalls(dt)
             continue;
         }
 
+        const effectiveSpeed = ballSpeed * (slowTimer > 0 ? SLOW_FACTOR : 1);
+        if (ball.vel.length() > 0)
+            ball.vel = ball.vel.normalize(effectiveSpeed);
+
         ball.pos = ball.pos.add(ball.vel.scale(dt));
         const r = ball.size / 2;
 
@@ -595,9 +625,17 @@ function updateBalls(dt)
             if (!isOverlapping(ball.pos, vec2(ball.size), b.pos, b.size))
                 continue;
 
+            if (fireballTimer > 0 && b.type !== BRICK_GOLD)
+            {
+                // Fireball: destroy normal AND silver in one hit, no bounce.
+                b.hp = 1;     // force damageBrick to destroy in one tick
+                damageBrick(b);
+                continue;     // keep flying through the row
+            }
+
             resolveBallRect(ball, b.pos, b.size);
             damageBrick(b);
-            ball.vel = ball.vel.normalize(ballSpeed);
+            ball.vel = ball.vel.normalize(effectiveSpeed);
             break;
         }
     }
@@ -687,7 +725,13 @@ function gameRender()
 
     // balls
     for (const b of balls)
-        drawCircle(b.pos, b.size, hsl(.12, .9, .6));
+    {
+        const ballColor =
+            fireballTimer > 0 ? hsl(.07, 1, .6) :
+            slowTimer     > 0 ? hsl(.50, .9, .7) :
+                                hsl(.12, .9, .6);
+        drawCircle(b.pos, b.size, ballColor);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -702,6 +746,8 @@ function gameRenderPost()
     if (paddleExtra > 0) status += `WIDE +${paddleExtra.toFixed(0)}   `;
     if (stickyTimer > 0) status += `STICKY ${stickyTimer.toFixed(0)}s   `;
     if (laserTimer  > 0) status += `LASER ${laserTimer.toFixed(0)}s   `;
+    if (fireballTimer > 0) status += `FIRE ${fireballTimer.toFixed(0)}s   `;
+    if (slowTimer   > 0) status += `SLOW ${slowTimer.toFixed(0)}s   `;
     if (balls.length > 1) status += `BALLS ${balls.length}`;
     if (status)
         drawTextScreen(status, vec2(mainCanvasSize.x / 2, 42), 22, hsl(0, 0, .95), 4, hsl(0, 0, 0));
@@ -728,7 +774,7 @@ function gameRenderPost()
             hsl(0, 0, 1), 6, hsl(0, 0, 0));
     }
 
-    drawTextScreen(`Special bricks show their drop (W=Wide, M=Multi, T=Sticky, L=Laser)`,
+    drawTextScreen(`W=Wide M=Multi T=Sticky L=Laser F=Fire S=Slow 1UP=Life`,
         vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 18), 18, hsl(0, 0, .8), 4, hsl(0, 0, 0));
 
     if (laserTimer > 0)
