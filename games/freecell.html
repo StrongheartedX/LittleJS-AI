@@ -67,6 +67,18 @@ class Card
         this.tweenDuration = 0.2;
     }
     isRed() { return this.suit % 2 === 0; }
+    startTween(fromPos)
+    {
+        this.tweenFrom = fromPos.copy();
+        this.tweenTimer.set(this.tweenDuration);
+    }
+    drawnPos()
+    {
+        if (!this.tweenFrom) return this.pos;
+        const p = this.tweenTimer.getPercent();   // 0 → 1 over tweenDuration
+        if (p >= 1) { this.tweenFrom = null; return this.pos; }
+        return this.tweenFrom.lerp(this.pos, smoothStep(p));
+    }
 }
 
 class CardStack
@@ -93,22 +105,24 @@ class CardStack
         for (let i = 0; i < this.cards.length; ++i)
             this.cards[i].pos = this.pos.add(this.cardOffset(i));
     }
-    putCardOnTop(card)
+    putCardOnTop(card, tween = false)
     {
+        const oldPos = card.pos.copy();
         this.cards.push(card);
         card.pos = this.pos.add(this.cardOffset(this.cards.length - 1));
+        if (tween) card.startTween(oldPos);
     }
-    moveTopCard(target)
+    moveTopCard(target, tween = false)
     {
         if (this.isEmpty()) return;
-        target.putCardOnTop(this.cards.pop());
+        target.putCardOnTop(this.cards.pop(), tween);
     }
-    moveManyToStack(target, startCard)
+    moveManyToStack(target, startCard, tween = false)
     {
         const startIndex = startCard ? this.cards.indexOf(startCard) : 0;
         if (startIndex < 0) return;
         const moving = this.cards.splice(startIndex);
-        for (const c of moving) target.putCardOnTop(c);
+        for (const c of moving) target.putCardOnTop(c, tween);
     }
 }
 
@@ -400,7 +414,7 @@ function trySendHome()
                     : (c.value === 0);
                 if (fits)
                 {
-                    s.moveTopCard(f);
+                    s.moveTopCard(f, true);
                     progressed = true;
                     break;
                 }
@@ -461,7 +475,9 @@ function gameUpdate()
             }
         }
         const placed = target !== null;
-        handStack.moveManyToStack(target || pickupOrigin);
+        // Snap-back tweens; drops on a valid target snap instantly because the
+        // card is already where the cursor left it.
+        handStack.moveManyToStack(target || pickupOrigin, undefined, !placed);
         pickupOrigin = null;
         if (placed) trySendHome();
     }
@@ -480,10 +496,10 @@ function gameRender()
             drawSlotOutline(s);
     for (const s of cardStacks)
         for (const c of s.cards)
-            drawCard(c, c.pos);
+            drawCard(c, c.drawnPos());
     // Hand cards on top of everything.
     for (const c of handStack.cards)
-        drawCard(c, c.pos);
+        drawCard(c, c.pos);   // hand cards never tween while dragged
 }
 function gameRenderPost() {}
 
