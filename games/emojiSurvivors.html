@@ -303,6 +303,8 @@ class Enemy extends EngineObject
         this.slowTimer = 0;
         this.tint = null;
         this.additive = null;
+        // per-instance phase so a wave of enemies doesn't sync up
+        this.bobPhase = rand(2 * PI);
     }
 
     render()
@@ -319,7 +321,25 @@ class Enemy extends EngineObject
             // is visible even on a 50-pixel sprite in a swarm of hundreds
             additive = new Color(.8, .8, .8, 0);
         }
-        drawEmoji(this.pos, this.size, this.tileInfo, tint, additive);
+
+        // per-type wobble so the swarm reads as alive. Frozen enemies skip
+        // it so a frozen pose is visibly static.
+        let renderPos = this.pos;
+        let renderAngle = 0;
+        if (this.frozenTimer <= 0)
+        {
+            const k = this.type.key;
+            const ph = this.bobPhase;
+            if (k === 'zombie') renderAngle = sin(time * 5  + ph) * .14;
+            else if (k === 'bat')    renderPos = this.pos.add(vec2(0, sin(time * 7 + ph) * .18));
+            else if (k === 'ant')    renderAngle = sin(time * 12 + ph) * .12;
+            else if (k === 'snail')  renderAngle = sin(time * 2  + ph) * .05;
+            else if (k === 'skull')  renderAngle = time * .8;
+            else if (k === 'clown')  renderAngle = sin(time * 8  + ph) * .18;
+            else if (k === 'reaper') renderAngle = sin(time * 3  + ph) * .1;
+        }
+
+        drawEmoji(renderPos, this.size, this.tileInfo, tint, additive, renderAngle);
     }
 
     update()
@@ -354,13 +374,19 @@ class Enemy extends EngineObject
             this.tint = new Color(.7, .85, 1);
         }
 
-        // walk toward the player
+        // walk toward the player — clamped so we don't tunnel through.
+        // Fast enemies like 🦇 were stepping past player.pos in a single
+        // frame, which read as a glitchy snap. Now we stop within touch
+        // range and let contact damage + knockback handle the bump.
         const toPlayer = player.pos.subtract(this.pos);
         const dist = toPlayer.length();
         if (dist > .01)
         {
-            const step = toPlayer.normalize(this.speed * moveScale / 60);
-            this.velocity = step;
+            const targetStep = this.speed * moveScale / 60;
+            const contactDist = (this.size.x + player.size.x) * .4;
+            const usableDist = max(0, dist - contactDist);
+            const stepLen = min(targetStep, usableDist);
+            this.velocity = stepLen > 0 ? toPlayer.normalize(stepLen) : vec2();
         }
 
         super.update();
@@ -691,14 +717,19 @@ function drawDamageNumbers()
 // after the floor so they sit under everything else.
 function drawShadows()
 {
+    // Lay an ellipse-scaled soft radial under every player + enemy. Uses
+    // sprites.shadow (white radial gradient) with a dark tint so we get
+    // a soft-edged shadow rather than a hard ellipse. Cheap — WebGL handles
+    // a thousand quads easily.
+    const shadowTint = new Color(0, 0, 0, .35);
     for (const obj of engineObjects)
     {
         if (obj.destroyed) continue;
-        const wants = obj === player || (obj instanceof Enemy && obj.isBoss);
-        if (!wants) continue;
+        const isShadowed = obj === player || obj instanceof Enemy;
+        if (!isShadowed) continue;
         const pos = obj.pos.subtract(vec2(0, obj.size.y * .35));
-        const size = vec2(obj.size.x * .8, obj.size.y * .22);
-        drawTile(pos, size, sprites.shadow, new Color(0, 0, 0, .35));
+        const size = vec2(obj.size.x * .85, obj.size.y * .3);
+        drawTile(pos, size, sprites.shadow, shadowTint);
     }
 }
 
@@ -794,10 +825,20 @@ class PizzaTossWeapon
 
     update()
     {
-        // remember the last direction the player moved so a stationary
-        // player still has a sensible throw direction
+        // Aim: prefer the player's last movement direction. If standing still,
+        // aim at the nearest enemy so a stationary player still throws toward
+        // a threat instead of firing off-screen.
         if (player.velocity.length() > .005)
+        {
             this.facing = player.velocity.normalize();
+        }
+        else
+        {
+            const target = nearestEnemy(player.pos, 25);
+            if (target)
+                this.facing = target.pos.subtract(player.pos).normalize();
+            // else keep last facing
+        }
 
         this.cooldown -= 1 / 60;
         if (this.cooldown > 0) return;
@@ -816,7 +857,7 @@ class PizzaTossWeapon
             const dir = vec2().setAngle(ang, 1);
             const proj = new Projectile(player.pos.copy(), dir, speed,
                 dmg, 1.6, sprites.pizza, true);
-            proj.angularVelocity = 10;  // tumble through the air
+            proj.angleVelocity = 10;  // tumble through the air
         }
     }
 }
@@ -979,7 +1020,7 @@ class SpicyPizzaWeapon
                     e.burnTimer = 1.5;
                     if (6 > e.burnDps) e.burnDps = 6;
                 });
-            proj.angularVelocity = 14;
+            proj.angleVelocity = 14;
         }
     }
 }
@@ -1498,75 +1539,102 @@ function startRun(hero)
 // an automatic restart ~1.5s after death so a long balance pass loops.
 let playerAI = false;
 
-// Smoothed direction memory — AI motion is filtered through an EMA so the
-// heading can't snap every frame as enemies drift in and out of danger range
-// or attractive/repulsive forces balance out at zero. Without this the
-// player visibly vibrates.
+// The AI commits to a destination point and walks toward it until the next
+// retarget. This prevents per-frame fluctuations in enemy positions from
+// flipping the heading every frame (which used to show as visible jitter
+// even with EMA smoothing). Retargets fire on a timer, on arrival, or when
+// an enemy gets dangerously close.
+let aiTargetPos = null;
+let aiNextRetargetTime = 0;
 let aiSmoothedDir = vec2(1, 0);
+
+const AI_RETARGET_NORMAL    = .55;   // seconds between target picks in normal play
+const AI_RETARGET_EMERGENCY = .2;    // shorter window when something is very close
+const AI_EMERGENCY_DIST_SQ  = 16;    // 4 units — recompute path more often inside this radius
+const AI_ARRIVE_DIST_SQ     = 1.5 * 1.5;
+const AI_LOOKAHEAD          = 5;     // how far ahead of the player the destination sits
 
 function aiDirection()
 {
-    let dir = vec2();
-
-    // repel from enemies; weighted by threat (damage) and falloff^2
-    // also track the closest enemy so we can seek toward it when idle
-    const dangerRange = 8;
-    let closestEnemy = null, closestEnemyDist = Infinity;
+    // Recompute the destination periodically rather than every frame.
+    let emergency = false;
     for (const e of enemies)
     {
-        const away = player.pos.subtract(e.pos);
-        const d = away.length();
-        if (d < closestEnemyDist) { closestEnemyDist = d; closestEnemy = e; }
-        if (d < dangerRange && d > .01)
-        {
-            const closeness = (dangerRange - d) / dangerRange;
-            const weight = 1 + e.dmg / 8;
-            dir = dir.add(away.normalize(closeness * closeness * weight));
-        }
+        if (e.pos.distanceSquared(player.pos) < AI_EMERGENCY_DIST_SQ)
+        { emergency = true; break; }
     }
+    const arrived = aiTargetPos && aiTargetPos.distanceSquared(player.pos) < AI_ARRIVE_DIST_SQ;
 
-    // attract to nearby gems and hearts
-    const lureRange = 12;
-    for (const obj of engineObjects)
+    if (!aiTargetPos || time >= aiNextRetargetTime || emergency || arrived)
     {
-        if (!(obj instanceof Pickup)) continue;
-        const toward = obj.pos.subtract(player.pos);
-        const d = toward.length();
-        if (d < lureRange && d > .01)
+        aiNextRetargetTime = time + (emergency ? AI_RETARGET_EMERGENCY : AI_RETARGET_NORMAL);
+
+        let force = vec2();
+
+        // repel from enemies; weighted by threat (damage) and falloff^2
+        const dangerRange = 8;
+        let closestEnemy = null, closestEnemyDist = Infinity;
+        for (const e of enemies)
         {
-            const pull = .35 * (lureRange - d) / lureRange;
-            dir = dir.add(toward.normalize(pull));
+            const away = player.pos.subtract(e.pos);
+            const d = away.length();
+            if (d < closestEnemyDist) { closestEnemyDist = d; closestEnemy = e; }
+            if (d < dangerRange && d > .01)
+            {
+                const closeness = (dangerRange - d) / dangerRange;
+                const weight = 1 + e.dmg / 8;
+                force = force.add(away.normalize(closeness * closeness * weight));
+            }
         }
+
+        // attract to nearby gems and hearts
+        const lureRange = 12;
+        for (const obj of engineObjects)
+        {
+            if (!(obj instanceof Pickup)) continue;
+            const toward = obj.pos.subtract(player.pos);
+            const d = toward.length();
+            if (d < lureRange && d > .01)
+            {
+                const pull = .35 * (lureRange - d) / lureRange;
+                force = force.add(toward.normalize(pull));
+            }
+        }
+
+        // arena wall repulsion so the AI doesn't trap itself in a corner
+        const wallBuf = 5;
+        const dxMin = player.pos.x - ARENA_MIN_X;
+        const dxMax = ARENA_MAX_X - player.pos.x;
+        const dyMin = player.pos.y - ARENA_MIN_Y;
+        const dyMax = ARENA_MAX_Y - player.pos.y;
+        if (dxMin < wallBuf) force = force.add(vec2((wallBuf - dxMin) / wallBuf, 0));
+        if (dxMax < wallBuf) force = force.add(vec2(-(wallBuf - dxMax) / wallBuf, 0));
+        if (dyMin < wallBuf) force = force.add(vec2(0, (wallBuf - dyMin) / wallBuf));
+        if (dyMax < wallBuf) force = force.add(vec2(0, -(wallBuf - dyMax) / wallBuf));
+
+        // when no immediate forces apply, seek the nearest enemy so the AI
+        // keeps moving instead of standing still
+        if (force.length() < .05)
+        {
+            if (closestEnemy)
+                force = closestEnemy.pos.subtract(player.pos);
+            else
+                force = vec2(1, 0);
+        }
+
+        // Commit to a destination point. Clamped inside the arena so the AI
+        // doesn't try to walk into a wall it can never reach.
+        const dir = force.normalize();
+        aiTargetPos = player.pos.add(dir.scale(AI_LOOKAHEAD));
+        aiTargetPos.x = clamp(aiTargetPos.x, ARENA_MIN_X + 1, ARENA_MAX_X - 1);
+        aiTargetPos.y = clamp(aiTargetPos.y, ARENA_MIN_Y + 1, ARENA_MAX_Y - 1);
     }
 
-    // arena wall repulsion so the AI doesn't trap itself in a corner
-    const wallBuf = 5;
-    const dxMin = player.pos.x - ARENA_MIN_X;
-    const dxMax = ARENA_MAX_X - player.pos.x;
-    const dyMin = player.pos.y - ARENA_MIN_Y;
-    const dyMax = ARENA_MAX_Y - player.pos.y;
-    if (dxMin < wallBuf) dir = dir.add(vec2((wallBuf - dxMin) / wallBuf, 0));
-    if (dxMax < wallBuf) dir = dir.add(vec2(-(wallBuf - dxMax) / wallBuf, 0));
-    if (dyMin < wallBuf) dir = dir.add(vec2(0, (wallBuf - dyMin) / wallBuf));
-    if (dyMax < wallBuf) dir = dir.add(vec2(0, -(wallBuf - dyMax) / wallBuf));
-
-    // when no immediate forces apply (early game, post-clear lulls), seek
-    // the nearest enemy so the AI is always moving. Otherwise the player
-    // sits still until something walks within dangerRange, which reads as
-    // "AI is broken".
-    if (dir.length() < .05)
-    {
-        if (closestEnemy)
-            dir = closestEnemy.pos.subtract(player.pos);
-        else
-            dir = vec2(1, 0);  // arbitrary fallback if the world is empty
-    }
-    const target = dir.normalize();
-
-    // EMA blend toward the new target — keeps high-frequency direction
-    // flips from showing up as visible vibration. .12 ≈ 150ms time-constant
-    // at 60fps so the AI still reacts quickly to real threats.
-    aiSmoothedDir = aiSmoothedDir.scale(.88).add(target.scale(.12));
+    // Walk toward the cached destination. Light EMA smoothing just to ease
+    // the visible heading when a retarget swings to the opposite side.
+    const heading = aiTargetPos.subtract(player.pos);
+    const target = heading.length() > .01 ? heading.normalize() : vec2(1, 0);
+    aiSmoothedDir = aiSmoothedDir.scale(.85).add(target.scale(.15));
     return aiSmoothedDir.length() > .01 ? aiSmoothedDir.normalize() : target;
 }
 
@@ -1605,14 +1673,30 @@ async function gameInit()
     sprites.chest     = drawToTexture(26, paintEmoji('🎁'), 'a wrapped gift box with bow');
     sprites.coin      = drawToTexture(27, paintEmoji('💰'), 'a gold coin or money bag');
 
-    // black ellipse shadow used as a ground decal under the player + bosses
+    // Soft radial gradient circle — white center fading to transparent. Used
+    // for shadows (tinted dark) and any "soft glow" effects. Painted in white
+    // so we can color it via the tint argument at draw time.
     sprites.shadow    = drawToTexture(28, ctx =>
     {
-        ctx.fillStyle = '#000';
+        const grad = ctx.createRadialGradient(125, 125, 0, 125, 125, 120);
+        grad.addColorStop(0,   'rgba(255,255,255,1)');
+        grad.addColorStop(.55, 'rgba(255,255,255,.7)');
+        grad.addColorStop(1,   'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.ellipse(125, 125, 115, 48, 0, 0, Math.PI * 2);
+        ctx.arc(125, 125, 122, 0, Math.PI * 2);
         ctx.fill();
-    }, 'a black flat ellipse shadow');
+    }, 'a soft white radial gradient circle');
+
+    // Solid white circle — for hard-edged filled circles, range indicators,
+    // pickup auras. Tint to color, scale to size.
+    sprites.circle    = drawToTexture(29, ctx =>
+    {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(125, 125, 122, 0, Math.PI * 2);
+        ctx.fill();
+    }, 'a solid white circle');
 
     // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
     sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
@@ -2070,9 +2154,11 @@ function drawWeaponVisuals()
 
 function gameRender()
 {
+    // Shadow pass first — sits behind ground/walls/entities so every emoji
+    // gets grounded by a soft radial shadow under its feet.
+    drawShadows();
     drawGround();
     drawWalls();
-    drawShadows();
     drawWeaponVisuals();
     drawChainFlashes();
     drawDamageNumbers();
