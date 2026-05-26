@@ -1136,6 +1136,23 @@ function boardTick(board, controller, onLock)
                 board.active = null;
                 controller.hardDropping = false;
 
+                // Diamond resolution: find the diamond on the board, clear matching color
+                if (isDiamondPiece)
+                {
+                    let diamondPos = null;
+                    for (let x = 0; x < BOARD_W && !diamondPos; x++)
+                    for (let y = 0; y < BOARD_H && !diamondPos; y++)
+                        if (board.grid[x][y] && board.grid[x][y].type === 'diamond')
+                            diamondPos = [x, y];
+                    if (diamondPos)
+                    {
+                        const dr = resolveDiamond(board.grid, diamondPos[0], diamondPos[1]);
+                        if (dr.cleared.length > 0)
+                            clearCells(board.grid, dr.cleared);
+                        applyGravity(board.grid);
+                    }
+                }
+
                 const res = resolveBoard(board.grid, {
                     isDiamondInitiated: isDiamondPiece,
                     characterMultiplier: board.character.multiplier
@@ -1887,6 +1904,28 @@ function runUnitTests()
         assert(PATTERN_CHUNLI[0][0] === COLOR_R && PATTERN_CHUNLI[0][2] === COLOR_G, 'patterns: Chun-Li row 0 RRGGBB');
         assert(PATTERN_SAKURA[0][0] === COLOR_G && PATTERN_SAKURA[0][5] === COLOR_Y, 'patterns: Sakura row 0 GRRRRY');
         assert(PATTERN_RYU[2][0] === COLOR_B, 'patterns: Ryu row 2 starts with B (BYRGBY)');
+    }
+
+    // --- Diamond integration test ---
+    {
+        // Simulate a diamond piece landing on a red regular gem.
+        // After resolveDiamond + resolveBoard, all reds should be gone.
+        let g = emptyGrid();
+        g[2][0] = gemRegular(COLOR_R);
+        g[3][0] = gemRegular(COLOR_R);
+        g[4][0] = gemRegular(COLOR_B);
+        g[2][1] = gemDiamond();
+        // Mimic boardTick's diamond resolution wiring:
+        const dr = resolveDiamond(g, 2, 1);
+        assert(dr.color === COLOR_R, 'integration: diamond color resolved');
+        clearCells(g, dr.cleared);
+        applyGravity(g);
+        assert(g[2][0] === null || g[2][0].color === COLOR_B, 'integration: reds gone, blue may have fallen to (2,0)');
+        let foundRed = false;
+        for (let x = 0; x < BOARD_W; x++)
+        for (let y = 0; y < BOARD_H; y++)
+            if (g[x][y] && g[x][y].color === COLOR_R) foundRed = true;
+        assert(!foundRed, 'integration: no red gems remain after diamond');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
