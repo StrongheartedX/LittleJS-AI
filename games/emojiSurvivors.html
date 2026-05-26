@@ -128,6 +128,13 @@ class Player extends EngineObject
 
     render()
     {
+        // Soft pulsing halo so the player is always findable in a busy
+        // swarm. Drawn first so the player emoji renders on top of it.
+        const pulse = .5 + .5 * sin(time * 2.5);
+        const haloSize = this.size.x * (1.7 + pulse * .25);
+        drawTile(this.pos, vec2(haloSize), sprites.shadow,
+                 new Color(.55, .9, 1, .18 + pulse * .1));
+
         let tint = WHITE, additive = null;
         if (this.hurtTimer > 0)
         {
@@ -582,6 +589,99 @@ class Projectile extends EngineObject
                      new Color(1, 1, 1, alpha), g.angle);
         }
         drawTile(this.pos, this.size, this.tileInfo, WHITE, this.angle);
+    }
+}
+
+// Boomerang projectile — flies outward, reverses to seek back to the player.
+// Piercing with a per-enemy hit cooldown so on the return trip it can re-hit
+// enemies it caught on the way out.
+class StarToss extends EngineObject
+{
+    constructor(pos, dir, speed, damage, range)
+    {
+        super(pos, vec2(.7), sprites.starToss);
+        this.startPos = pos.copy();
+        this.speedPerFrame = speed / 60;
+        this.velocity = dir.normalize(this.speedPerFrame);
+        this.damageAmount = damage;
+        this.range = range;
+        this.returning = false;
+        this.hitMap = new Map();
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.angleVelocity = 10;       // visible spin (LittleJS naming!)
+        this.setCollision(false, false, false, false);
+        this.life = 3.0;                // hard timeout if we never reach player
+    }
+
+    update()
+    {
+        super.update();
+        this.renderOrder = -this.pos.y;
+        this.life -= 1 / 60;
+        if (this.life <= 0) { this.destroy(); return; }
+
+        if (!this.returning)
+        {
+            // flip to return mode once we've travelled out far enough
+            if (this.pos.distance(this.startPos) >= this.range)
+                this.returning = true;
+        }
+        else
+        {
+            // re-aim at the (possibly-moved) player every frame; slightly
+            // faster on the return so the round-trip doesn't drag
+            const toPlayer = player.pos.subtract(this.pos);
+            const d = toPlayer.length();
+            if (d < .8) { this.destroy(); return; }
+            this.velocity = toPlayer.normalize(this.speedPerFrame * 1.4);
+        }
+
+        // damage — piercing with .3s per-enemy hit cooldown so the same
+        // enemy can be hit twice (once out, once back)
+        for (const e of enemies)
+        {
+            if (!isOverlapping(this.pos, this.size, e.pos, e.size)) continue;
+            const next = this.hitMap.get(e) || 0;
+            if (time < next) continue;
+            e.takeDamage(this.damageAmount);
+            this.hitMap.set(e, time + .3);
+        }
+    }
+}
+
+class StarTossWeapon
+{
+    constructor() { this.level = 1; this.name = 'Star Toss'; this.cooldown = 0; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    damage()  { return 5 + this.level * 2; }
+
+    update()
+    {
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = 1.4 / player.cooldownMult;
+
+        const target = nearestEnemy(player.pos, 14 * player.areaMult);
+        if (!target) return;
+        const dirToTarget = target.pos.subtract(player.pos);
+        const baseAng = dirToTarget.angle();
+
+        // Small fan — 1 at Lv1 up to 5 at Lv5, ±.18 rad spread (≈10°)
+        const count = this.level;
+        const spread = count === 1 ? 0 : .18;
+        const dmg = this.damage() * player.dmgMult;
+        const speed = 10 * player.projSpeedMult;
+        const range = 6 * player.areaMult;
+        for (let i = 0; i < count; ++i)
+        {
+            const t = count === 1 ? .5 : i / (count - 1);
+            const ang = baseAng + lerp(-spread, spread, t);
+            const d = vec2().setAngle(ang, 1);
+            new StarToss(player.pos.copy(), d, speed, dmg, range);
+        }
     }
 }
 
@@ -1363,6 +1463,13 @@ function recomputeMultipliers()
         for (const key in currentHero.stats)
             player[key] = (player[key] || 1) * currentHero.stats[key];
     }
+    // permanent power-ups (shop-purchased, persisted)
+    player.dmgMult       *= 1 + powerUps.might    * .05;
+    player.maxHpMult     *= 1 + powerUps.heart    * .10;
+    player.moveSpeedMult *= 1 + powerUps.speed    * .05;
+    player.cooldownMult  *= 1 + powerUps.cooldown * .05;
+    player.magnetMult    *= 1 + powerUps.magnet   * .20;
+    player.xpGainMult    *= 1 + powerUps.growth   * .08;
     // grant the player any new max HP from a fresh Heart pickup
     const newMaxHp = playerMaxHp * player.maxHpMult;
     if (newMaxHp > prevMaxHp) player.hp += (newMaxHp - prevMaxHp);
@@ -1537,6 +1644,21 @@ let coins = 0;          // lifetime persistent
 let bestTime = 0;       // lifetime longest survival
 const STORAGE_KEY = 'emojiSurvivors.v1';
 
+// Permanent power-ups — spent at the title-screen shop with 💰 coins.
+// Effects apply on every future run via recomputeMultipliers. Caps at
+// 5 levels each. Costs scale linearly with current level.
+const POWER_UPS = [
+    {key:'might',    emoji:'💪', name:'Might',     desc:'+5% damage'},
+    {key:'heart',    emoji:'❤️', name:'Vigor',     desc:'+10% max HP'},
+    {key:'speed',    emoji:'👟', name:'Speed',     desc:'+5% move speed'},
+    {key:'cooldown', emoji:'⏱️', name:'Haste',     desc:'+5% fire rate'},
+    {key:'magnet',   emoji:'🧲', name:'Magnetism', desc:'+20% pickup radius'},
+    {key:'growth',   emoji:'🌱', name:'Growth',    desc:'+8% XP gain'},
+];
+const powerUps = {might: 0, heart: 0, speed: 0,
+                  cooldown: 0, magnet: 0, growth: 0};
+function powerUpCost(level) { return 50 + level * 50; }    // 50/100/150/200/250
+
 function loadMetaState()
 {
     try
@@ -1546,6 +1668,10 @@ function loadMetaState()
         const data = JSON.parse(raw);
         coins = data.coins || 0;
         bestTime = data.bestTime || 0;
+        if (data.powerUps)
+            for (const k in powerUps)
+                if (typeof data.powerUps[k] === 'number')
+                    powerUps[k] = data.powerUps[k];
     }
     catch (e) { /* ignore */ }
 }
@@ -1555,7 +1681,7 @@ function saveMetaState()
     try
     {
         localStorage.setItem(STORAGE_KEY,
-            JSON.stringify({coins, bestTime}));
+            JSON.stringify({coins, bestTime, powerUps}));
     }
     catch (e) { /* localStorage may be disabled */ }
 }
@@ -1579,7 +1705,7 @@ function startRun(hero)
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
             obj instanceof Pickup || obj instanceof Bomb || obj instanceof FireZone ||
-            obj instanceof Chest)
+            obj instanceof Chest || obj instanceof StarToss)
             obj.destroy();
     }
     chainFlashes.length = 0;
@@ -1758,6 +1884,7 @@ async function gameInit()
     sprites.pizza     = drawToTexture(19, paintEmoji('🍕'), 'a pizza slice');
     sprites.bomb      = drawToTexture(20, paintEmoji('💣'), 'a black bomb with fuse');
     sprites.ice       = drawToTexture(21, paintEmoji('🧊'), 'a clear ice cube');
+    sprites.starToss  = drawToTexture(22, paintEmoji('⭐'), 'a yellow five-pointed star');
 
     // pickups 24-26
     sprites.gem       = drawToTexture(24, paintEmoji('💎'), 'a cyan diamond gem');
@@ -1852,7 +1979,65 @@ async function gameInit()
             {type: 'label',     id: 'coinsLabel', text: '💰 Total Coins: 0'},
             {type: 'separator'},
             {type: 'button',    label: 'PLAY',    onClick: () => pushMenu('heroSelect')},
+            {type: 'button',    label: 'SHOP',    onClick: () => pushMenu('shop')},
             {type: 'button',    label: 'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+    });
+
+    // Power-Up shop — spend lifetime coins for permanent stat boosts.
+    // Labels are refreshed in onShow + after each purchase so the level,
+    // cost, and 💰 counter stay in sync without re-creating the menu.
+    function refreshShopLabels()
+    {
+        const m = getMenu('shop');
+        if (!m) return;
+        const coinsLabel = m.getItem('shopCoins');
+        if (coinsLabel) coinsLabel.setLabel('💰 ' + coins);
+        for (const p of POWER_UPS)
+        {
+            const item = m.getItem(p.key);
+            if (!item) continue;
+            const lvl = powerUps[p.key];
+            const maxed = lvl >= 5;
+            const cost = powerUpCost(lvl);
+            const lvlBar = '★'.repeat(lvl) + '☆'.repeat(5 - lvl);
+            const label = maxed
+                ? p.emoji + ' ' + p.name + ' ' + lvlBar + ' MAX'
+                : p.emoji + ' ' + p.name + ' ' + lvlBar +
+                  ' — ' + cost + '💰 (' + p.desc + ')';
+            item.setLabel(label);
+            item.setDisabled(maxed || coins < cost);
+        }
+    }
+    function buyPowerUp(p)
+    {
+        const lvl = powerUps[p.key];
+        if (lvl >= 5) return;
+        const cost = powerUpCost(lvl);
+        if (coins < cost) return;
+        coins -= cost;
+        powerUps[p.key] = lvl + 1;
+        saveMetaState();
+        refreshShopLabels();
+    }
+    createMenu({
+        id: 'shop',
+        title: '💰 POWER-UP SHOP',
+        subtitle: 'Permanent bonuses, apply to every future run',
+        dismissable: true,
+        onShow: refreshShopLabels,
+        onHide: popMenu,
+        items: [
+            {type: 'label', id: 'shopCoins', text: '💰 0'},
+            {type: 'separator'},
+            ...POWER_UPS.map(p => ({
+                type: 'button',
+                id: p.key,
+                label: p.emoji + ' ' + p.name,   // refreshed by onShow
+                onClick: () => buyPowerUp(p),
+            })),
+            {type: 'separator'},
+            {type: 'button', label: 'BACK', onClick: () => hideMenu('shop')},
         ],
     });
 
@@ -1947,7 +2132,7 @@ async function gameInit()
 
 // All available weapons by name. Names match the constructor classes below.
 const ALL_WEAPONS = ['Fireball', 'OrbitingStar', 'ChainLightning',
-                     'PizzaToss', 'IceCube', 'Bomb', 'FirePatch'];
+                     'PizzaToss', 'IceCube', 'Bomb', 'FirePatch', 'StarToss'];
 
 function makeWeaponByName(name)
 {
@@ -1958,6 +2143,7 @@ function makeWeaponByName(name)
     if (name === 'IceCube')        return new IceCubeWeapon();
     if (name === 'Bomb')           return new BombWeapon();
     if (name === 'FirePatch')      return new FirePatchWeapon();
+    if (name === 'StarToss')       return new StarTossWeapon();
     return null;
 }
 
@@ -1970,6 +2156,7 @@ function emojiForWeapon(name)
     if (name === 'IceCube')        return '🧊';
     if (name === 'Bomb')           return '💣';
     if (name === 'FirePatch')      return '🔥';
+    if (name === 'StarToss')       return '⭐';
     return '?';
 }
 
@@ -2101,7 +2288,7 @@ function goToTitle()
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
             obj instanceof Pickup || obj instanceof Bomb || obj instanceof FireZone ||
-            obj instanceof Chest)
+            obj instanceof Chest || obj instanceof StarToss)
             obj.destroy();
     }
     chainFlashes.length = 0;
