@@ -170,8 +170,10 @@ class Enemy extends EngineObject
         if (this.hp <= 0)  // only drop on death, not despawn
         {
             killCount++;
-            const value = this.xpDrop;
-            new Pickup(this.pos.copy(), sprites.gem, 'gem', value);
+            if (rand() < .1)
+                new Pickup(this.pos.copy(), sprites.heart, 'heart', 20);
+            else
+                new Pickup(this.pos.copy(), sprites.gem, 'gem', this.xpDrop);
         }
         super.destroy();
     }
