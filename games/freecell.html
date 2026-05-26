@@ -237,6 +237,7 @@ function newGame()
     pickupOrigin = null;
     stateUndo    = [];
     stateRedo    = [];
+    saveState();   // initial snapshot so undo never empties the stack
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -424,6 +425,52 @@ function trySendHome()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+function snapshot()
+{
+    return {
+        seed: 0,                 // reserved for future seedable startup load
+        stacks: cardStacks.map(s => s.cards.map(c => [c.value, c.suit])),
+    };
+}
+
+function saveState()
+{
+    stateUndo.push(snapshot());
+    if (stateUndo.length > 500) stateUndo.shift();   // cap memory
+    stateRedo = [];
+    try { localStorage['freecell.saveState'] = JSON.stringify(stateUndo[stateUndo.length - 1]); }
+    catch (e) { /* localStorage full / blocked — non-fatal */ }
+}
+
+function loadState(snap)
+{
+    if (!snap || !snap.stacks) return;
+    for (let i = 0; i < cardStacks.length; ++i)
+    {
+        const stack = cardStacks[i];
+        stack.cards = snap.stacks[i].map(([v, s]) => new Card(v, s));
+        stack.relayout();
+    }
+    // Clear any in-flight tweens — restored positions are authoritative.
+    for (const s of cardStacks) for (const c of s.cards) c.tweenFrom = null;
+}
+
+function undoState()
+{
+    if (stateUndo.length <= 1) return;
+    stateRedo.push(stateUndo.pop());
+    loadState(stateUndo[stateUndo.length - 1]);
+}
+
+function redoState()
+{
+    if (!stateRedo.length) return;
+    const snap = stateRedo.pop();
+    stateUndo.push(snap);
+    loadState(snap);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
     if (!isPlaying || won) return;
@@ -479,8 +526,12 @@ function gameUpdate()
         // card is already where the cursor left it.
         handStack.moveManyToStack(target || pickupOrigin, undefined, !placed);
         pickupOrigin = null;
-        if (placed) trySendHome();
+        if (placed) { trySendHome(); saveState(); }
     }
+
+    const shift = keyIsDown('ShiftLeft') || keyIsDown('ShiftRight');
+    if (keyWasPressed('KeyZ')) shift ? redoState() : undoState();
+    if (keyWasPressed('KeyY')) redoState();
 }
 function gameUpdatePost()
 {
