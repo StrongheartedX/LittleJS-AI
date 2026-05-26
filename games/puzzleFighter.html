@@ -190,6 +190,24 @@ function runUnitTests()
         place(g, 0, 1, COLOR_Y); g[1][1] = gemCounter(COLOR_Y, 5);
         mergePowerGems(g);
         assert(g[0][0].powerGemId === -1, 'merge: counter gem blocks rectangle');
+
+        // Return value: true when something changed, false on a stable grid
+        g = emptyGrid();
+        for (let x = 0; x < 2; x++)
+        for (let y = 0; y < 2; y++) place(g, x, y, COLOR_R);
+        assert(mergePowerGems(g) === true,  'merge: returns true when 2x2 newly formed');
+        assert(mergePowerGems(g) === false, 'merge: returns false on stable grid (idempotent)');
+
+        // Extension: 2x2 grows to 2x3, existing id preserved
+        g = emptyGrid();
+        for (let x = 0; x < 2; x++)
+        for (let y = 0; y < 2; y++) place(g, x, y, COLOR_B);
+        mergePowerGems(g);
+        const extId = g[0][0].powerGemId;
+        place(g, 0, 2, COLOR_B); place(g, 1, 2, COLOR_B);
+        mergePowerGems(g);
+        assert(g[0][2].powerGemId === extId, 'merge: 2x2 extending to 2x3 keeps existing id');
+        assert(g[0][0].powerGemId === extId, 'merge: original cells still have same id after extension');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
