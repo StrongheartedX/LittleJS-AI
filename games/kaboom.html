@@ -135,8 +135,13 @@ function startWave(w) {
 }
 
 function spawnBomb() {
+    const facing = bomber.vx >= 0 ? 1 : -1;
+    // Spawn from the throwing hand — must match the dropping pose in
+    // drawBomber so the bomb visibly comes OUT OF his hand.
+    const handX = bomber.x + facing * 1.4;
+    const handY = ROOF_Y + 1.7 - 0.5;     // bodyY - 0.5 (dropping arm dip)
     bombs.push({
-        pos: vec2(bomber.x, ROOF_Y - 0.5),
+        pos: vec2(handX, handY),
         vel: vec2(0, -bombFallSpeed(wave)),
         fuse: rand(0, PI * 2),
     });
@@ -406,16 +411,31 @@ function drawBomber() {
     drawRect(vec2(x, bodyY - 0.6), vec2(1.55, 0.18), hsl(0, 0, .12));
     drawRect(vec2(x, bodyY - 0.6), vec2(0.3, 0.18), hsl(.13, .9, .65));      // buckle
 
-    // Arms — one extended forward when dropping
-    const armY = bodyY;
-    const armReach = bomber.dropTimer > 0 ? 1.1 : 0.6;
-    const armDip = bomber.dropTimer > 0 ? -0.3 : 0;
-    drawLine(vec2(x, armY + 0.1),
-             vec2(x + facing * armReach, armY - 0.2 + armDip),
-             0.22, hsl(.08, .5, .8));
-    drawLine(vec2(x, armY + 0.1),
-             vec2(x - facing * 0.5, armY + 0.2),
-             0.22, hsl(.08, .5, .8));
+    // Throwing arm — extends forward, dips down + reaches further when
+    // dropping. Hand position MUST match spawnBomb's handX/handY so the
+    // bomb visibly leaves his hand.
+    const throwShoulder = vec2(x + facing * 0.5, bodyY + 0.4);
+    const throwReach    = bomber.dropTimer > 0 ? 1.4 : 1.0;
+    const throwDip      = bomber.dropTimer > 0 ? -0.5 : -0.1;
+    const throwHand     = vec2(x + facing * throwReach, bodyY + throwDip);
+    drawLine(throwShoulder, throwHand, 0.22, hsl(.08, .5, .8));
+    drawCircle(throwHand, 0.36, hsl(.08, .5, .8));
+
+    // Holding arm — bent at elbow, cradles the pile against his chest on
+    // the side OPPOSITE to facing.
+    const holdShoulder = vec2(x - facing * 0.5, bodyY + 0.4);
+    const holdElbow    = vec2(x - facing * 0.65, bodyY - 0.1);
+    const holdHand     = vec2(x - facing * 0.2, bodyY - 0.3);
+    drawLine(holdShoulder, holdElbow, 0.22, hsl(.08, .5, .8));
+    drawLine(holdElbow,    holdHand,  0.22, hsl(.08, .5, .8));
+    drawCircle(holdHand, 0.36, hsl(.08, .5, .8));
+
+    // Pile of remaining bombs in his off-hand — shrinks as he drops them.
+    // On title (attract), show a full pile so he looks menacing.
+    const remainingBombs = isPlaying
+        ? max(0, bombsInWave - bombsSpawned)
+        : (onTitle ? 5 : 0);
+    drawBombPile(holdHand.x, holdHand.y + 0.22, min(remainingBombs, 5));
 
     // Head (yellow with mustache + wicked grin)
     const headY = y + 3.1 + stepBob * 0.4;
@@ -445,6 +465,31 @@ function drawBomber() {
     drawRect(vec2(x, headY - 0.55), vec2(grin * 2, 0.18), hsl(0, 0, .05));
     drawRect(vec2(x - grin * 0.5, headY - 0.55), vec2(0.08, 0.18), hsl(0, 0, .95));
     drawRect(vec2(x + grin * 0.5, headY - 0.55), vec2(0.08, 0.18), hsl(0, 0, .95));
+}
+
+// Layouts for the held bomb pile. Each entry positions bombs so the pile
+// looks balanced at every count (a single bomb sits centered; a full pile
+// is a 3-on-bottom, 2-on-top triangle).
+function bombPilePositions(n) {
+    if (n <= 0) return [];
+    if (n === 1) return [[0, 0.1]];
+    if (n === 2) return [[-0.25, 0], [0.25, 0]];
+    if (n === 3) return [[-0.3, 0], [0, 0], [0.3, 0]];
+    if (n === 4) return [[-0.28, 0], [0.28, 0], [-0.14, 0.4], [0.14, 0.4]];
+    return [[-0.3, 0], [0, 0], [0.3, 0], [-0.15, 0.4], [0.15, 0.4]];
+}
+
+function drawBombPile(cx, cy, count) {
+    if (count <= 0) return;
+    const positions = bombPilePositions(min(count, 5));
+    const r = 0.22;
+    for (const p of positions) {
+        const px = cx + p[0], py = cy + p[1];
+        drawCircle(vec2(px, py), r * 2, hsl(0, 0, .08), 0.04, hsl(0, 0, .3));
+        drawCircle(vec2(px - r * 0.25, py + r * 0.25), r * 0.4, hsl(0, 0, .35));
+        drawLine(vec2(px, py + r),
+                 vec2(px + 0.05, py + r + 0.12), 0.05, hsl(.08, .4, .4));
+    }
 }
 
 function drawBomb(b) {
