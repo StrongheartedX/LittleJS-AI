@@ -549,9 +549,6 @@ function gameRenderPost()
 
     if (pausedLocal)
         drawTextScreen('PAUSED', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2), 70, hsl(0,0,1), 6, hsl(0,0,0));
-
-    for (let y=0; y<mainCanvasSize.y; y+=2)
-        drawLine(vec2(0, y), vec2(mainCanvasSize.x, y), 1, rgb(0,0,0,.08), undefined, 0, undefined, true);
 }
 
 engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
