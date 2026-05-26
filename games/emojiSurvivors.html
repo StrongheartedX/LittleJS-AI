@@ -88,7 +88,9 @@ class Player extends EngineObject
     {
         this.speed = playerSpeed;
         this.maxHp = playerMaxHp;
-        const dir = keyDirection().add(gamepadStick(0));
+        const dir = playerAI
+            ? aiDirection()
+            : keyDirection().add(gamepadStick(0));
         const move = dir.length() > 1 ? dir.normalize() : dir;
         this.velocity = move.scale(this.speed / 60);  // velocity is per-frame
 
@@ -690,6 +692,58 @@ let fireballDamage = 2;
 let elapsedTime = 0;
 let killCount = 0;
 let gameOver = false;
+let gameOverFrameCount = 0;
+
+// AI auto-player — toggle with the T key. Useful for balance testing.
+// Movement only (weapons auto-fire anyway), random level-up picks, and
+// an automatic restart ~1.5s after death so a long balance pass loops.
+let playerAI = false;
+
+function aiDirection()
+{
+    let dir = vec2();
+
+    // repel from enemies; weighted by threat (damage) and falloff^2
+    const dangerRange = 8;
+    for (const e of enemies)
+    {
+        const away = player.pos.subtract(e.pos);
+        const d = away.length();
+        if (d < dangerRange && d > .01)
+        {
+            const closeness = (dangerRange - d) / dangerRange;
+            const weight = 1 + e.dmg / 8;
+            dir = dir.add(away.normalize(closeness * closeness * weight));
+        }
+    }
+
+    // attract to nearby gems and hearts
+    const lureRange = 12;
+    for (const obj of engineObjects)
+    {
+        if (!(obj instanceof Pickup)) continue;
+        const toward = obj.pos.subtract(player.pos);
+        const d = toward.length();
+        if (d < lureRange && d > .01)
+        {
+            const pull = .25 * (lureRange - d) / lureRange;
+            dir = dir.add(toward.normalize(pull));
+        }
+    }
+
+    // arena wall repulsion so the AI doesn't trap itself in a corner
+    const wallBuf = 5;
+    const dxMin = player.pos.x - ARENA_MIN_X;
+    const dxMax = ARENA_MAX_X - player.pos.x;
+    const dyMin = player.pos.y - ARENA_MIN_Y;
+    const dyMax = ARENA_MAX_Y - player.pos.y;
+    if (dxMin < wallBuf) dir = dir.add(vec2((wallBuf - dxMin) / wallBuf, 0));
+    if (dxMax < wallBuf) dir = dir.add(vec2(-(wallBuf - dxMax) / wallBuf, 0));
+    if (dyMin < wallBuf) dir = dir.add(vec2(0, (wallBuf - dyMin) / wallBuf));
+    if (dyMax < wallBuf) dir = dir.add(vec2(0, -(wallBuf - dyMax) / wallBuf));
+
+    return dir.length() > 0 ? dir.normalize() : vec2();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
@@ -870,6 +924,7 @@ function restartGame()
     elapsedTime = 0;
     killCount = 0;
     gameOver = false;
+    gameOverFrameCount = 0;
 
     player = new Player();
     player.weapons = [new FireballWeapon()];
@@ -899,10 +954,24 @@ function showGameOverMenu()
 function gameUpdate()
 {
     elapsedTime += 1 / 60;
-    if (player.pendingLevelUps > 0 && !isMenuVisible())
+    if (player.pendingLevelUps > 0)
     {
-        showLevelUpMenu();
-        return;
+        if (playerAI)
+        {
+            // pick a random offered choice for each queued level-up
+            while (player.pendingLevelUps > 0)
+            {
+                const choices = buildUpgradeChoices();
+                if (choices.length === 0) { player.pendingLevelUps = 0; break; }
+                choices[randInt(choices.length)].apply();
+                player.pendingLevelUps--;
+            }
+        }
+        else if (!isMenuVisible())
+        {
+            showLevelUpMenu();
+            return;
+        }
     }
     updateSpawner();
     for (const w of player.weapons) w.update();
@@ -1014,8 +1083,32 @@ function drawHUD()
 
 function gameRenderPost()
 {
-    if (gameOver && keyWasPressed('KeyR')) restartGame();
+    if (keyWasPressed('KeyT')) playerAI = !playerAI;
+
+    if (gameOver)
+    {
+        gameOverFrameCount++;
+        // AI auto-restarts ~1.5s after death so a balance run keeps looping
+        if (keyWasPressed('KeyR') || (playerAI && gameOverFrameCount > 90))
+            restartGame();
+    }
+    else
+    {
+        gameOverFrameCount = 0;
+    }
+
     drawHUD();
+
+    if (playerAI)
+    {
+        drawTextScreen('🤖 AI [T]', vec2(20, mainCanvasSize.y - 24),
+                       18, new Color(.6, 1, .6), 3, BLACK, 'left');
+    }
+    else
+    {
+        drawTextScreen('T = AI test', vec2(20, mainCanvasSize.y - 24),
+                       14, new Color(.7, .7, .7), 2, BLACK, 'left');
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
