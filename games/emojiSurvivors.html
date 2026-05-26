@@ -172,6 +172,18 @@ const BOSS_SCHEDULE = [
 const bossesSpawned = new Set();
 let activeBoss = null;
 
+// Run duration — Reaper ☠️ spawns when the timer hits this. Tweakable so a
+// playtester can shorten it for fast iteration.
+let runDuration = 900;          // 15 minutes per design doc §17
+let reaperSpawned = false;
+let runVictory   = false;
+
+const REAPER_DEF = {
+    key: 'reaper', sprite: 'reaper', name: '☠️ THE REAPER',
+    hp: 2500, dmg: 999, speed: 7.5, size: 3.2, xpDrop: 0,
+    isReaper: true,
+};
+
 class Chest extends EngineObject
 {
     constructor(pos)
@@ -409,8 +421,17 @@ class Enemy extends EngineObject
             }
             if (this.isBoss)
             {
-                // bosses drop a 🎁 chest instead of a gem/heart
-                new Chest(this.pos.copy());
+                if (this.bossDef && this.bossDef.isReaper)
+                {
+                    // killing the Reaper wins the run
+                    runVictory = true;
+                    showVictoryMenu();
+                }
+                else
+                {
+                    // regular bosses drop a 🎁 chest instead of a gem/heart
+                    new Chest(this.pos.copy());
+                }
                 if (activeBoss === this) activeBoss = null;
             }
             else if (rand() < .1)
@@ -1189,6 +1210,14 @@ function updateSpawner()
             spawnBoss(boss);
         }
     }
+    // ☠️ Reaper at runDuration ends the run — boss with isReaper flag
+    if (elapsedTime >= runDuration && !reaperSpawned && !gameOver && !runVictory)
+    {
+        reaperSpawned = true;
+        spawnBoss(REAPER_DEF);
+        // override the default gold boss glow with ominous red
+        if (activeBoss) activeBoss.eliteAdditive = new Color(.65, 0, 0);
+    }
 
     // ramp the spawn interval from base down to 0.08s over the first 90 seconds
     spawner.interval = lerp(min(time / 90, 1), enemySpawnIntervalBase, 0.08);
@@ -1314,6 +1343,7 @@ async function gameInit()
     sprites.ant       = drawToTexture(11, paintEmoji('🐜'), 'a small black ant');
     sprites.snail     = drawToTexture(12, paintEmoji('🐌'), 'a brown snail with shell');
     sprites.clown     = drawToTexture(13, paintEmoji('🤡'), 'a clown face with red nose');
+    sprites.reaper    = drawToTexture(14, paintEmoji('☠️'), 'a skull and crossbones reaper');
 
     // weapons / projectiles 16-21
     sprites.fireball  = drawToTexture(16, paintEmoji('🔥'), 'a fireball, orange and yellow flames');
@@ -1360,6 +1390,7 @@ async function gameInit()
     tweak('xpToNextBase',             {min: 2,   max: 20});
     tweak('fireballDamage',           {min: 1,   max: 10});
     tweak('magnetRadius',             {min: 1,   max: 10});
+    tweak('runDuration',              {min: 60,  max: 1800});
 }
 
 // All available weapons by name. Names match the constructor classes below.
@@ -1514,14 +1545,19 @@ function restartGame()
     gameOverFrameCount = 0;
     bossesSpawned.clear();
     activeBoss = null;
+    reaperSpawned = false;
+    runVictory = false;
 
     player = new Player();
     player.weapons = [new FireballWeapon()];
     player.passives = [];
     recomputeMultipliers();
 
-    const m = getMenu('gameover');
-    if (m) { hideMenu('gameover'); m.destroy(); }
+    for (const id of ['gameover', 'victory'])
+    {
+        const m = getMenu(id);
+        if (m) { hideMenu(id); m.destroy(); }
+    }
 }
 
 function showGameOverMenu()
@@ -1539,6 +1575,23 @@ function showGameOverMenu()
         ],
     });
     showMenu('gameover');
+}
+
+function showVictoryMenu()
+{
+    const existing = getMenu('victory');
+    if (existing) existing.destroy();
+    createMenu({
+        id: 'victory',
+        title: '🏆 VICTORY',
+        subtitle: 'You felled the Reaper!\n⏱ ' + formatTime(elapsedTime) +
+                  '   💀 ' + killCount + '   Lv ' + player.level,
+        dismissable: false,
+        items: [
+            {type: 'button', label: 'PLAY AGAIN', onClick: restartGame},
+        ],
+    });
+    showMenu('victory');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1694,9 +1747,24 @@ function drawHUD()
     drawTextScreen('Lv ' + player.level, vec2(xpX, xpY + xpH + 14),
                    18, WHITE, 3, BLACK);
 
-    // Timer & kills — top-right
-    drawTextScreen('⏱ ' + formatTime(elapsedTime),
-                   vec2(cs.x - pad, pad + 14), 22, WHITE, 3, BLACK, 'right');
+    // Timer & kills — top-right. Timer goes red in the final 60s, and a
+    // pulsing "REAPER INCOMING" warning replaces the timer in the final 10s.
+    const remaining = max(0, runDuration - elapsedTime);
+    const timerColor = remaining < 60 ? new Color(1, .3, .3) : WHITE;
+    if (remaining > 0 && remaining < 10 && !reaperSpawned)
+    {
+        const flash = Math.sin(time * 12) > 0;
+        drawTextScreen('☠️ REAPER ' + Math.ceil(remaining),
+                       vec2(cs.x - pad, pad + 14), 24,
+                       flash ? new Color(1, .2, .2) : new Color(1, .7, .7),
+                       3, BLACK, 'right');
+    }
+    else
+    {
+        drawTextScreen('⏱ ' + formatTime(elapsedTime) + ' / ' +
+                       formatTime(runDuration),
+                       vec2(cs.x - pad, pad + 14), 22, timerColor, 3, BLACK, 'right');
+    }
     drawTextScreen('💀 ' + killCount,
                    vec2(cs.x - pad, pad + 44), 22, WHITE, 3, BLACK, 'right');
 }
