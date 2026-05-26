@@ -246,7 +246,7 @@ function roundedRect(ctx, x, y, w, h, r)
     ctx.closePath();
 }
 
-function drawCard(card, pos)
+function drawCard(card, pos, tint)
 {
     drawTile(pos, CARD_SIZE, cardSprites.bg);
 
@@ -270,6 +270,11 @@ function drawCard(card, pos)
     // Bottom-right corner, rotated 180° so glyphs read upside-down.
     drawTile(pos.add(vec2( CARD_SIZE.x/2 - CORNER_RANK_OFFSET.x, -CARD_SIZE.y/2 + CORNER_RANK_OFFSET.y)), CORNER_RANK_SIZE, rankTile, color, PI);
     drawTile(pos.add(vec2( CARD_SIZE.x/2 - CORNER_SUIT_OFFSET.x, -CARD_SIZE.y/2 + CORNER_SUIT_OFFSET.y)), CORNER_SUIT_SIZE, suitTile, color, PI);
+
+    // Translucent highlight veil applied LAST so it sits over the
+    // glyphs too. Uses the border-less tint tile so the bg's dark
+    // edge doesn't get re-tinted.
+    if (tint) drawTile(pos, CARD_SIZE, cardSprites.tint, tint);
 }
 
 // Pip positions for number cards (v = 2..10) — ported from
@@ -989,40 +994,49 @@ function gameRender()
         if (s.isEmpty() || s.type !== StackType.Cascade)
             drawSlotOutline(s);
 
-    // Stack cards — non-tweening pass. Tweening cards are deferred to a
-    // later pass so an in-flight auto-send-home flies over everything
-    // instead of being hidden behind cascade cards drawn after it.
-    for (const s of cardStacks)
-        for (const c of s.cards)
-            if (!c.isTweening())
-                drawCard(c, c.pos);
-
-    // Hover tint: a light-blue veil over every card that would lift
-    // together if the player clicked right now. Uses the border-less
-    // tint tile so the bg's dark edge doesn't show through.
-    if (handStack.isEmpty() && isPlaying && !won)
-    {
-        const tint = new Color(0.55, 0.8, 1.0, 0.4);
-        for (const c of pickableTail(stackUnderPoint(mousePos)))
-            drawTile(c.drawnPos(), CARD_SIZE, cardSprites.tint, tint);
-    }
-
-    // Legal-drop tint: a green veil on the top card (or empty slot anchor)
-    // of every stack that would accept the current hand. Mirrors the blue
-    // hover tint — color-coded: blue = "grab", green = "drop".
+    // Compute per-card tint for this frame. Color-coded:
+    //   blue  = "this would lift if you click" (hover, hand empty)
+    //   green = "this is a legal drop target" (dragging)
+    const HOVER_TINT = new Color(0.55, 0.8, 1.0, 0.4);
+    const DROP_TINT  = new Color(0.3, 1.0, 0.4, 0.4);
+    const hoverSet   = (handStack.isEmpty() && isPlaying && !won)
+        ? new Set(pickableTail(stackUnderPoint(mousePos))) : null;
+    const dropTops   = new Set();
     if (!handStack.isEmpty())
     {
-        const tint = new Color(0.3, 1.0, 0.4, 0.4);
         for (const s of cardStacks)
         {
             if (s === pickupOrigin || !isMoveLegal(s)) continue;
-            const tp = s.topCard() ? s.topCard().drawnPos() : s.pos;
-            drawTile(tp, CARD_SIZE, cardSprites.tint, tint);
+            const top = s.topCard();
+            if (top) dropTops.add(top);
+        }
+    }
+    const tintFor = c =>
+        dropTops.has(c) ? DROP_TINT :
+        (hoverSet && hoverSet.has(c)) ? HOVER_TINT :
+        null;
+
+    // Stack cards — non-tweening pass. Tint is applied inside drawCard,
+    // immediately after the card content, so each card carries its own
+    // highlight instead of relying on a global second pass.
+    for (const s of cardStacks)
+        for (const c of s.cards)
+            if (!c.isTweening())
+                drawCard(c, c.pos, tintFor(c));
+
+    // Empty legal-drop slots still need a phantom tint because there's
+    // no card to draw the overlay on.
+    if (!handStack.isEmpty())
+    {
+        for (const s of cardStacks)
+        {
+            if (s === pickupOrigin || !isMoveLegal(s) || !s.isEmpty()) continue;
+            drawTile(s.pos, CARD_SIZE, cardSprites.tint, DROP_TINT);
         }
     }
 
     // Tweening cards (auto-send-home, snap-back) drawn last so the
-    // flight path stays on top of static cards and highlights.
+    // flight path stays on top of static cards.
     for (const s of cardStacks)
         for (const c of s.cards)
             if (c.isTweening())
