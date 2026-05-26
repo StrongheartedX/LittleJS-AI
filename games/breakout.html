@@ -125,6 +125,12 @@ let state = 'serve'; // serve | lose (otherwise playing)
 let combo = 1;
 let floatTexts = []; // {pos, vel, text, color, life, maxLife}
 
+let shatter = [];        // {pos, size, color, life, maxLife}
+let screenShake = 0;     // current magnitude
+let shakeEnabled = true; // toggled via options (Task 7)
+let paddleFlash = 0;     // 0..1, decays
+const BALL_TRAIL_LEN = 8;
+
 let stickyTimer = 0;
 let laserTimer = 0;
 let laserCooldown = 0;
@@ -143,7 +149,7 @@ function applyPaddleWidth()
 
 function makeBall(pos, vel, size = .8)
 {
-    return { pos: pos.copy(), vel: vel.copy(), size, stuck: false, stuckOffsetX: 0 };
+    return { pos: pos.copy(), vel: vel.copy(), size, stuck: false, stuckOffsetX: 0, trail: [] };
 }
 
 function anyStuckBalls()
@@ -344,6 +350,23 @@ function spawnPowerupFromBrick(brick)
     });
 }
 
+function addShake(amount)
+{
+    if (shakeEnabled)
+        screenShake = max(screenShake, amount);
+}
+
+function addShatter(brick)
+{
+    shatter.push({
+        pos:     brick.pos.copy(),
+        size:    brick.size.copy(),
+        color:   brick.color,
+        life:    0,
+        maxLife: .15,
+    });
+}
+
 // Returns true if the brick was destroyed this call.
 function damageBrick(brick)
 {
@@ -361,6 +384,34 @@ function damageBrick(brick)
     }
 
     brick.alive = false;
+    addShatter(brick);
+    addShake(.05);
+
+    const c = brick.color;
+    new ParticleEmitter(
+        brick.pos, 0,                    // pos, angle
+        brick.size.scale(.8),            // emitSize (rect)
+        .1,                              // emitTime (one short burst)
+        140,                             // emitRate
+        PI,                              // emitConeAngle (full)
+        undefined,                       // tileInfo
+        c, c,                            // colorStartA/B
+        new Color(c.r, c.g, c.b, 0),     // colorEndA (fade alpha)
+        new Color(c.r, c.g, c.b, 0),     // colorEndB
+        .4,                              // particleTime
+        .15, .05,                        // sizeStart, sizeEnd
+        4,                               // speed
+        0,                               // angleSpeed
+        .95,                             // damping
+        1,                               // angleDamping
+        .3,                              // gravityScale (slight downward)
+        PI,                              // particleConeAngle
+        .1,                              // fadeRate
+        .3,                              // randomness
+        false,                           // collideTiles
+        true,                            // additive
+    );
+
     const base = BRICK_SCORE[brick.type];
     const gained = base * combo;
     score += gained;
@@ -422,6 +473,9 @@ function resetRunState()
     powerups.length = 0;
     bullets.length = 0;
     floatTexts.length = 0;
+    shatter.length = 0;
+    screenShake = 0;
+    paddleFlash = 0;
     stickyTimer = 0;
     laserTimer = 0;
     laserCooldown = 0;
@@ -533,6 +587,7 @@ function gameUpdate()
     updateBullets(dt);
     updateBalls(dt);
     updateFloatTexts(dt);
+    updateJuice(dt);
 
     // level clear check (gold doesn't count — only breakable bricks)
     for (const b of bricks)
@@ -555,6 +610,23 @@ function updateFloatTexts(dt)
     }
 }
 
+function updateJuice(dt)
+{
+    if (screenShake > 0)
+        screenShake = max(0, screenShake - dt * 1.5);
+
+    if (paddleFlash > 0)
+        paddleFlash = max(0, paddleFlash - dt * 6);
+
+    for (let i = shatter.length; i--;)
+    {
+        const s = shatter[i];
+        s.life += dt;
+        if (s.life >= s.maxLife)
+            shatter.splice(i, 1);
+    }
+}
+
 function updatePowerups(dt)
 {
     for (let i = powerups.length; i--;)
@@ -571,6 +643,7 @@ function updatePowerups(dt)
         if (isOverlapping(p.pos, p.size, paddlePos, paddleSize))
         {
             applyPowerup(p.type);
+            addShake(.10);
             powerups.splice(i, 1);
         }
     }
@@ -623,6 +696,11 @@ function updateBalls(dt)
         if (ball.vel.length() > 0)
             ball.vel = ball.vel.normalize(effectiveSpeed);
 
+        // Push trail BEFORE moving (gives a visible lag behind the ball)
+        ball.trail.push(ball.pos.copy());
+        if (ball.trail.length > BALL_TRAIL_LEN)
+            ball.trail.shift();
+
         ball.pos = ball.pos.add(ball.vel.scale(dt));
         const r = ball.size / 2;
 
@@ -641,6 +719,7 @@ function updateBalls(dt)
                 ball.vel = vec2(0, 0);
                 ball.pos.y = paddlePos.y + paddleSize.y / 2 + r + .001;
                 combo = 1;
+                paddleFlash = 1;
                 sfxBounce.play();
             }
             else
@@ -650,6 +729,7 @@ function updateBalls(dt)
                 const x = clamp(offset, -1, 1);
                 ball.vel = vec2(x * 1.2, 1).normalize(effectiveSpeed);
                 combo = 1;
+                paddleFlash = 1;
                 sfxBounce.play();
             }
         }
@@ -688,6 +768,7 @@ function updateBalls(dt)
         lives--;
         combo = 1;
         sfxLose.play();
+        addShake(.40);
 
         if (lives <= 0)
         {
@@ -707,6 +788,9 @@ function updateBalls(dt)
 function gameUpdatePost()
 {
     cameraPos = levelSize.scale(.5);
+    if (screenShake > 0)
+        cameraPos = cameraPos.add(vec2(rand(-1, 1), rand(-1, 1)).scale(screenShake));
+
     const fit = min(mainCanvasSize.x / levelSize.x, mainCanvasSize.y / levelSize.y);
     cameraScale = fit * .95;
 }
@@ -737,19 +821,32 @@ function gameRender()
         }
         else if (b.special)
         {
+            const pulse = 1 + .03 * Math.sin(time * 6 + b.pos.x);
             const frame = powerupColor(b.dropType);
-            drawRect(b.pos, b.size.subtract(vec2(.02, .02)), frame);
-            drawRect(b.pos, inset, b.color);
-            drawPowerLetter(b.pos, b.dropType);
+            drawRect(b.pos, b.size.subtract(vec2(.02, .02)).scale(pulse), frame);
+            drawRect(b.pos, inset.scale(pulse), b.color);
+            drawPowerLetter(b.pos, b.dropType, pulse);
         }
         else
             drawRect(b.pos, inset, b.color);
     }
 
+    // shatter (fading destroyed bricks)
+    for (const s of shatter)
+    {
+        const k = 1 - s.life / s.maxLife;
+        const c = s.color.copy();
+        c.a = k;
+        drawRect(s.pos, s.size.scale(k), c);
+    }
+
     // powerups
     for (const p of powerups)
     {
-        drawRect(p.pos, p.size, powerupColor(p.type));
+        const pulse = 1 + .15 * Math.sin(time * 8);
+        const c = powerupColor(p.type);
+        drawRect(p.pos, p.size.scale(1.4 * pulse), new Color(c.r, c.g, c.b, .25));
+        drawRect(p.pos, p.size, c);
         drawPowerLetter(p.pos, p.type);
     }
 
@@ -758,12 +855,30 @@ function gameRender()
         drawRect(s.pos, s.size, hsl(0, 0, 1));
 
     // paddle
-    const paddleCol = stickyTimer > 0 ? hsl(.12, .75, .75) : laserTimer > 0 ? hsl(0, .75, .72) : hsl(0, 0, .95);
+    let paddleCol = stickyTimer > 0 ? hsl(.12, .75, .75) :
+                    laserTimer > 0 ? hsl(0, .75, .72) :
+                                     hsl(0, 0, .95);
+    if (paddleFlash > 0)
+    {
+        const k = paddleFlash;
+        paddleCol = new Color(
+            lerp(paddleCol.r, 1, k),
+            lerp(paddleCol.g, 1, k),
+            lerp(paddleCol.b, 1, k),
+            1,
+        );
+    }
     drawRect(paddlePos, paddleSize, paddleCol);
 
     // balls
     for (const b of balls)
     {
+        for (let i = 0; i < b.trail.length; ++i)
+        {
+            const k = (i + 1) / (b.trail.length + 1);
+            drawCircle(b.trail[i], b.size * k, hsl(.12, .9, .6, k * .4));
+        }
+
         const ballColor =
             fireballTimer > 0 ? hsl(.07, 1, .6) :
             slowTimer     > 0 ? hsl(.50, .9, .7) :
