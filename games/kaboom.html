@@ -277,6 +277,34 @@ function updateBombs(dt) {
         b.pos.y += b.vel.y * dt;
         b.fuse += dt * 12;
 
+        // Smoke trail — small gray wisps just above the bomb (where it
+        // just was). As the bomb falls past, the wisps recede upward
+        // naturally, drawing the trail. behind:true so they render under
+        // the bomb instead of obscuring it.
+        if (rand() < 0.75) {
+            particles.push({
+                pos: b.pos.copy().add(vec2(rand(-0.1, 0.1), rand(0.1, 0.3))),
+                vel: vec2(rand(-0.4, 0.4), rand(0, 0.6)),
+                life: 0.55, maxLife: 0.55,
+                h: 0, s: 0, l: 0.55 + rand(0, 0.15),
+                gravityScale: -0.05,                  // very slight rise
+                size: rand(0.12, 0.22),
+                behind: true,
+            });
+        }
+        // Occasional bright fuse spark from the wick.
+        if (rand() < 0.35) {
+            particles.push({
+                pos: b.pos.copy().add(vec2(rand(-0.05, 0.05), BOMB_R + 0.42)),
+                vel: vec2(rand(-1, 1), rand(0.5, 2)),
+                life: 0.3, maxLife: 0.3,
+                h: 0.11, s: 1, l: 0.7,
+                gravityScale: 0.3,
+                size: rand(0.06, 0.1),
+                behind: true,
+            });
+        }
+
         // Catch test: only the TOP (highest) bucket catches. Lower buckets
         // are visual lives only — classic Kaboom rules.
         const dx = Math.abs(b.pos.x - bucketX);
@@ -558,8 +586,9 @@ function drawBuckets() {
     }
 }
 
-function drawParticles() {
+function drawParticles(behindLayer=false) {
     for (const p of particles) {
+        if (!!p.behind !== behindLayer) continue;
         const a = clamp(p.life / p.maxLife, 0, 1);
         drawRect(p.pos, vec2(p.size, p.size), hsl(p.h, p.s, p.l, a));
     }
@@ -820,9 +849,10 @@ function gameRender() {
     drawBuilding();
     drawTrees();
     drawBomber();
+    drawParticles(true);                 // trail smoke + sparks (behind bombs)
     for (const b of bombs) drawBomb(b);
     drawBuckets();
-    drawParticles();
+    drawParticles(false);                // explosions / catch sparks (on top)
 }
 
 function gameRenderPost() {
