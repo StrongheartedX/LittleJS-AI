@@ -1,25 +1,31 @@
 'use strict';
 
 // AI can use this module to build a sprite atlas from canvas 2D draw ops.
-// Fixed 4x4 grid of 500x500 drawable tiles in a 2048x2048 atlas, with
-// 6px transparent gutters around every tile to prevent bilinear bleed.
-// initDrawToTexture() replaces textureInfos[0]. drawToTexture() paints a
-// tile and returns a TileInfo. saveAtlasImage()/saveAtlasPrompt() export
-// the sheet + prompt. useAtlasImage(url) swaps in an AI-generated 2048
-// image without invalidating already-returned TileInfos.
+// initDrawToTexture(cols) builds a cols x cols grid inside a 2048 atlas.
+// cols=4 (default) gives 16 tiles of 500px with 6px gutters (unchanged
+// from the original module). cols=8 gives 64 tiles of 250px with 3px
+// gutters. Only 4 and 8 are supported. initDrawToTexture() replaces
+// textureInfos[0]. drawToTexture() paints a tile and returns a TileInfo.
+// saveAtlasImage()/saveAtlasPrompt() export the sheet + prompt.
+// useAtlasImage(url) swaps in an AI-generated 2048 image without
+// invalidating already-returned TileInfos.
 
-const ATLAS_SIZE   = 2048;
-const TILE_PADDING = 6;
-const TILE_SIZE    = 500;
-const TILE_STRIDE  = TILE_SIZE + TILE_PADDING * 2;     // 512
-const TILE_COLS    = ATLAS_SIZE / TILE_STRIDE;         // 4
-const TILE_COUNT   = TILE_COLS * TILE_COLS;            // 16
+const ATLAS_SIZE = 2048;
 
+let TILE_COLS, TILE_PADDING, TILE_STRIDE, TILE_SIZE, TILE_COUNT;
 let atlasCanvas, atlasCtx, atlasDirty, flushScheduled;
 const tileDescriptions = [];
 
-function initDrawToTexture()
+function initDrawToTexture(cols = 4)
 {
+    ASSERT(cols === 4 || cols === 8, 'cols must be 4 or 8');
+
+    TILE_COLS    = cols;
+    TILE_STRIDE  = ATLAS_SIZE / TILE_COLS;        // 512 or 256
+    TILE_PADDING = TILE_COLS === 4 ? 6 : 3;
+    TILE_SIZE    = TILE_STRIDE - TILE_PADDING * 2; // 500 or 250
+    TILE_COUNT   = TILE_COLS * TILE_COLS;
+
     atlasCanvas = document.createElement('canvas');
     atlasCanvas.width = atlasCanvas.height = ATLAS_SIZE;
     atlasCtx = atlasCanvas.getContext('2d');
@@ -87,10 +93,12 @@ function saveAtlasImage(filename = 'atlas')
 
 function saveAtlasPrompt(filename = 'atlas-prompt')
 {
-    let blob = 'A 2048x2048 sprite atlas, 4x4 grid of 500px tiles with ' +
-        '6px gutters between tiles, transparent background. ' +
-        'Tiles are numbered 0-15 left-to-right, top-to-bottom. Match each ' +
-        'tile\'s silhouette and palette to the rough drawing.\n\n';
+    let blob = 'A 2048x2048 sprite atlas, ' + TILE_COLS + 'x' + TILE_COLS +
+        ' grid of ' + TILE_SIZE + 'px tiles with ' + TILE_PADDING +
+        'px gutters between tiles, transparent background. ' +
+        'Tiles are numbered 0-' + (TILE_COUNT - 1) +
+        ' left-to-right, top-to-bottom. Match each tile\'s silhouette ' +
+        'and palette to the rough drawing.\n\n';
     for (let i = 0; i < TILE_COUNT; ++i)
     {
         if (tileDescriptions[i])
