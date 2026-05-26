@@ -267,9 +267,6 @@ async function gameInit()
 {
     setupLayout();
     newGame();
-    console.log('cardStacks length:', cardStacks.length,
-                '— total cards:', cardStacks.reduce((n, s) => n + s.cards.length, 0));
-
     // Match the engine's master volume to whatever the options slider starts at,
     // so the very first menu sound plays at the user-visible volume.
     setSoundVolume(.8);
@@ -711,14 +708,14 @@ function gameRender()
         const hit = stackUnderPoint(mousePos);
         if (hit && hit.card)
         {
-            const c = hit.card;
+            const cp = hit.card.drawnPos();
             const glow = new Color(1, 1, 0.3, 0.55);
             // Outline drawn as 4 rects just outside the card edges.
             const o = 0.25;
-            drawRect(vec2(c.pos.x, c.pos.y + CARD_SIZE.y/2 + o), vec2(CARD_SIZE.x + 2*o, 0.2), glow);
-            drawRect(vec2(c.pos.x, c.pos.y - CARD_SIZE.y/2 - o), vec2(CARD_SIZE.x + 2*o, 0.2), glow);
-            drawRect(vec2(c.pos.x - CARD_SIZE.x/2 - o, c.pos.y), vec2(0.2, CARD_SIZE.y + 2*o), glow);
-            drawRect(vec2(c.pos.x + CARD_SIZE.x/2 + o, c.pos.y), vec2(0.2, CARD_SIZE.y + 2*o), glow);
+            drawRect(vec2(cp.x, cp.y + CARD_SIZE.y/2 + o), vec2(CARD_SIZE.x + 2*o, 0.2), glow);
+            drawRect(vec2(cp.x, cp.y - CARD_SIZE.y/2 - o), vec2(CARD_SIZE.x + 2*o, 0.2), glow);
+            drawRect(vec2(cp.x - CARD_SIZE.x/2 - o, cp.y), vec2(0.2, CARD_SIZE.y + 2*o), glow);
+            drawRect(vec2(cp.x + CARD_SIZE.x/2 + o, cp.y), vec2(0.2, CARD_SIZE.y + 2*o), glow);
         }
     }
     // Green outline on stacks that would accept the current hand.
@@ -728,7 +725,7 @@ function gameRender()
         for (const s of cardStacks)
         {
             if (s === pickupOrigin || !isMoveLegal(s)) continue;
-            const tp = s.topCard() ? s.topCard().pos : s.pos;
+            const tp = s.topCard() ? s.topCard().drawnPos() : s.pos;
             const o = 0.25;
             drawRect(vec2(tp.x, tp.y + CARD_SIZE.y/2 + o), vec2(CARD_SIZE.x + 2*o, 0.2), ok);
             drawRect(vec2(tp.x, tp.y - CARD_SIZE.y/2 - o), vec2(CARD_SIZE.x + 2*o, 0.2), ok);
