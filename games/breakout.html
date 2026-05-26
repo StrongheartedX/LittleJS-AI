@@ -653,6 +653,10 @@ function gameUpdate()
     if (keyWasPressed('KeyR'))
         startNewGame();
 
+    // Debug: N cycles to the next level (skip-clear).
+    if (LEVELS.length > 1 && keyWasPressed('KeyN'))
+        advanceLevel();
+
     // paddle controls (keyboard overrides mouse)
     const left  = keyIsDown('ArrowLeft') || keyIsDown('KeyA');
     const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
