@@ -639,7 +639,7 @@
   </div>
   <div id="list"></div>
   <div id="sidebar-footer">
-    <button class="btn disabled" id="reloadBtn" title="Reload the current game">Reload</button>
+    <a class="btn disabled" id="sourceBtn" target="_blank" rel="noopener" title="View this game's source on GitHub">Source ↗</a>
     <button class="btn disabled" id="fullscreenBtn" title="Play fullscreen">Full ⛶</button>
     <a class="btn disabled" id="openBtn" target="_blank" rel="noopener" title="Open in a new tab">Open ↗</a>
   </div>
@@ -738,9 +738,11 @@ const searchEl = document.getElementById('search');
 const filterChipsEl = document.getElementById('filter-chips');
 const frameEl = document.getElementById('frame');
 const welcomeEl = document.getElementById('welcome');
-const reloadBtn = document.getElementById('reloadBtn');
+const sourceBtn = document.getElementById('sourceBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 const openBtn = document.getElementById('openBtn');
+// Base URL for the per-game "Source ↗" button — points at the game file on GitHub.
+const SOURCE_BASE = 'https://github.com/KilledByAPixel/LittleJS-AI/blob/main/games/';
 
 let currentFile = null;
 let activeCategory = 'all'; // sidebar filter
@@ -1046,7 +1048,8 @@ function showWelcome(pushHistory = true) {
   frameEl.style.display = 'none';
   welcomeEl.style.display = 'block';
   welcomeEl.scrollTop = 0;
-  reloadBtn.classList.add('disabled');
+  sourceBtn.classList.add('disabled');
+  sourceBtn.removeAttribute('href');
   fullscreenBtn.classList.add('disabled');
   openBtn.classList.add('disabled');
   openBtn.removeAttribute('href');
@@ -1072,7 +1075,8 @@ function selectGame(file, pushHistory = true) {
   loadIframe(file + '?t=' + Date.now());
   frameEl.style.display = 'block';
   welcomeEl.style.display = 'none';
-  reloadBtn.classList.remove('disabled');
+  sourceBtn.classList.remove('disabled');
+  sourceBtn.href = SOURCE_BASE + file;
   fullscreenBtn.classList.remove('disabled');
   openBtn.classList.remove('disabled');
   openBtn.href = file;
@@ -1105,9 +1109,6 @@ function loadFromHash() {
 sidebarLogoWrap.addEventListener('click', showWelcome);
 searchEl.addEventListener('input', renderList);
 window.addEventListener('hashchange', loadFromHash);
-reloadBtn.addEventListener('click', () => {
-  if (currentFile) loadIframe(currentFile + '?t=' + Date.now());
-});
 fullscreenBtn.addEventListener('click', () => {
   if (currentFile && frameEl.requestFullscreen) frameEl.requestFullscreen();
 });
