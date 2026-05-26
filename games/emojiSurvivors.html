@@ -1441,6 +1441,7 @@ function startRun(hero)
     }
     chainFlashes.length = 0;
     damageNumbers.length = 0;
+    aiSmoothedDir = vec2(1, 0);
     spawner.timer = 0;
     spawner.interval = 1.5;
     elapsedTime = 0;
@@ -1466,6 +1467,12 @@ function startRun(hero)
 // Movement only (weapons auto-fire anyway), random level-up picks, and
 // an automatic restart ~1.5s after death so a long balance pass loops.
 let playerAI = false;
+
+// Smoothed direction memory — AI motion is filtered through an EMA so the
+// heading can't snap every frame as enemies drift in and out of danger range
+// or attractive/repulsive forces balance out at zero. Without this the
+// player visibly vibrates.
+let aiSmoothedDir = vec2(1, 0);
 
 function aiDirection()
 {
@@ -1524,8 +1531,13 @@ function aiDirection()
         else
             dir = vec2(1, 0);  // arbitrary fallback if the world is empty
     }
+    const target = dir.normalize();
 
-    return dir.normalize();
+    // EMA blend toward the new target — keeps high-frequency direction
+    // flips from showing up as visible vibration. .12 ≈ 150ms time-constant
+    // at 60fps so the AI still reacts quickly to real threats.
+    aiSmoothedDir = aiSmoothedDir.scale(.88).add(target.scale(.12));
+    return aiSmoothedDir.length() > .01 ? aiSmoothedDir.normalize() : target;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1846,6 +1858,7 @@ function goToTitle()
     }
     chainFlashes.length = 0;
     damageNumbers.length = 0;
+    aiSmoothedDir = vec2(1, 0);
     bossesSpawned.clear();
     activeBoss = null;
     reaperSpawned = false;
