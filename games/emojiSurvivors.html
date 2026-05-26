@@ -85,6 +85,8 @@ class Player extends EngineObject
         this.pos.x = clamp(this.pos.x, ARENA_MIN_X + .6, ARENA_MAX_X - .6);
         this.pos.y = clamp(this.pos.y, ARENA_MIN_Y + .6, ARENA_MAX_Y - .6);
 
+        this.renderOrder = -this.pos.y;
+
         if (this.hp <= 0 && !gameOver)
         {
             gameOver = true;
@@ -147,6 +149,8 @@ class Enemy extends EngineObject
         }
 
         super.update();
+
+        this.renderOrder = -this.pos.y;
 
         // tick contact cooldown
         if (this.hitCooldown > 0) this.hitCooldown -= 1 / 60;
@@ -214,6 +218,8 @@ class Projectile extends EngineObject
     {
         super.update();
 
+        this.renderOrder = -this.pos.y;
+
         this.lifetime -= 1 / 60;
         if (this.lifetime <= 0) { this.destroy(); return; }
 
@@ -230,7 +236,7 @@ class Projectile extends EngineObject
     }
 }
 
-function xpToNext(level) { return xpToNextBase + level * 3; }
+function xpToNext(level) { return xpToNextBase + level * level * 2; }
 
 class Pickup extends EngineObject
 {
@@ -260,6 +266,8 @@ class Pickup extends EngineObject
         }
 
         super.update();
+
+        this.renderOrder = -this.pos.y;
 
         // pickup
         if (dist < .8)
@@ -330,7 +338,7 @@ class OrbitingStarWeapon
                 const next = this.hitMap.get(e) || 0;
                 if (now < next) continue;
                 e.takeDamage(this.damage());
-                this.hitMap.set(e, now + .5);
+                this.hitMap.set(e, now + 1);
             }
         }
     }
@@ -442,8 +450,8 @@ function pickWeightedType(elapsed)
 
 function updateSpawner()
 {
-    // ramp the spawn interval from 1.5s down to 0.4s over the first 3 minutes
-    spawner.interval = lerp(min(time / 180, 1), enemySpawnIntervalBase, 0.4);
+    // ramp the spawn interval from base down to 0.15s over the first 2 minutes
+    spawner.interval = lerp(min(time / 120, 1), enemySpawnIntervalBase, 0.15);
 
     spawner.timer -= 1 / 60;
     if (spawner.timer > 0) return;
@@ -451,15 +459,21 @@ function updateSpawner()
 
     if (enemies.length >= ENEMY_CAP) return;
 
-    const type = pickWeightedType(time);
-    let pos;
-    for (let tries = 0; tries < 4; ++tries)
+    // burst spawning — more enemies per tick as the run goes on
+    const burst = min(1 + Math.floor(time / 30), 6);
+    for (let n = 0; n < burst; ++n)
     {
-        pos = player.pos.add(vec2().setAngle(rand(2 * PI), SPAWN_RADIUS));
-        if (pos.x >= ARENA_MIN_X && pos.x <= ARENA_MAX_X &&
-            pos.y >= ARENA_MIN_Y && pos.y <= ARENA_MAX_Y) break;
+        if (enemies.length >= ENEMY_CAP) break;
+        const type = pickWeightedType(time);
+        let pos;
+        for (let tries = 0; tries < 4; ++tries)
+        {
+            pos = player.pos.add(vec2().setAngle(rand(2 * PI), SPAWN_RADIUS));
+            if (pos.x >= ARENA_MIN_X && pos.x <= ARENA_MAX_X &&
+                pos.y >= ARENA_MIN_Y && pos.y <= ARENA_MAX_Y) break;
+        }
+        new Enemy(pos, type);
     }
-    new Enemy(pos, type);
 }
 
 let magnetRadius = 3;
@@ -494,12 +508,13 @@ async function gameInit()
     sprites.gem       = drawToTexture(24, paintEmoji('💎'), 'a cyan diamond gem');
     sprites.heart     = drawToTexture(25, paintEmoji('❤️'), 'a red heart');
 
-    // ground / decor 32-34
-    sprites.grass1    = drawToTexture(32, paintEmoji('🌿'), 'a green herb tuft');
-    sprites.grass2    = drawToTexture(33, paintEmoji('🌱'), 'a green seedling sprout');
-    sprites.rock      = drawToTexture(34, paintEmoji('🪨'), 'a gray rock');
+    // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
+    sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
+    sprites.tree2     = drawToTexture(33, paintEmoji('🌲'), 'an evergreen pine tree');
+    sprites.tree3     = drawToTexture(34, paintEmoji('🌴'), 'a palm tree');
+    sprites.wall      = drawToTexture(35, paintEmoji('⛰️'), 'a rocky mountain peak');
 
-    canvasClearColor = hsl(.3, .15, .05);  // dark forest-floor green
+    canvasClearColor = hsl(.3, .35, .18);  // mossy grass green
 
     inputWASDEmulateDirection = true;
 
@@ -687,7 +702,7 @@ function cellHash(x, y)
 
 function drawGround()
 {
-    const groundSprites = [sprites.grass1, sprites.grass2, sprites.rock];
+    const groundSprites = [sprites.tree1, sprites.tree2, sprites.tree3];
     const cam = cameraPos;
     const half = getCameraSize().scale(.5);
     const minX = max(Math.floor(cam.x - half.x), ARENA_MIN_X);
@@ -701,14 +716,44 @@ function drawGround()
         // ~1 tile per 9 cells (12% density) — keeps the floor sparse
         if ((h & 7) !== 0) continue;
         const which = (h >>> 3) % groundSprites.length;
-        drawTile(vec2(x + .5, y + .5), vec2(.8), groundSprites[which],
+        drawTile(vec2(x + 1, y + 1), vec2(1.4), groundSprites[which],
                  WHITE, 0, false, undefined, undefined);
+    }
+}
+
+function drawWalls()
+{
+    // mountain border just outside the arena rect; cull to visible camera rect
+    const cam = cameraPos;
+    const half = getCameraSize().scale(.5);
+    const minVX = cam.x - half.x - 1, maxVX = cam.x + half.x + 1;
+    const minVY = cam.y - half.y - 1, maxVY = cam.y + half.y + 1;
+    const size = vec2(1.6);
+
+    // top + bottom rows
+    for (let x = ARENA_MIN_X; x <= ARENA_MAX_X; ++x)
+    {
+        if (x < minVX || x > maxVX) continue;
+        if (maxVY >= ARENA_MAX_Y + 1)
+            drawTile(vec2(x, ARENA_MAX_Y + 1), size, sprites.wall);
+        if (minVY <= ARENA_MIN_Y - 1)
+            drawTile(vec2(x, ARENA_MIN_Y - 1), size, sprites.wall);
+    }
+    // left + right columns (skip corners already drawn above)
+    for (let y = ARENA_MIN_Y + 1; y <= ARENA_MAX_Y - 1; ++y)
+    {
+        if (y < minVY || y > maxVY) continue;
+        if (maxVX >= ARENA_MAX_X + 1)
+            drawTile(vec2(ARENA_MAX_X + 1, y), size, sprites.wall);
+        if (minVX <= ARENA_MIN_X - 1)
+            drawTile(vec2(ARENA_MIN_X - 1, y), size, sprites.wall);
     }
 }
 
 function gameRender()
 {
     drawGround();
+    drawWalls();
     drawChainFlashes();
 }
 function formatTime(s)
