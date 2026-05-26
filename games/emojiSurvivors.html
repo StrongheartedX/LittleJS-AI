@@ -123,9 +123,13 @@ class Player extends EngineObject
 }
 
 const ENEMY_TYPES = [
-    {key:'zombie', sprite:'zombie', hp: 3, dmg: 10, speed: 1.5, xpDrop: 1},
-    {key:'bat',    sprite:'bat',    hp: 1, dmg: 5,  speed: 4.0, xpDrop: 1},
-    {key:'skull',  sprite:'skull',  hp: 8, dmg: 15, speed: 1.2, xpDrop: 3},
+    {key:'ant',    sprite:'ant',    hp: 1,  dmg: 3,  speed: 1.0, xpDrop: 1, size: .55},
+    {key:'zombie', sprite:'zombie', hp: 3,  dmg: 10, speed: 1.5, xpDrop: 1, size: 1.0},
+    {key:'bat',    sprite:'bat',    hp: 1,  dmg: 5,  speed: 4.0, xpDrop: 1, size: .85},
+    {key:'snail',  sprite:'snail',  hp: 25, dmg: 5,  speed: .7,  xpDrop: 5, size: 1.2},
+    {key:'skull',  sprite:'skull',  hp: 8,  dmg: 15, speed: 1.2, xpDrop: 3, size: 1.0},
+    {key:'clown',  sprite:'clown',  hp: 5,  dmg: 8,  speed: 1.8, xpDrop: 2, size: 1.0,
+                                    splitInto: 'ant', splitCount: 3},
 ];
 
 const enemies = [];
@@ -134,7 +138,8 @@ class Enemy extends EngineObject
 {
     constructor(pos, type)
     {
-        super(pos, vec2(1.0), sprites[type.sprite]);
+        const sz = type.size != null ? type.size : 1.0;
+        super(pos, vec2(sz), sprites[type.sprite]);
         this.type     = type;
         this.hp       = type.hp;
         this.dmg      = type.dmg;
@@ -148,6 +153,7 @@ class Enemy extends EngineObject
         enemies.push(this);
         this.hitCooldown = 0;
         this.hitFlashTimer = 0;
+        this.frozenTimer = 0;
         this.tint = null;
         this.additive = null;
     }
@@ -168,12 +174,24 @@ class Enemy extends EngineObject
 
     update()
     {
+        // tick status effects, set tint based on the strongest one
+        if (this.frozenTimer > 0)
+        {
+            this.frozenTimer -= 1 / 60;
+            this.tint = new Color(.45, .75, 1);
+        }
+        else
+        {
+            this.tint = null;
+        }
+        const moveScale = this.frozenTimer > 0 ? 0 : 1;
+
         // walk toward the player
         const toPlayer = player.pos.subtract(this.pos);
         const dist = toPlayer.length();
         if (dist > .01)
         {
-            const step = toPlayer.normalize(this.speed / 60);
+            const step = toPlayer.normalize(this.speed * moveScale / 60);
             this.velocity = step;
         }
 
@@ -211,6 +229,20 @@ class Enemy extends EngineObject
         if (this.hp <= 0)  // only drop on death, not despawn
         {
             killCount++;
+            // split into smaller enemies if the type defines a split
+            if (this.type.splitInto)
+            {
+                const child = ENEMY_TYPES.find(t => t.key === this.type.splitInto);
+                if (child)
+                {
+                    const count = this.type.splitCount || 3;
+                    for (let i = 0; i < count; ++i)
+                    {
+                        const offset = vec2().setAngle(rand(2 * PI), .6);
+                        new Enemy(this.pos.add(offset), child);
+                    }
+                }
+            }
             if (rand() < .1)
                 new Pickup(this.pos.copy(), sprites.heart, 'heart', 20);
             else
@@ -229,13 +261,14 @@ class Enemy extends EngineObject
 
 class Projectile extends EngineObject
 {
-    constructor(pos, dir, speed, damage, lifetime, sprite, piercing = false)
+    constructor(pos, dir, speed, damage, lifetime, sprite, piercing = false, onHit = null)
     {
         super(pos, vec2(.6), sprite);
         this.velocity = dir.normalize(speed / 60);
         this.damage   = damage;
         this.lifetime = lifetime;
         this.piercing = piercing;
+        this.onHit    = onHit;
         this.hitSet   = new Set();
         this.damping = 1;
         this.friction = 1;
@@ -259,6 +292,7 @@ class Projectile extends EngineObject
             if (isOverlapping(this.pos, this.size, e.pos, e.size))
             {
                 e.takeDamage(this.damage);
+                if (this.onHit) this.onHit(e);
                 this.hitSet.add(e);
                 if (!this.piercing) { this.destroy(); return; }
             }
@@ -449,6 +483,142 @@ class FireballWeapon
     }
 }
 
+class PizzaTossWeapon
+{
+    constructor()
+    {
+        this.level = 1;
+        this.name = 'Pizza Toss';
+        this.cooldown = 0;
+        this.facing = vec2(1, 0);
+    }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    damage()  { return 4 + this.level * 2; }
+
+    update()
+    {
+        // remember the last direction the player moved so a stationary
+        // player still has a sensible throw direction
+        if (player.velocity.length() > .005)
+            this.facing = player.velocity.normalize();
+
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = 1.1;
+
+        // fan-shot — one slice at level 1, three at level 3, five at level 5
+        const slices = 1 + (this.level - 1);
+        const spread = slices === 1 ? 0 : .35;
+        const baseAng = this.facing.angle();
+        for (let i = 0; i < slices; ++i)
+        {
+            const t = slices === 1 ? .5 : i / (slices - 1);
+            const ang = baseAng + lerp(t, -spread, spread);
+            const dir = vec2().setAngle(ang, 1);
+            const proj = new Projectile(player.pos.copy(), dir, 11,
+                this.damage(), 1.6, sprites.pizza, true);
+            proj.angularVelocity = 10;  // tumble through the air
+        }
+    }
+}
+
+class IceCubeWeapon
+{
+    constructor() { this.level = 1; this.name = 'Ice Cube'; this.cooldown = 0; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    damage()  { return 1 + this.level; }
+
+    update()
+    {
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = 1.5;
+
+        // fire `level` ice cubes at random enemies within range; freezes on hit
+        const range = 11;
+        const candidates = enemies.filter(e => e.pos.distance(player.pos) < range);
+        const dmg = this.damage();
+        for (let i = 0; i < this.level && candidates.length > 0; ++i)
+        {
+            const idx = randInt(candidates.length);
+            const target = candidates[idx];
+            candidates.splice(idx, 1);
+            const dir = target.pos.subtract(player.pos);
+            new Projectile(player.pos.copy(), dir, 14, dmg, 1.0,
+                sprites.ice, false, e => { e.frozenTimer = 1.5; });
+        }
+    }
+}
+
+class BombWeapon
+{
+    constructor() { this.level = 1; this.name = 'Bomb'; this.cooldown = 0; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    damage()  { return 10 + this.level * 5; }
+    radius()  { return 2.5 + this.level * .4; }
+
+    update()
+    {
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = 2.6;
+        new Bomb(player.pos.copy(), this.damage(), this.radius());
+    }
+}
+
+class Bomb extends EngineObject
+{
+    constructor(pos, damage, radius)
+    {
+        super(pos, vec2(.8), sprites.bomb);
+        this.damageAmount = damage;
+        this.radius = radius;
+        this.fuse = .9;
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.setCollision(false, false, false, false);
+        this.velocity = vec2();
+        this.tint = null;
+        this.additive = null;
+    }
+
+    update()
+    {
+        super.update();
+        this.renderOrder = -this.pos.y;
+
+        this.fuse -= 1 / 60;
+        // pulse faster as the fuse runs out
+        const pulseRate = lerp(clamp(this.fuse / .9, 0, 1), 6, 20);
+        const pulse = Math.sin(time * pulseRate) * .5 + .5;
+        this.additive = new Color(.6 * pulse, .1 * pulse, .1 * pulse);
+
+        if (this.fuse <= 0)
+        {
+            // damage all enemies in radius
+            for (const e of enemies)
+                if (e.pos.distance(this.pos) < this.radius)
+                    e.takeDamage(this.damageAmount);
+            // visual blast: emit chainFlashes radiating outward
+            const rays = 12;
+            for (let i = 0; i < rays; ++i)
+            {
+                const a = i * 2 * PI / rays;
+                const tip = this.pos.add(vec2().setAngle(a, this.radius));
+                chainFlashes.push({a: this.pos.copy(), b: tip, t: time + .25});
+            }
+            this.destroy();
+        }
+    }
+
+    render()
+    {
+        drawEmoji(this.pos, this.size, sprites.bomb, this.tint, this.additive);
+    }
+}
+
 const SPAWN_RADIUS = 20;
 const ENEMY_CAP    = 800;
 
@@ -457,12 +627,15 @@ const spawner = {
     interval: 1.5,
 };
 
-// Returns [zombie%, bat%, skull%] based on elapsed time.
+// Returns a weights array aligned with ENEMY_TYPES:
+//   [ant, zombie, bat, snail, skull, clown]
 function enemyMixForTime(seconds)
 {
-    if (seconds < 20)  return [1.0, 0.0, 0.0];
-    if (seconds < 60)  return [0.7, 0.3, 0.0];
-    return [0.5, 0.3, 0.2];
+    if (seconds < 15)  return [.60, .40,   0,   0,   0,   0];
+    if (seconds < 40)  return [.40, .30, .30,   0,   0,   0];
+    if (seconds < 80)  return [.30, .25, .25, .10, .10,   0];
+    if (seconds < 150) return [.25, .20, .20, .15, .10, .10];
+    return                    [.20, .15, .20, .20, .10, .15];
 }
 
 function pickWeightedType(elapsed)
@@ -525,15 +698,21 @@ async function gameInit()
 
     sprites.player    = drawToTexture(0,  paintEmoji('🧙'), 'a wizard in robes, facing forward');
 
-    // enemies 8-10
+    // enemies 8-13
     sprites.zombie    = drawToTexture(8,  paintEmoji('🧟'), 'a green zombie shambling forward');
     sprites.bat       = drawToTexture(9,  paintEmoji('🦇'), 'a black bat with spread wings');
     sprites.skull     = drawToTexture(10, paintEmoji('💀'), 'a white skull, menacing');
+    sprites.ant       = drawToTexture(11, paintEmoji('🐜'), 'a small black ant');
+    sprites.snail     = drawToTexture(12, paintEmoji('🐌'), 'a brown snail with shell');
+    sprites.clown     = drawToTexture(13, paintEmoji('🤡'), 'a clown face with red nose');
 
-    // weapons / projectiles 16-18
+    // weapons / projectiles 16-21
     sprites.fireball  = drawToTexture(16, paintEmoji('🔥'), 'a fireball, orange and yellow flames');
     sprites.star      = drawToTexture(17, paintEmoji('🌟'), 'a yellow glowing star');
     sprites.bolt      = drawToTexture(18, paintEmoji('⚡'), 'a yellow lightning bolt');
+    sprites.pizza     = drawToTexture(19, paintEmoji('🍕'), 'a pizza slice');
+    sprites.bomb      = drawToTexture(20, paintEmoji('💣'), 'a black bomb with fuse');
+    sprites.ice       = drawToTexture(21, paintEmoji('🧊'), 'a clear ice cube');
 
     // pickups 24-25
     sprites.gem       = drawToTexture(24, paintEmoji('💎'), 'a cyan diamond gem');
@@ -572,13 +751,17 @@ async function gameInit()
 }
 
 // All available weapons by name. Names match the constructor classes below.
-const ALL_WEAPONS = ['Fireball', 'OrbitingStar', 'ChainLightning'];
+const ALL_WEAPONS = ['Fireball', 'OrbitingStar', 'ChainLightning',
+                     'PizzaToss', 'IceCube', 'Bomb'];
 
 function makeWeaponByName(name)
 {
     if (name === 'Fireball')       return new FireballWeapon();
     if (name === 'OrbitingStar')   return new OrbitingStarWeapon();
     if (name === 'ChainLightning') return new ChainLightningWeapon();
+    if (name === 'PizzaToss')      return new PizzaTossWeapon();
+    if (name === 'IceCube')        return new IceCubeWeapon();
+    if (name === 'Bomb')           return new BombWeapon();
     return null;
 }
 
@@ -587,6 +770,9 @@ function emojiForWeapon(name)
     if (name === 'Fireball')       return '🔥';
     if (name === 'OrbitingStar')   return '🌟';
     if (name === 'ChainLightning') return '⚡';
+    if (name === 'PizzaToss')      return '🍕';
+    if (name === 'IceCube')        return '🧊';
+    if (name === 'Bomb')           return '💣';
     return '?';
 }
 
@@ -605,8 +791,8 @@ function buildUpgradeChoices()
             });
         }
     }
-    // Unlock new weapons (cap at 3 total in MVP)
-    if (player.weapons.length < 3)
+    // Unlock new weapons (cap at 5 total)
+    if (player.weapons.length < 5)
     {
         const have = new Set(player.weapons.map(w =>
             w.constructor.name.replace(/Weapon$/, '')));
@@ -674,7 +860,7 @@ function restartGame()
     for (const obj of engineObjects.slice())
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
-            obj instanceof Pickup)
+            obj instanceof Pickup || obj instanceof Bomb)
             obj.destroy();
     }
 
