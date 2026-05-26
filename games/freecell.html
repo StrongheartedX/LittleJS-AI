@@ -312,6 +312,34 @@ async function gameInit()
         onPlay: playFromTitle,
         canReveal: () => !isPlaying,
     });
+
+    // ----- pause menu -----
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume', label:'RESUME',        onClick: () => hideMenu('pause')},
+            {type:'button',              label:'NEW GAME',      onClick: () =>
+                showConfirmDialog({
+                    message: 'Abandon this game and start a new one?',
+                    onYes: () => { newGame(); clearSubmenuStack(); hideAllMenus(); },
+                })},
+            {type:'button',              label:'OPTIONS',       onClick: () => pushMenu('options')},
+            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
+                showConfirmDialog({
+                    message: 'Quit to title?',
+                    onYes: () =>
+                    {
+                        clearSubmenuStack();
+                        hideAllMenus();
+                        newGame();             // reset board so title backdrop is clean
+                        setPlaying(false);
+                        showMenu('title');
+                    },
+                })},
+        ],
+    });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -512,6 +540,7 @@ function redoState()
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
+    if (bindPauseKey({ when: () => isPlaying && !won })) return;
     if (!isPlaying || won) return;
 
     if (mouseWasPressed(0) && handStack.isEmpty())
