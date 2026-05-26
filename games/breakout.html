@@ -52,12 +52,6 @@ let laserCooldown = 0;
 // sounds
 let sfxBounce, sfxBrick, sfxLose, sfxWin, sfxPower, sfxLaser;
 
-// helpers
-const playSound = (s) => { try { s && s.play(); } catch(e) {} };
-const clampToLevelX = (x, halfWidth) => clamp(x, halfWidth, levelSize.x - halfWidth);
-const aabbOverlap = (posA, sizeA, posB, sizeB) =>
-    abs(posA.x - posB.x) < (sizeA.x + sizeB.x) / 2 &&
-    abs(posA.y - posB.y) < (sizeA.y + sizeB.y) / 2;
 
 function applyPaddleWidth()
 {
@@ -105,13 +99,13 @@ function fireLaser()
     bullets.push({ pos: vec2(x2, y), vel: v, size: vec2(.22, .7) });
 
     laserCooldown = .14;
-    playSound(sfxLaser);
+    sfxLaser.play();
 }
 
 // Resolve ball (AABB) vs rect (AABB). Mutates ball pos/vel.
 function resolveBallRect(ball, rectPos, rectSize)
 {
-    if (!aabbOverlap(ball.pos, vec2(ball.size), rectPos, rectSize))
+    if (!isOverlapping(ball.pos, vec2(ball.size), rectPos, rectSize))
         return;
 
     const halfB = ball.size / 2;
@@ -195,7 +189,7 @@ function resetBricks()
 
     for (let i = idx.length - 1; i > 0; --i)
     {
-        const j = (Math.random() * (i + 1)) | 0;
+        const j = randInt(0, i + 1);
         const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
     }
 
@@ -205,7 +199,7 @@ function resetBricks()
         b.special = true;
 
         // Weighted drops: W common, M medium, T less, L rare
-        const r = Math.random();
+        const r = rand();
         b.dropType = r < .45 ? 'W' : r < .75 ? 'M' : r < .92 ? 'T' : 'L';
     }
 }
@@ -225,7 +219,7 @@ function spawnPowerupFromBrick(brick)
 
 function applyPowerup(type)
 {
-    playSound(sfxPower);
+    sfxPower.play();
 
     if (type === 'W')
     {
@@ -308,7 +302,7 @@ function gameUpdate()
     else
         paddlePos.x = mousePos.x;
 
-    paddlePos.x = clampToLevelX(paddlePos.x, paddleSize.x / 2);
+    paddlePos.x = clamp(paddlePos.x, paddleSize.x / 2, levelSize.x - paddleSize.x / 2);
 
     // timers
     if (stickyTimer > 0) stickyTimer = max(0, stickyTimer - dt);
@@ -348,7 +342,7 @@ function gameUpdate()
             return;
 
     state = 'win';
-    playSound(sfxWin);
+    sfxWin.play();
 }
 
 function updatePowerups(dt)
@@ -364,7 +358,7 @@ function updatePowerups(dt)
             continue;
         }
 
-        if (aabbOverlap(p.pos, p.size, paddlePos, paddleSize))
+        if (isOverlapping(p.pos, p.size, paddlePos, paddleSize))
         {
             applyPowerup(p.type);
             powerups.splice(i, 1);
@@ -388,12 +382,12 @@ function updateBullets(dt)
         for (const b of bricks)
         {
             if (!b.alive) continue;
-            if (!aabbOverlap(s.pos, s.size, b.pos, b.size))
+            if (!isOverlapping(s.pos, s.size, b.pos, b.size))
                 continue;
 
             b.alive = false;
             score += 100;
-            playSound(sfxBrick);
+            sfxBrick.play();
             spawnPowerupFromBrick(b);
 
             bullets.splice(i, 1);
@@ -409,7 +403,7 @@ function updateBalls(dt)
         // stuck balls ride the paddle
         if (ball.stuck)
         {
-            ball.pos.x = clampToLevelX(paddlePos.x + ball.stuckOffsetX, ball.size / 2);
+            ball.pos.x = clamp(paddlePos.x + ball.stuckOffsetX, ball.size / 2, levelSize.x - ball.size / 2);
             ball.pos.y = paddlePos.y + paddleSize.y / 2 + ball.size / 2 + .001;
             continue;
         }
@@ -418,12 +412,12 @@ function updateBalls(dt)
         const r = ball.size / 2;
 
         // walls
-        if (ball.pos.x - r < 0) { ball.pos.x = r; ball.vel.x = abs(ball.vel.x); playSound(sfxBounce); }
-        else if (ball.pos.x + r > levelSize.x) { ball.pos.x = levelSize.x - r; ball.vel.x = -abs(ball.vel.x); playSound(sfxBounce); }
-        if (ball.pos.y + r > levelSize.y) { ball.pos.y = levelSize.y - r; ball.vel.y = -abs(ball.vel.y); playSound(sfxBounce); }
+        if (ball.pos.x - r < 0) { ball.pos.x = r; ball.vel.x = abs(ball.vel.x); sfxBounce.play(); }
+        else if (ball.pos.x + r > levelSize.x) { ball.pos.x = levelSize.x - r; ball.vel.x = -abs(ball.vel.x); sfxBounce.play(); }
+        if (ball.pos.y + r > levelSize.y) { ball.pos.y = levelSize.y - r; ball.vel.y = -abs(ball.vel.y); sfxBounce.play(); }
 
         // paddle (only if moving down)
-        if (ball.vel.y < 0 && aabbOverlap(ball.pos, vec2(ball.size), paddlePos, paddleSize))
+        if (ball.vel.y < 0 && isOverlapping(ball.pos, vec2(ball.size), paddlePos, paddleSize))
         {
             if (stickyTimer > 0)
             {
@@ -431,7 +425,7 @@ function updateBalls(dt)
                 ball.stuckOffsetX = clamp(ball.pos.x - paddlePos.x, -paddleSize.x / 2 + r, paddleSize.x / 2 - r);
                 ball.vel = vec2(0, 0);
                 ball.pos.y = paddlePos.y + paddleSize.y / 2 + r + .001;
-                playSound(sfxBounce);
+                sfxBounce.play();
             }
             else
             {
@@ -439,7 +433,7 @@ function updateBalls(dt)
                 const offset = (ball.pos.x - paddlePos.x) / (paddleSize.x / 2);
                 const x = clamp(offset, -1, 1);
                 ball.vel = vec2(x * 1.2, 1).normalize(ballSpeed);
-                playSound(sfxBounce);
+                sfxBounce.play();
             }
         }
 
@@ -447,13 +441,13 @@ function updateBalls(dt)
         for (const b of bricks)
         {
             if (!b.alive) continue;
-            if (!aabbOverlap(ball.pos, vec2(ball.size), b.pos, b.size))
+            if (!isOverlapping(ball.pos, vec2(ball.size), b.pos, b.size))
                 continue;
 
             resolveBallRect(ball, b.pos, b.size);
             b.alive = false;
             score += 100;
-            playSound(sfxBrick);
+            sfxBrick.play();
             spawnPowerupFromBrick(b);
             ball.vel = ball.vel.normalize(ballSpeed);
             break;
@@ -469,7 +463,7 @@ function updateBalls(dt)
     if (!balls.length)
     {
         lives--;
-        playSound(sfxLose);
+        sfxLose.play();
 
         if (lives <= 0)
         {
