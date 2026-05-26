@@ -57,6 +57,53 @@ showEngineVersion = false; // Hide engine version console display
   // Sounds
   let sfxPaddle, sfxWall, sfxScore, sfxServe;
 
+  // FX state
+  const COLOR_L = hsl(.50, .9, .65);   // cyan (left team)
+  const COLOR_R = hsl(.95, .9, .65);   // magenta (right team)
+  const TRAIL_LEN = 14;
+
+  let shake = 0;
+  let leftFlash = 0, rightFlash = 0;
+  let leftScoreFlash = 0, rightScoreFlash = 0;
+  let bgFlash = 0, bgFlashColor = COLOR_L;
+  let lastHitter = 0;                  // -1 left, +1 right, 0 none
+  let ballTrail = [];                  // {pos, color}
+
+  function addShake(a) { shake = max(shake, a); }
+
+  function ballTintColor()
+  {
+      if (lastHitter < 0) return COLOR_L;
+      if (lastHitter > 0) return COLOR_R;
+      return hsl(0, 0, 1);
+  }
+
+  function colorLerp(a, b, k)
+  {
+      return new Color(lerp(a.r, b.r, k), lerp(a.g, b.g, k), lerp(a.b, b.b, k), 1);
+  }
+
+  function spawnHitBurst(pos, color)
+  {
+      new ParticleEmitter(
+          pos, 0,                       // pos, angle
+          vec2(.1),                     // emitSize
+          .06,                          // emitTime
+          400,                          // emitRate
+          PI,                           // emitConeAngle (full burst)
+          undefined,
+          color, color,
+          new Color(color.r, color.g, color.b, 0),
+          new Color(color.r, color.g, color.b, 0),
+          .55,                          // particleTime
+          .35, .05,                     // sizeStart, sizeEnd
+          .5,                           // speed
+          0, .9, 1, 0,                  // angleSpeed, damping, angleDamping, gravityScale
+          PI, .1, .6,                   // particleConeAngle, fadeRate, randomness
+          false, true,                  // collideTiles, additive
+      );
+  }
+
   ///////////////////////////////////////////////////////////////////////////////////////////////
   // Helpers
 
@@ -134,6 +181,13 @@ showEngineVersion = false; // Hide engine version console display
       else scoreR++;
 
       sfxScore?.play();
+      addShake(.3);
+      bgFlash = 1;
+      bgFlashColor = leftScored ? COLOR_L : COLOR_R;
+      if (leftScored) leftScoreFlash = 1;
+      else rightScoreFlash = 1;
+      lastHitter = 0;
+      ballTrail.length = 0;
 
       // win at 10
       if (scoreL >= 10 || scoreR >= 10)
@@ -251,12 +305,16 @@ showEngineVersion = false; // Hide engine version console display
           ball.pos.y = yLimit;
           ball.vel.y = -Math.abs(ball.vel.y);
           sfxWall?.play(ball.pos);
+          spawnHitBurst(ball.pos, ballTintColor());
+          addShake(.06);
       }
       else if (ball.pos.y < -yLimit)
       {
           ball.pos.y = -yLimit;
           ball.vel.y = Math.abs(ball.vel.y);
           sfxWall?.play(ball.pos);
+          spawnHitBurst(ball.pos, ballTintColor());
+          addShake(.06);
       }
 
       // Left paddle
@@ -271,6 +329,11 @@ showEngineVersion = false; // Hide engine version console display
           const speed = clamp(ball.vel.length() * 1.04, 14, maxBallSpeed);
           ball.vel = ball.vel.normalize(speed);
           sfxPaddle?.play(ball.pos);
+
+          lastHitter = -1;
+          leftFlash = 1;
+          addShake(.10);
+          spawnHitBurst(ball.pos, COLOR_L);
       }
 
       // Right paddle
@@ -285,6 +348,11 @@ showEngineVersion = false; // Hide engine version console display
           const speed = clamp(ball.vel.length() * 1.04, 14, maxBallSpeed);
           ball.vel = ball.vel.normalize(speed);
           sfxPaddle?.play(ball.pos);
+
+          lastHitter = 1;
+          rightFlash = 1;
+          addShake(.10);
+          spawnHitBurst(ball.pos, COLOR_R);
       }
 
       // Scoring
@@ -296,17 +364,42 @@ showEngineVersion = false; // Hide engine version console display
 
   function gameUpdatePost()
   {
-      // keep camera stable
-      setCameraPos(vec2(0,0));
+      // keep camera stable, then add shake offset on top
+      let cam = vec2(0, 0);
+      if (shake > 0)
+      {
+          cam = cam.add(vec2(rand(-1, 1), rand(-1, 1)).scale(shake));
+          shake = max(0, shake - timeDelta * 1.4);
+      }
+      setCameraPos(cam);
+
+      leftFlash       = max(0, leftFlash       - timeDelta * 4);
+      rightFlash      = max(0, rightFlash      - timeDelta * 4);
+      leftScoreFlash  = max(0, leftScoreFlash  - timeDelta * 1.2);
+      rightScoreFlash = max(0, rightScoreFlash - timeDelta * 1.2);
+      bgFlash         = max(0, bgFlash         - timeDelta * 1.8);
+
+      if (!waitingForServe && !gameOver)
+      {
+          ballTrail.push({ pos: ball.pos.copy(), color: ballTintColor() });
+          if (ballTrail.length > TRAIL_LEN)
+              ballTrail.shift();
+      }
+      else if (ballTrail.length)
+          ballTrail.length = 0;
   }
 
   function gameRender()
   {
       // background
-      drawRect(cameraPos, vec2(200), rgb(.08,.08,.08));
+      drawRect(vec2(0, 0), vec2(200), rgb(.08,.08,.08));
 
-      // playfield
-      drawRect(cameraPos, fieldSize, rgb(.12,.12,.12));
+      // playfield (tinted briefly toward scoring team on a score)
+      const fieldBase = rgb(.12, .12, .12);
+      const fieldCol  = bgFlash > 0
+          ? colorLerp(fieldBase, bgFlashColor, bgFlash * .5)
+          : fieldBase;
+      drawRect(vec2(0, 0), fieldSize, fieldCol);
 
       // center dashed line
       const dashCount = 18;
@@ -317,12 +410,30 @@ showEngineVersion = false; // Hide engine version console display
           drawRect(vec2(0, y), vec2(.35, .7), rgb(.85,.85,.85));
       }
 
-      // paddles
-      drawRect(left.pos, paddleSize, rgb(.95,.95,.95));
-      drawRect(right.pos, paddleSize, rgb(.95,.95,.95));
+      // ball trail (additive-feeling: older = smaller, more transparent)
+      for (let i = 0; i < ballTrail.length; ++i)
+      {
+          const t = ballTrail[i];
+          const k = (i + 1) / (ballTrail.length + 1);
+          const c = new Color(t.color.r, t.color.g, t.color.b, k * .55);
+          drawRect(t.pos, ballSize.scale(k * .9), c);
+      }
 
-      // ball
-      drawRect(ball.pos, ballSize, rgb(1,1,1));
+      // paddles — flash to team color on hit, white at rest
+      const leftCol  = colorLerp(rgb(.95,.95,.95), COLOR_L, leftFlash);
+      const rightCol = colorLerp(rgb(.95,.95,.95), COLOR_R, rightFlash);
+      drawRect(left.pos,  paddleSize, leftCol);
+      drawRect(right.pos, paddleSize, rightCol);
+
+      // ball — glow halo (sized with speed, color of last hitter)
+      const speedT = clamp((ball.vel.length() - 14) / (maxBallSpeed - 14), 0, 1);
+      const haloCol = ballTintColor();
+      drawRect(
+          ball.pos,
+          ballSize.scale(1.6 + speedT * 1.4),
+          new Color(haloCol.r, haloCol.g, haloCol.b, .18 + speedT * .25),
+      );
+      drawRect(ball.pos, ballSize, rgb(1, 1, 1));
 
       // top/bottom border lines (subtle)
       drawRect(vec2(0, halfField.y + .15), vec2(fieldSize.x, .15), rgb(.2,.2,.2));
@@ -331,9 +442,14 @@ showEngineVersion = false; // Hide engine version console display
 
   function gameRenderPost()
   {
-      // score
-      const scoreText = `${scoreL}    ${scoreR}`;
-      drawTextScreen(scoreText, vec2(mainCanvasSize.x/2, 60), 80, hsl(0,0,1), 6, hsl(0,0,0));
+      // score — split so each half pulses & tints with its team color on a score
+      const cx     = mainCanvasSize.x / 2;
+      const lSize  = 80 * (1 + leftScoreFlash  * .6);
+      const rSize  = 80 * (1 + rightScoreFlash * .6);
+      const lTxtC  = colorLerp(hsl(0, 0, 1), COLOR_L, leftScoreFlash);
+      const rTxtC  = colorLerp(hsl(0, 0, 1), COLOR_R, rightScoreFlash);
+      drawTextScreen(`${scoreL}`, vec2(cx - 90, 60), lSize, lTxtC, 6, hsl(0,0,0));
+      drawTextScreen(`${scoreR}`, vec2(cx + 90, 60), rSize, rTxtC, 6, hsl(0,0,0));
 
       // hints
       const lines = [];
