@@ -4,6 +4,7 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.15"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
 
@@ -17,8 +18,8 @@ showEngineVersion = false;
 const BOARD_W = 18, BOARD_H = 28;
 const BALL_R = .5;
 const PEG_R = .4;
-const PEG_FADE = .4;        // seconds for hit peg to vanish
-const SUBSTEPS = 4;          // physics substeps per frame (prevents tunneling)
+const PEG_FADE = .4;       // seconds for hit peg to vanish
+const SUBSTEPS = 4;         // physics substeps per frame (prevents tunneling)
 const SHOOT_SPEED = 22;
 const GRAVITY_Y = 28;
 
@@ -30,29 +31,36 @@ let pegs, bucket, activeBall;
 let particles, scorePops, stars, trail;
 let score, ballsRemaining, orangeLeft, comboCount, maxCombo;
 let win, gameOver;
+let isPlaying;       // false while title is up
+let endDialogShown;  // prevents re-triggering the game-over dialog
 
 let sfxShoot, sfxPeg, sfxOrange, sfxBucket, sfxLose, sfxWin;
+let sfxMenuNav, sfxMenuOK;
 
 ///////////////////////////////////////////////////////////////////////////////
 function gameInit()
 {
     cameraScale = 26;
     cameraPos = vec2(0, 0);
-    gravity = vec2(0, 0); // ball gravity is applied manually below
+    gravity = vec2(0, 0); // ball gravity is applied manually
 
     initSounds();
     createStars();
     resetGame();
+    buildMenus();
+    showMenu('title');
 }
 
 function initSounds()
 {
-    sfxShoot  = new SoundGenerator({frequency:420, release:.08, volume:.7, shapeCurve:1.4});
-    sfxPeg    = new SoundGenerator({frequency:520, release:.08, volume:.55});
-    sfxOrange = new SoundGenerator({frequency:740, release:.14, volume:.9, slide:.5});
-    sfxBucket = new SoundGenerator({frequency:260, release:.2,  volume:1,  noise:.15});
-    sfxLose   = new SoundGenerator({frequency:140, release:.2,  volume:.6, slide:-.6, shapeCurve:.7});
-    sfxWin    = new SoundGenerator({frequency:660, release:.4,  volume:1,  slide:.9});
+    sfxShoot   = new SoundGenerator({frequency:420, release:.08, volume:.7, shapeCurve:1.4});
+    sfxPeg     = new SoundGenerator({frequency:520, release:.08, volume:.55});
+    sfxOrange  = new SoundGenerator({frequency:740, release:.14, volume:.9, slide:.5});
+    sfxBucket  = new SoundGenerator({frequency:260, release:.2,  volume:1,  noise:.15});
+    sfxLose    = new SoundGenerator({frequency:140, release:.2,  volume:.6, slide:-.6, shapeCurve:.7});
+    sfxWin     = new SoundGenerator({frequency:660, release:.4,  volume:1,  slide:.9});
+    sfxMenuNav = new SoundGenerator({frequency:600, release:.03, volume:.25});
+    sfxMenuOK  = new SoundGenerator({frequency:900, release:.08, volume:.5, slide:.3});
 }
 
 function createStars()
@@ -76,6 +84,7 @@ function resetGame()
     ballsRemaining = 10;
     activeBall = null;
     win = gameOver = false;
+    endDialogShown = false;
     comboCount = maxCombo = 0;
     trail = [];
     particles = [];
@@ -110,7 +119,7 @@ function createPegs()
         }
     }
 
-    // Pick orange pegs that are spread apart (no two within minDist)
+    // Pick orange pegs that are spread apart
     const targetOranges = 14;
     const minDist = 2.6;
     const shuffled = [...candidates];
@@ -153,8 +162,98 @@ function createBucket()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Menus
+
+function buildMenus()
+{
+    setMenuVisibilityCallback(v => paused = v);
+    setMenuSounds({
+        select:   () => sfxMenuNav.play(),
+        activate: () => sfxMenuOK.play(),
+    });
+
+    createTitleMenu({
+        title:    'PEGGLE',
+        subtitle: 'knock out every orange peg',
+        revealOnClick: false,
+        onPlay: () => { resetGame(); isPlaying = true; },
+        items: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        dismissable: true,
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume', label:'RESUME',
+                onClick: () => hideMenu('pause')},
+            {type:'button', label:'OPTIONS',
+                onClick: () => pushMenu('options')},
+            {type:'button', label:'QUIT TO TITLE',
+                onClick: () => {
+                    hideMenu('pause');
+                    resetGame();
+                    isPlaying = false;
+                    showMenu('title');
+                }},
+        ],
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            {type:'slider', label:'Volume', min:0, max:1, step:.05, value:.5,
+                persist:'peggle_volume',
+                onChange: v => soundVolume = v},
+            {type:'checkbox', label:'Sound', value:true,
+                persist:'peggle_sound',
+                onChange: v => soundEnable = v},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            {type:'text', text:
+                'Knock out every ORANGE peg to win. You have 10 balls. ' +
+                'Land in the moving yellow bucket for a FREE BALL. ' +
+                'Hit pegs without stopping to build a COMBO multiplier.\n\n' +
+                'Aim with the mouse, click or press SPACE to shoot. ' +
+                'Press ESC to pause.\n\n' +
+                'Made with LittleJS.'},
+        ],
+    });
+}
+
+function showEndDialog()
+{
+    showConfirmDialog({
+        title:    win ? 'YOU WIN!' : 'GAME OVER',
+        icon:     win ? '🏆' : '💥',
+        message:  'Score: ' + score + '\nBest combo: x' + maxCombo,
+        yesLabel: 'PLAY AGAIN',
+        noLabel:  'QUIT',
+        onYes: () => { resetGame(); isPlaying = true; },
+        onNo:  () => { resetGame(); isPlaying = false; showMenu('title'); },
+    });
+}
+
+///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
+    // Esc / Start opens pause menu mid-game
+    if (bindPauseKey({when: () => isPlaying && !gameOver})) return;
+
     updateInput();
 
     if (activeBall && !gameOver)
@@ -172,7 +271,6 @@ function gameUpdate()
         }
     }
 
-    // Decay trail
     for (let i = trail.length - 1; i >= 0; i--)
     {
         trail[i].life -= timeDelta * 5;
@@ -186,6 +284,13 @@ function gameUpdate()
 
     if (activeBall && activeBall.pos.y < -BOARD_H/2 - 3)
         loseBall();
+
+    // Surface end-of-round dialog once the ball is gone
+    if (gameOver && !endDialogShown && !activeBall)
+    {
+        endDialogShown = true;
+        showEndDialog();
+    }
 }
 
 function gameUpdatePost()
@@ -258,19 +363,17 @@ function addScorePop(pos, text, big)
 
 function updateInput()
 {
-    if (keyWasPressed('KeyR')) { resetGame(); return; }
-    if (gameOver) return;
-
-    // Aim toward mouse
+    // Always update the aim direction so the cannon tracks the mouse,
+    // but only shoot while actually playing.
     const toMouse = mousePos.subtract(cannonPos);
     if (toMouse.length() > .01) aimDir = toMouse.normalize();
 
-    // Clamp aim to a downward cone
     const minAng = -PI * .95, maxAng = -PI * .05;
     let ang = Math.atan2(aimDir.y, aimDir.x);
     ang = clamp(ang, minAng, maxAng);
     aimDir = vec2(Math.cos(ang), Math.sin(ang));
 
+    if (!isPlaying || gameOver) return;
     if ((mouseWasPressed(0) || keyWasPressed('Space')) && !activeBall && ballsRemaining > 0)
         shootBall();
 }
@@ -292,19 +395,14 @@ function loseBall()
     activeBall = null;
     trail = [];
 
-    if (orangeLeft <= 0)
-    {
-        win = true;
-        gameOver = true;
-        sfxWin.play();
-        return;
-    }
+    if (gameOver) return; // win was already triggered mid-shot; dialog handler fires next frame
+
+    sfxLose.play();
     if (ballsRemaining <= 0)
     {
         win = false;
         gameOver = true;
     }
-    sfxLose.play();
 }
 
 function updateBucket()
@@ -330,17 +428,14 @@ function updateBucket()
 
 function stepBall(dt)
 {
-    // Manual gravity
     activeBall.vel.y -= GRAVITY_Y * dt;
     activeBall.pos = activeBall.pos.add(activeBall.vel.scale(dt));
 
-    // Side walls
     const wL = -BOARD_W/2 + activeBall.r;
     const wR =  BOARD_W/2 - activeBall.r;
     if (activeBall.pos.x < wL) { activeBall.pos.x = wL; activeBall.vel.x =  Math.abs(activeBall.vel.x) * .7; }
     if (activeBall.pos.x > wR) { activeBall.pos.x = wR; activeBall.vel.x = -Math.abs(activeBall.vel.x) * .7; }
 
-    // Ceiling (soft)
     const top = BOARD_H/2 - activeBall.r - .2;
     if (activeBall.pos.y > top)
     {
@@ -348,7 +443,6 @@ function stepBall(dt)
         activeBall.vel.y = -Math.abs(activeBall.vel.y) * .6;
     }
 
-    // Peg collisions
     for (const p of pegs)
     {
         if (p.dead || p.hit) continue;
@@ -357,7 +451,6 @@ function stepBall(dt)
         const minDist = activeBall.r + p.r;
         if (dist < minDist && dist > 0)
         {
-            // Separate, reflect with mild restitution
             const n = d.scale(1 / dist);
             activeBall.pos = p.pos.add(n.scale(minDist + .001));
             const v = activeBall.vel;
@@ -393,11 +486,10 @@ function stepBall(dt)
                 playPegSound(false, comboCount);
             }
 
-            // Don't let ball stall completely on a peg
             const sp = activeBall.vel.length();
             if (sp < 3.5) activeBall.vel = activeBall.vel.normalize().scale(3.5);
 
-            break; // one peg per substep
+            break;
         }
     }
 }
@@ -456,7 +548,6 @@ function gameRender()
         {
             drawCircle(p.pos, r * 2, hsl(.58, .65, .55, alpha), .08, hsl(0,0,0,alpha));
         }
-        // Glossy highlight
         drawCircle(p.pos.add(vec2(-r*.3, r*.3)), r * .7, hsl(0, 0, 1, .32 * alpha));
     }
 
@@ -497,14 +588,13 @@ function gameRender()
         const bc = cannonPos.add(aimDir.scale(barrelLen/2 + .25));
         drawRect(bc, vec2(barrelW + .15, barrelLen + .15), hsl(.05, .55, .15), ang);
         drawRect(bc, vec2(barrelW,        barrelLen),       hsl(.06, .75, .42), ang);
-        // Muzzle ring
         drawCircle(cannonPos.add(aimDir.scale(barrelLen + .15)), .35, hsl(.05, .55, .15));
     }
     drawCircle(cannonPos, .95, hsl(.06, .7, .45));
     drawCircle(cannonPos, .6,  hsl(.06, .5, .25));
 
-    // Aim guide (dotted line)
-    if (!gameOver && ballsRemaining > 0 && !activeBall)
+    // Aim guide
+    if (isPlaying && !gameOver && ballsRemaining > 0 && !activeBall)
     {
         const start = cannonPos.add(aimDir.scale(2.1));
         for (let i = 0; i < 6; i++)
@@ -515,7 +605,7 @@ function gameRender()
         }
     }
 
-    // Score pops (world space, in front of everything)
+    // Score pops (in front of everything in world space)
     for (const sp of scorePops)
     {
         const life = Math.min(1, sp.life * 1.3);
@@ -527,6 +617,8 @@ function gameRender()
 ///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
+    if (!isPlaying) return;
+
     const cx = mainCanvasSize.x / 2;
     const top = 38;
 
@@ -538,34 +630,12 @@ function gameRenderPost()
         vec2(mainCanvasSize.x - 40, top), 32,
         hsl(.08, 1, .65), 4, hsl(0,0,0), 'right');
 
-    // Combo banner while shot is live
     if (comboCount >= 2 && activeBall)
     {
         const wobble = 1 + Math.sin(time * 8) * .05;
         drawTextScreen('x' + comboCount + '  COMBO!',
             vec2(cx, top + 50), 38 * wobble,
             hsl(.12, 1, .65), 5, hsl(0,0,0), 'center');
-    }
-
-    if (gameOver)
-    {
-        const txt = win ? 'YOU WIN!' : 'GAME OVER';
-        drawTextScreen(txt,
-            vec2(cx, mainCanvasSize.y/2 - 30), 80,
-            win ? hsl(.12, 1, .65) : hsl(0, .8, .65),
-            6, hsl(0,0,0), 'center');
-        drawTextScreen('Best combo: x' + maxCombo,
-            vec2(cx, mainCanvasSize.y/2 + 30), 28,
-            hsl(0,0,.9), 3, hsl(0,0,0), 'center');
-        drawTextScreen('Press R to play again',
-            vec2(cx, mainCanvasSize.y/2 + 70), 26,
-            hsl(0,0,.85), 3, hsl(0,0,0), 'center');
-    }
-    else if (!activeBall)
-    {
-        drawTextScreen('Aim with mouse, click or SPACE to shoot',
-            vec2(cx, mainCanvasSize.y - 30), 24,
-            hsl(0,0,.85), 3, hsl(0,0,0), 'center');
     }
 }
 
