@@ -286,9 +286,44 @@ function nearestEnemy(fromPos, maxDist)
 
 class OrbitingStarWeapon
 {
-    constructor() { this.level = 1; this.name = 'Orbiting Star'; }
+    constructor()
+    {
+        this.level = 1;
+        this.name = 'Orbiting Star';
+        this.angle = 0;
+        this.hitMap = new Map();   // enemy -> next-allowed-hit time
+    }
     levelUp() { this.level = min(this.level + 1, 5); }
-    update() { /* TODO Task 12 */ }
+    damage()  { return 1 + this.level; }
+
+    update()
+    {
+        this.angle += 4 / 60;  // 4 rad/sec
+
+        const radius = 2.5;
+        const now = time;
+        // tick hitMap — purge stale entries
+        for (const [e, t] of this.hitMap)
+            if (!e.parent && (e.destroyed || t < now - 5)) this.hitMap.delete(e);
+
+        for (let i = 0; i < this.level; ++i)
+        {
+            const a = this.angle + i * 2 * PI / this.level;
+            const pos = player.pos.add(vec2().setAngle(a, radius));
+            // draw the star
+            drawTile(pos, vec2(.7), sprites.star, WHITE, a + time);
+
+            // damage check
+            for (const e of enemies)
+            {
+                if (!isOverlapping(pos, vec2(.7), e.pos, e.size)) continue;
+                const next = this.hitMap.get(e) || 0;
+                if (now < next) continue;
+                e.takeDamage(this.damage());
+                this.hitMap.set(e, now + .5);
+            }
+        }
+    }
 }
 class ChainLightningWeapon
 {
