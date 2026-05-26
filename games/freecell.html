@@ -343,24 +343,42 @@ function isMoveLegal(target)
     return (top.suit % 2) !== (bottom.suit % 2) && top.value === bottom.value + 1;
 }
 
+// Is the tail of `stack` starting at `card` a valid alternating-color
+// descending run? Always true for a single card.
+function tailIsValidRun(stack, card)
+{
+    const i = stack.cards.indexOf(card);
+    if (i < 0) return false;
+    for (let k = i; k < stack.cards.length - 1; ++k)
+    {
+        const a = stack.cards[k], b = stack.cards[k + 1];
+        if ((a.suit % 2) === (b.suit % 2)) return false;
+        if (a.value !== b.value + 1)        return false;
+    }
+    return true;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
     if (!isPlaying || won) return;
 
-    // Pickup
     if (mouseWasPressed(0) && handStack.isEmpty())
     {
         const hit = stackUnderPoint(mousePos);
         if (hit && hit.card)
         {
-            // For Task 6 we only pick up the single top card.
-            if (hit.card === hit.stack.topCard())
+            // For cascades, allow picking up a tail-run starting at `hit.card`.
+            // For other stack types, only the top card is pickable.
+            const canPick = hit.stack.type === StackType.Cascade
+                ? tailIsValidRun(hit.stack, hit.card)
+                : (hit.card === hit.stack.topCard());
+            if (canPick)
             {
                 pickupOrigin = hit.stack;
                 mouseHoldPos = hit.card.pos.subtract(mousePos);
-                hit.stack.moveTopCard(handStack);
                 handStack.type = hit.stack.type;
+                hit.stack.moveManyToStack(handStack, hit.card);
             }
         }
     }
