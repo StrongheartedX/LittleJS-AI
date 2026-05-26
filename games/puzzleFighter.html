@@ -529,6 +529,40 @@ function applyDefense(incoming, outgoing)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Diamond resolution
+
+// (dx, dy) is the cell where the diamond landed. Returns:
+//   { cleared: [[x,y], ...], color: number | null, tech: bool }
+function resolveDiamond(grid, dx, dy)
+{
+    if (!inBounds(dx, dy) || !grid[dx][dy] || grid[dx][dy].type !== 'diamond')
+        return { cleared: [], color: null, tech: false };
+
+    // Color = color of cell directly below
+    const below = dy > 0 ? grid[dx][dy - 1] : null;
+    if (!below || below.type === 'diamond')
+    {
+        // Tech bonus: just remove the diamond, no clears, no attack
+        grid[dx][dy] = null;
+        return { cleared: [], color: null, tech: true };
+    }
+    const targetColor = below.color;
+
+    grid[dx][dy] = null;  // remove diamond itself
+    const cleared = [];
+    for (let x = 0; x < BOARD_W; x++)
+    for (let y = 0; y < BOARD_H; y++)
+    {
+        const g = grid[x][y];
+        if (!g) continue;
+        if ((g.type === 'regular' || g.type === 'crash' || g.type === 'counter') && g.color === targetColor)
+            cleared.push([x, y]);
+    }
+
+    return { cleared, color: targetColor, tech: false };
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Placeholder Board
 
 class Board
@@ -976,6 +1010,31 @@ function runUnitTests()
 
         r = applyDefense(10, 8);  // defense=4, 40%
         assert(r.defendedRatio < 0.5, 'defense: <50% not flagged (got ' + r.defendedRatio + ')');
+    }
+
+    // --- Diamond tests ---
+    {
+        // Diamond on a red regular → clears all reds
+        let g = emptyGrid();
+        g[2][0] = gemRegular(COLOR_R);
+        g[2][1] = gemDiamond();
+        g[3][0] = gemRegular(COLOR_R);
+        g[4][0] = gemRegular(COLOR_B);
+        g[1][3] = gemCrash(COLOR_R);
+        g[5][2] = gemCounter(COLOR_R, 4);
+        let r = resolveDiamond(g, 2, 1);
+        assert(r.color === COLOR_R, 'diamond: color resolved to red');
+        assert(r.cleared.length === 4, 'diamond: 4 red cells cleared (got '+r.cleared.length+')');
+        assert(!r.tech, 'diamond: not tech bonus');
+        assert(g[2][1] === null, 'diamond: diamond itself removed');
+
+        // Diamond on floor → tech bonus
+        g = emptyGrid();
+        g[2][0] = gemDiamond();
+        r = resolveDiamond(g, 2, 0);
+        assert(r.tech === true, 'diamond: floor landing = tech bonus');
+        assert(r.cleared.length === 0, 'diamond: tech bonus clears nothing');
+        assert(g[2][0] === null, 'diamond: tech bonus still removes diamond');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
