@@ -695,17 +695,47 @@ function resolveBoard(grid, opts)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Placeholder Board
+// Board
 
 class Board
 {
-    constructor()
+    constructor(character)
     {
-        this.grid = [...Array(BOARD_W)].map(()=> Array(BOARD_H).fill(null));
+        this.grid = emptyGrid();
+        this.character = character || CHARACTERS[0];
+        this.score = 0;
+        this.chain = 0;
+        this.active = null;
+        this.next = null;
+        this.fallTimer = 0;
+        this.fallInterval = 1.0;
+        this.lockTimer = 0;
+        this.gameOver = false;
+        this.incomingQueue = 0;
+        this.pendingDiamondInitiator = false;
+        this.nextOutgoingCountdown = 5;
+    }
+
+    spawnNext(piece)
+    {
+        if (this.gameOver) return;
+        this.active = {
+            a: piece.a, b: piece.b,
+            x: SPAWN_COL, y: BOARD_H_VISIBLE + 1,
+            rot: 0
+        };
+        if (!pieceCanPlace(this.grid, this.active, this.active.x, this.active.y, 0))
+        {
+            this.gameOver = true;
+            this.active = null;
+        }
+        this.fallTimer = this.fallInterval;
+        this.lockTimer = 0;
     }
 }
 
 let p1Board, p2Board;
+let p1Controller, p2Controller;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Rendering
@@ -802,6 +832,130 @@ function drawBoardGems(board, boardIndex)
         const g = board.grid[x][y];
         if (!g) continue;
         drawGem(cellPos(boardIndex, x, y), g, false);
+    }
+
+    // Active piece + ghost
+    if (board.active && !board.gameOver)
+    {
+        let ghostY = board.active.y;
+        while (pieceCanPlace(board.grid, board.active, board.active.x, ghostY - 1, board.active.rot))
+            ghostY--;
+        if (ghostY !== board.active.y)
+        {
+            for (const c of pieceCells(board.active, board.active.x, ghostY, board.active.rot))
+            {
+                if (c.y < 0 || c.y >= BOARD_H_VISIBLE) continue;
+                drawRect(cellPos(boardIndex, c.x, c.y), vec2(.9, .9), rgb(1,1,1,.08));
+            }
+        }
+        for (const c of pieceCells(board.active))
+        {
+            if (c.y < 0) continue;
+            const drawY = Math.min(c.y, BOARD_H_VISIBLE - 1);
+            const yOffset = c.y >= BOARD_H_VISIBLE ? c.y - (BOARD_H_VISIBLE - 1) : 0;
+            drawGem(cellPos(boardIndex, c.x, drawY).add(vec2(0, yOffset)), c.gem, true);
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Piece generation (placeholder random; replaced by shared sequence in Task 14)
+
+function makeRandomPiece()
+{
+    const mk = () => {
+        const isCrash = randInt(100) < 18;
+        const c = randInt(4);
+        return isCrash ? gemCrash(c) : gemRegular(c);
+    };
+    return { a: mk(), b: mk() };
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Controllers
+
+const KEYMAP_P1 = {
+    left: ['ArrowLeft'], right: ['ArrowRight'],
+    softDrop: ['ArrowDown'], hardDrop: ['ArrowUp', 'Space'],
+    rotCCW: ['KeyZ'], rotCW: ['KeyX'],
+};
+const KEYMAP_P2 = {
+    left: ['KeyA'], right: ['KeyD'],
+    softDrop: ['KeyS'], hardDrop: ['KeyW', 'ShiftLeft'],
+    rotCCW: ['KeyK'], rotCW: ['KeyL'],
+};
+
+function anyPressed(codes) { for (const k of codes) if (keyWasPressed(k)) return true; return false; }
+function anyDown(codes)    { for (const k of codes) if (keyIsDown(k))    return true; return false; }
+
+class HumanController
+{
+    constructor(keymap) { this.keymap = keymap; this.hardDropping = false; }
+
+    update(board)
+    {
+        if (!board.active || board.gameOver) return;
+        const km = this.keymap;
+
+        if (!this.hardDropping)
+        {
+            if (anyPressed(km.left))   pieceTryMove(board.grid, board.active, -1, 0);
+            if (anyPressed(km.right))  pieceTryMove(board.grid, board.active,  1, 0);
+            if (anyPressed(km.rotCCW)) pieceTryRotate(board.grid, board.active, -1);
+            if (anyPressed(km.rotCW))  pieceTryRotate(board.grid, board.active,  1);
+
+            if (anyPressed(km.hardDrop))
+            {
+                this.hardDropping = true;
+            }
+        }
+    }
+
+    fallSpeed(board)
+    {
+        if (this.hardDropping) return 0;
+        if (anyDown(this.keymap.softDrop)) return 0.05;
+        return board.fallInterval;
+    }
+}
+
+function boardTick(board, controller, onLock)
+{
+    if (board.gameOver || !board.active) return;
+
+    const step = controller.fallSpeed(board);
+    board.fallTimer -= timeDelta;
+
+    while (board.fallTimer <= 0 && board.active)
+    {
+        board.fallTimer += Math.max(.001, step);
+
+        if (pieceTryMove(board.grid, board.active, 0, -1))
+        {
+            board.lockTimer = 0;
+        }
+        else
+        {
+            board.lockTimer += step;
+            if (board.lockTimer >= 0.3 || controller.hardDropping)
+            {
+                const isDiamondPiece = (board.active.a.type === 'diamond' || board.active.b.type === 'diamond');
+                lockPieceWithSeparation(board.grid, board.active);
+                board.active = null;
+                controller.hardDropping = false;
+
+                const res = resolveBoard(board.grid, {
+                    isDiamondInitiated: isDiamondPiece,
+                    characterMultiplier: board.character.multiplier
+                });
+                board.score += res.totalDamage;
+                board.chain = res.waves;
+
+                tickCounterGems(board.grid);
+                if (onLock) onLock(board, res);
+                return;
+            }
+        }
     }
 }
 
@@ -1308,25 +1462,31 @@ async function gameInit()
     cameraPos = vec2(0, 0);
     cameraScale = 38;
 
-    p1Board = new Board();
-    p2Board = new Board();
-
-    // Visual test population
-    p1Board.grid[0][0] = gemRegular(COLOR_R);
-    p1Board.grid[1][0] = gemRegular(COLOR_R);
-    p1Board.grid[0][1] = gemRegular(COLOR_R);
-    p1Board.grid[1][1] = gemRegular(COLOR_R);
-    mergePowerGems(p1Board.grid);
-    p1Board.grid[2][0] = gemCrash(COLOR_B);
-    p1Board.grid[3][0] = gemCounter(COLOR_Y, 3);
-
-    p2Board.grid[2][4] = gemDiamond();
-    p2Board.grid[2][3] = gemRegular(COLOR_G);
+    p1Board = new Board(CHARACTERS[0]);
+    p2Board = new Board(CHARACTERS[0]);
+    p1Controller = new HumanController(KEYMAP_P1);
+    p1Board.spawnNext(makeRandomPiece());
 
     runUnitTests();
 }
 
-function gameUpdate() {}
+function gameUpdate()
+{
+    if (keyWasPressed('KeyR'))
+    {
+        p1Board = new Board(CHARACTERS[0]);
+        p1Controller = new HumanController(KEYMAP_P1);
+        p1Board.spawnNext(makeRandomPiece());
+    }
+
+    if (p1Board && p1Controller)
+    {
+        p1Controller.update(p1Board);
+        boardTick(p1Board, p1Controller, (b) => {
+            b.spawnNext(makeRandomPiece());
+        });
+    }
+}
 function gameUpdatePost() { cameraPos = vec2(0, 0); }
 function gameRender()
 {
