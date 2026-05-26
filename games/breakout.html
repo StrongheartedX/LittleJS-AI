@@ -403,13 +403,13 @@ function damageBrick(brick)
         c, c,                            // colorStartA/B
         new Color(c.r, c.g, c.b, 0),     // colorEndA (fade alpha)
         new Color(c.r, c.g, c.b, 0),     // colorEndB
-        .4,                              // particleTime
+        .6,                              // particleTime
         .15, .05,                        // sizeStart, sizeEnd
-        4,                               // speed
+        2,                               // speed
         0,                               // angleSpeed
-        .95,                             // damping
+        .92,                             // damping
         1,                               // angleDamping
-        .3,                              // gravityScale (slight downward)
+        .1,                              // gravityScale (slight downward)
         PI,                              // particleConeAngle
         .1,                              // fadeRate
         .3,                              // randomness
@@ -672,6 +672,11 @@ function gameUpdate()
     if (fireballTimer > 0) fireballTimer = max(0, fireballTimer - dt);
     if (slowTimer     > 0) slowTimer     = max(0, slowTimer     - dt);
 
+    // Tick visual decay regardless of state, so screenShake/paddleFlash/
+    // shatter/floatTexts keep fading even while serving or just after death.
+    updateFloatTexts(dt);
+    updateJuice(dt);
+
     // serve state keeps ball attached to paddle
     if (state === 'serve')
     {
@@ -698,8 +703,6 @@ function gameUpdate()
     updatePowerups(dt);
     updateBullets(dt);
     updateBalls(dt);
-    updateFloatTexts(dt);
-    updateJuice(dt);
 
     // level clear check (gold doesn't count — only breakable bricks)
     for (const b of bricks)
@@ -881,7 +884,7 @@ function updateBalls(dt)
         lives--;
         combo = 1;
         sfxLose.play();
-        addShake(.40);
+        addShake(.15);
 
         if (lives <= 0)
         {
