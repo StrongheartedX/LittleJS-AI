@@ -81,6 +81,118 @@ class Player extends EngineObject
     }
 }
 
+const ENEMY_TYPES = [
+    {key:'zombie', sprite:'zombie', hp: 3, dmg: 10, speed: 1.5, xpDrop: 1},
+    {key:'bat',    sprite:'bat',    hp: 1, dmg: 5,  speed: 4.0, xpDrop: 1},
+    {key:'skull',  sprite:'skull',  hp: 8, dmg: 15, speed: 1.2, xpDrop: 3},
+];
+
+const enemies = [];
+
+class Enemy extends EngineObject
+{
+    constructor(pos, type)
+    {
+        super(pos, vec2(1.0), sprites[type.sprite]);
+        this.type     = type;
+        this.hp       = type.hp;
+        this.dmg      = type.dmg;
+        this.speed    = type.speed;
+        this.xpDrop   = type.xpDrop;
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.setCollision(false, false, false, false);
+        enemies.push(this);
+    }
+
+    update()
+    {
+        // walk toward the player
+        const toPlayer = player.pos.subtract(this.pos);
+        const dist = toPlayer.length();
+        if (dist > .01)
+        {
+            const step = toPlayer.normalize(this.speed / 60);
+            this.velocity = step;
+        }
+
+        super.update();
+
+        // despawn if dragged too far from the player or fully outside arena
+        const farFromPlayer = player.pos.distance(this.pos) > 50;
+        const outsideArena = this.pos.x < ARENA_MIN_X - 2 || this.pos.x > ARENA_MAX_X + 2 ||
+                             this.pos.y < ARENA_MIN_Y - 2 || this.pos.y > ARENA_MAX_Y + 2;
+        if (farFromPlayer || outsideArena)
+            this.destroy();
+    }
+
+    destroy()
+    {
+        const i = enemies.indexOf(this);
+        if (i >= 0) enemies.splice(i, 1);
+        super.destroy();
+    }
+
+    takeDamage(amount)
+    {
+        this.hp -= amount;
+        if (this.hp <= 0) this.destroy();
+    }
+}
+
+const SPAWN_RADIUS = 20;
+const ENEMY_CAP    = 150;
+
+const spawner = {
+    timer: 0,
+    interval: 1.5,
+};
+
+// Returns [zombie%, bat%, skull%] based on elapsed time.
+function enemyMixForTime(seconds)
+{
+    if (seconds < 20)  return [1.0, 0.0, 0.0];
+    if (seconds < 60)  return [0.7, 0.3, 0.0];
+    return [0.5, 0.3, 0.2];
+}
+
+function pickWeightedType(elapsed)
+{
+    const w = enemyMixForTime(elapsed);
+    const r = rand();
+    let acc = 0;
+    for (let i = 0; i < ENEMY_TYPES.length; ++i)
+    {
+        acc += w[i];
+        if (r < acc) return ENEMY_TYPES[i];
+    }
+    return ENEMY_TYPES[0];
+}
+
+function updateSpawner()
+{
+    // ramp the spawn interval from 1.5s down to 0.4s over the first 3 minutes
+    spawner.interval = lerp(min(time / 180, 1), 1.5, 0.4);
+
+    spawner.timer -= 1 / 60;
+    if (spawner.timer > 0) return;
+    spawner.timer = spawner.interval;
+
+    if (enemies.length >= ENEMY_CAP) return;
+
+    const type = pickWeightedType(time);
+    let pos;
+    for (let tries = 0; tries < 4; ++tries)
+    {
+        pos = player.pos.add(vec2().setAngle(rand(2 * PI), SPAWN_RADIUS));
+        if (pos.x >= ARENA_MIN_X && pos.x <= ARENA_MAX_X &&
+            pos.y >= ARENA_MIN_Y && pos.y <= ARENA_MAX_Y) break;
+    }
+    new Enemy(pos, type);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
@@ -124,7 +236,10 @@ async function gameInit()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-function gameUpdate() { }
+function gameUpdate()
+{
+    updateSpawner();
+}
 function gameUpdatePost()
 {
     cameraPos = player.pos;
