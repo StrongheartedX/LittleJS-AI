@@ -639,6 +639,19 @@ function runUnitTests()
         g[2][0] = gemCrash(COLOR_B);
         cleared = detectCrashClears(g);
         assert(cleared.length === 5, 'crash: touching a power gem cell clears all 4 + bomb');
+
+        // Same-color bomb chain
+        g = emptyGrid();
+        g[0][0] = gemCrash(COLOR_R); g[1][0] = gemCrash(COLOR_R); g[2][0] = gemRegular(COLOR_R);
+        cleared = detectCrashClears(g);
+        assert(cleared.length === 3, 'crash: bomb-to-bomb chain clears connected bombs + regular');
+
+        // On-color active counter adjacent to clearing region IS destroyed (by adjacency, not by color match)
+        g = emptyGrid();
+        g[0][0] = gemCrash(COLOR_Y); g[1][0] = gemRegular(COLOR_Y);
+        g[2][0] = gemCounter(COLOR_Y, 3);
+        cleared = detectCrashClears(g);
+        assert(cleared.length === 3, 'crash: on-color active counter cleared by adjacency');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
