@@ -255,66 +255,46 @@
     gap: 14px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 4px 4px 12px;
+    padding: 12px 4px 14px;     /* top padding gives hover-lift room */
     scroll-snap-type: x proximity;
   }
   .row .tiles::-webkit-scrollbar { height: 8px; }
   .row .tiles::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-  /* Tiles wrapper — hosts scroll fade overlays + arrow buttons */
+  /* Tiles wrapper hosts the edge scroll buttons */
   .tiles-wrap { position: relative; }
-  .tiles-wrap::before,
-  .tiles-wrap::after {
-    content: '';
+
+  /* Edge buttons — full-height columns at left/right that combine the
+     fade gradient and the click target. Chevron sits inside the fade. */
+  .edge-scroll {
     position: absolute;
     top: 0;
-    bottom: 12px;     /* clear the horizontal scrollbar */
-    width: 48px;
-    pointer-events: none;
-    z-index: 1;
-    opacity: 0;
-    transition: opacity .2s;
-  }
-  .tiles-wrap::before {
-    left: 0;
-    background: linear-gradient(to right, var(--bg) 0%, transparent 100%);
-  }
-  .tiles-wrap::after {
-    right: 0;
-    background: linear-gradient(to left, var(--bg) 0%, transparent 100%);
-  }
-  .tiles-wrap[data-at-start="false"]::before { opacity: 1; }
-  .tiles-wrap[data-at-end="false"]::after  { opacity: 1; }
-
-  .scroll-arrow {
-    position: absolute;
-    top: calc(50% - 6px); /* visually centered, ignoring scrollbar at bottom */
-    transform: translateY(-50%);
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: rgba(20, 26, 38, .92);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-size: 22px;
-    line-height: 1;
-    padding: 0;
+    bottom: 12px;               /* clear the horizontal scrollbar */
+    width: 64px;
+    border: 0;
+    padding: 0 14px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    opacity: 0;
+    font-size: 30px;
+    line-height: 1;
+    color: var(--text);
+    opacity: .55;
     z-index: 2;
-    transition: opacity .15s, background .15s, border-color .15s, transform .15s;
+    transition: opacity .15s;
+    text-shadow: 0 0 6px var(--bg), 0 0 12px var(--bg);
   }
-  .tiles-wrap:hover .scroll-arrow:not([hidden]) { opacity: 1; }
-  .scroll-arrow:hover {
-    background: var(--accent);
-    border-color: var(--accent);
-    transform: translateY(-50%) scale(1.08);
+  .edge-scroll:hover { opacity: 1; }
+  .edge-scroll[hidden] { display: none; }
+  .edge-scroll.left {
+    left: 0;
+    background: linear-gradient(to right, var(--bg) 25%, transparent);
+    justify-content: flex-start;
   }
-  .scroll-arrow.left  { left: 6px; }
-  .scroll-arrow.right { right: 6px; }
-  .scroll-arrow[hidden] { display: none; }
+  .edge-scroll.right {
+    right: 0;
+    background: linear-gradient(to left, var(--bg) 25%, transparent);
+    justify-content: flex-end;
+  }
 
   .tile {
     flex: 0 0 auto;
@@ -387,6 +367,7 @@
   <div id="list"></div>
   <div id="sidebar-footer">
     <button class="btn disabled" id="reloadBtn" title="Reload the current game">Reload</button>
+    <button class="btn disabled" id="fullscreenBtn" title="Play fullscreen">Full ⛶</button>
     <a class="btn disabled" id="openBtn" target="_blank" rel="noopener" title="Open in a new tab">Open ↗</a>
   </div>
 </aside>
@@ -404,7 +385,7 @@
 // top:      1..N — appears in the "Top Picks" row at that rank. Unset = not featured.
 const GAMES = [
   { file:'2048.html',           name:'2048',            category:'puzzle',  desc:'Slide numbered tiles to combine matching pairs.',          tags:['puzzle','grid'] },
-  { file:'asteroids.html',      name:'Asteroids',       category:'shooter', desc:'Rotate-and-thrust shooter — blast drifting space rocks.', tags:['arcade','shooter'] },
+  { file:'asteroids.html',      name:'Asteroids',       category:'shooter', desc:'Rotate-and-thrust shooter — blast drifting space rocks.', tags:['arcade','shooter'], top:10 },
   { file:'baseball.html',       name:'Baseball',        category:'sports',  desc:'Pitch, swing, and run the bases.',                         tags:['sports'] },
   { file:'basketball.html',     name:'Pop-a-Shot',      category:'sports',  desc:'Sink as many shots as you can before the clock runs out.', tags:['sports','arcade'] },
   { file:'breakout.html',       name:'Breakout',        category:'arcade',  desc:'Bounce a ball off a paddle to clear bricks.',              tags:['arcade','paddle'] },
@@ -418,7 +399,7 @@ const GAMES = [
   { file:'defender.html',       name:'Defender',        category:'shooter', desc:'Side-scrolling shooter — protect humans from aliens.',     tags:['arcade','shooter'] },
   { file:'drMario.html',        name:'Dr. Mario',       category:'puzzle',  desc:'Match falling pills with viruses to clear them.',          tags:['puzzle','falling'] },
   { file:'flappyBird.html',     name:'Flappy Bird',     category:'arcade',  desc:'Tap to flap through pipe gaps.',                           tags:['arcade','one-button'] },
-  { file:'frogger.html',        name:'Frogger',         category:'arcade',  desc:'Hop across traffic and rivers to safety.',                 tags:['arcade'] },
+  { file:'frogger.html',        name:'Frogger',         category:'arcade',  desc:'Hop across traffic and rivers to safety.',                 tags:['arcade'], top:5},
   { file:'geometryDash.html',   name:'Geometry Dash',   category:'arcade',  desc:'Rhythm-jump through spike obstacles.',                     tags:['arcade','runner'] },
   { file:'gradius.html',        name:'Gradius',         category:'shooter', desc:'Power up your ship and blast through horizontal levels.',  tags:['shooter','scrolling'] },
   { file:'jetpackDash.html',    name:'Jetpack Dash',    category:'arcade',  desc:'Boost upward to dodge hazards.',                           tags:['arcade','runner'] },
@@ -429,16 +410,15 @@ const GAMES = [
   { file:'microRacer.html',     name:'Micro Racer',     category:'arcade',  desc:'Top-down racing on a tight track.',                        tags:['racing'] },
   { file:'minesweeper.html',    name:'Minesweeper',     category:'puzzle',  desc:'Reveal cells without hitting a mine.',                     tags:['puzzle','grid'] },
   { file:'miniGolf.html',       name:'Mini Golf',       category:'sports',  desc:'Aim and putt across miniature courses.',                   tags:['sports','physics'] },
-  { file:'missileCommand.html', name:'Missile Command', category:'shooter', desc:'Defend cities from incoming nukes.',                       tags:['arcade','shooter'], top:5 },
+  { file:'missileCommand.html', name:'Missile Command', category:'shooter', desc:'Defend cities from incoming nukes.',                       tags:['arcade','shooter'], top:1 },
   { file:'moonPatrol.html',     name:'Moon Patrol',     category:'arcade',  desc:'Side-scrolling moon buggy — jump craters, shoot enemies.', tags:['arcade','scrolling'] },
   { file:'mrDriller.html',      name:'Mr. Driller',     category:'puzzle',  desc:'Drill down through colored blocks while managing air.',    tags:['puzzle','action'] },
   { file:'orbitswarm.html',     name:'OrbitSwarm',      category:'shooter', desc:'Orbit a star and shoot the incoming swarm.',               tags:['arcade','shooter'] },
   { file:'othello.html',        name:'Othello',         category:'board',   desc:'Flank to flip — capture the most stones.',                 tags:['board','strategy'] },
-  { file:'pacman.html',         name:'Pac-Man',         category:'arcade',  desc:'Eat dots and dodge ghosts in a maze.',                     tags:['arcade','maze'], top:2 },
+  { file:'pacman.html',         name:'Pac-Man',         category:'arcade',  desc:'Eat dots and dodge ghosts in a maze.',                     tags:['arcade','maze'], top:4 },
   { file:'peggle.html',         name:'Peggle',          category:'puzzle',  desc:'Aim balls at pegs to clear the board.',                    tags:['physics','puzzle'] },
   { file:'pinball.html',        name:'Pinball',         category:'arcade',  desc:'Launch a ball, hit the flippers, chase the score.',        tags:['physics','arcade']},
   { file:'plinko.html',         name:'Plinko',          category:'puzzle',  desc:'Drop chips down a peg field for prizes.',                  tags:['physics','arcade'] },
-  { file:'pokemon.html',        name:'Pokemon',         category:'arcade',  desc:'Top-down monster-collector RPG prototype.',                tags:['rpg'] },
   { file:'polePosition.html',   name:'Pole Position',   category:'arcade',  desc:'Pseudo-3D racing — steer through the curves.',             tags:['racing'] },
   { file:'pong.html',           name:'Pong',            category:'arcade',  desc:'Two-paddle bounce, first to score wins.',                  tags:['arcade','paddle'] },
   { file:'pool.html',           name:'Pool',            category:'sports',  desc:'8-ball pool with cue physics.',                            tags:['sports','physics'], top:5 },
@@ -449,9 +429,9 @@ const GAMES = [
   { file:'snake.html',          name:'Snake',           category:'arcade',  desc:'Eat to grow, don’t crash into yourself.',             tags:['arcade','grid'] },
   { file:'snood.html',          name:'Snood',           category:'puzzle',  desc:'Aim and shoot snoods to clear the board.',                 tags:['puzzle','physics'] },
   { file:'sokoban.html',        name:'Sokoban',         category:'puzzle',  desc:'Push boxes onto target squares.',                          tags:['puzzle','grid'] },
-  { file:'spaceInvaders.html',  name:'Space Invaders',  category:'shooter', desc:'Shoot descending alien formations.',                       tags:['arcade','shooter'] },
+  { file:'spaceInvaders.html',  name:'Space Invaders',  category:'shooter', desc:'Shoot descending alien formations.',                       tags:['arcade','shooter'], top:10 },
   { file:'spyhunter.html',      name:'Spy Hunter',      category:'arcade',  desc:'Top-down driving with car combat.',                        tags:['arcade','driving'] },
-  { file:'tetris.html',         name:'Tetris',          category:'puzzle',  desc:'Stack falling tetrominoes to clear lines.',                tags:['puzzle','falling'] },
+  { file:'tetris.html',         name:'Tetris',          category:'puzzle',  desc:'Stack falling tetrominoes to clear lines.',                tags:['puzzle','falling'], top:10 },
 ];
 
 GAMES.sort((a, b) => a.name.localeCompare(b.name));
@@ -474,6 +454,7 @@ const filterChipsEl = document.getElementById('filter-chips');
 const frameEl = document.getElementById('frame');
 const welcomeEl = document.getElementById('welcome');
 const reloadBtn = document.getElementById('reloadBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
 const openBtn = document.getElementById('openBtn');
 
 let currentFile = null;
@@ -634,17 +615,19 @@ function buildRow(label, games, isTop) {
   wrap.appendChild(tiles);
 
   const leftBtn = document.createElement('button');
-  leftBtn.className = 'scroll-arrow left';
+  leftBtn.className = 'edge-scroll left';
   leftBtn.setAttribute('aria-label', 'Scroll left');
   leftBtn.innerHTML = '&#8249;';
+  leftBtn.hidden = true; // start hidden — observer reveals if there's overflow
   leftBtn.addEventListener('click', () => {
     tiles.scrollBy({ left: -tiles.clientWidth * 0.85, behavior: 'smooth' });
   });
 
   const rightBtn = document.createElement('button');
-  rightBtn.className = 'scroll-arrow right';
+  rightBtn.className = 'edge-scroll right';
   rightBtn.setAttribute('aria-label', 'Scroll right');
   rightBtn.innerHTML = '&#8250;';
+  rightBtn.hidden = true;
   rightBtn.addEventListener('click', () => {
     tiles.scrollBy({ left: tiles.clientWidth * 0.85, behavior: 'smooth' });
   });
@@ -653,23 +636,17 @@ function buildRow(label, games, isTop) {
   wrap.appendChild(rightBtn);
   row.appendChild(wrap);
 
-  tiles.addEventListener('scroll', () => updateArrows(wrap));
-  // Set initial arrow + fade visibility after layout settles.
-  requestAnimationFrame(() => updateArrows(wrap));
+  const update = () => {
+    const atStart = tiles.scrollLeft <= 1;
+    const atEnd = tiles.scrollLeft + tiles.clientWidth >= tiles.scrollWidth - 1;
+    leftBtn.hidden = atStart;
+    rightBtn.hidden = atEnd;
+  };
+  tiles.addEventListener('scroll', update, { passive: true });
+  // ResizeObserver fires once on observe + on every size change — gives us
+  // a reliable initial measurement without rAF/setTimeout guesswork.
+  new ResizeObserver(update).observe(tiles);
   return row;
-}
-
-function updateArrows(wrap) {
-  const tiles = wrap.querySelector('.tiles');
-  const leftBtn = wrap.querySelector('.scroll-arrow.left');
-  const rightBtn = wrap.querySelector('.scroll-arrow.right');
-  if (!tiles || !leftBtn || !rightBtn) return;
-  const atStart = tiles.scrollLeft <= 1;
-  const atEnd = tiles.scrollLeft + tiles.clientWidth >= tiles.scrollWidth - 1;
-  wrap.dataset.atStart = atStart;
-  wrap.dataset.atEnd = atEnd;
-  leftBtn.hidden = atStart;
-  rightBtn.hidden = atEnd;
 }
 
 // ===================== Stage state =====================
@@ -681,6 +658,7 @@ function showWelcome() {
   welcomeEl.style.display = 'block';
   welcomeEl.scrollTop = 0;
   reloadBtn.classList.add('disabled');
+  fullscreenBtn.classList.add('disabled');
   openBtn.classList.add('disabled');
   openBtn.removeAttribute('href');
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -697,6 +675,7 @@ function selectGame(file) {
   frameEl.style.display = 'block';
   welcomeEl.style.display = 'none';
   reloadBtn.classList.remove('disabled');
+  fullscreenBtn.classList.remove('disabled');
   openBtn.classList.remove('disabled');
   openBtn.href = file;
   localStorage.setItem(LAST_GAME_KEY, file);
@@ -719,11 +698,11 @@ function loadFromHash() {
 sidebarLogoWrap.addEventListener('click', showWelcome);
 searchEl.addEventListener('input', renderList);
 window.addEventListener('hashchange', loadFromHash);
-window.addEventListener('resize', () => {
-  for (const wrap of welcomeEl.querySelectorAll('.tiles-wrap')) updateArrows(wrap);
-});
 reloadBtn.addEventListener('click', () => {
   if (currentFile) frameEl.src = currentFile + '?t=' + Date.now();
+});
+fullscreenBtn.addEventListener('click', () => {
+  if (currentFile && frameEl.requestFullscreen) frameEl.requestFullscreen();
 });
 
 document.addEventListener('keydown', e => {
