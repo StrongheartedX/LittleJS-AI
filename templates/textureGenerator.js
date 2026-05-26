@@ -9,6 +9,8 @@
 // saveAtlasImage()/saveAtlasPrompt() export the sheet + prompt.
 // useAtlasImage(url) swaps in an AI-generated 2048 image without
 // invalidating already-returned TileInfos.
+// showAtlasOverlay(true|false) pins the live atlas canvas to the
+// top-right of the page for visual debugging.
 
 const ATLAS_SIZE = 2048;
 
@@ -121,4 +123,25 @@ function useAtlasImage(url)
         textureInfos[0].createWebGLTexture();
     };
     img.src = url;
+}
+
+// Debug helper: pin the live atlasCanvas to the top-right of the page so
+// you can see exactly what's in the texture as you paint tiles. Same
+// element doubles as the WebGL texture source, so updates appear live.
+// Call showAtlasOverlay() to toggle on, showAtlasOverlay(false) to hide.
+function showAtlasOverlay(visible = true)
+{
+    if (!atlasCanvas) return;
+    if (visible)
+    {
+        atlasCanvas.style.cssText =
+            'position:fixed;top:8px;right:8px;width:25vmin;height:25vmin;' +
+            'border:2px solid #f0a;pointer-events:none;z-index:9999;' +
+            'background:rgba(0,0,0,.6);image-rendering:auto;';
+        document.body.appendChild(atlasCanvas);
+    }
+    else if (atlasCanvas.parentNode)
+    {
+        atlasCanvas.parentNode.removeChild(atlasCanvas);
+    }
 }

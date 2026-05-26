@@ -166,10 +166,8 @@ function paintRankTile(label)
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        // Sized to leave a transparent margin inside the 250px tile so
-        // bilinear filtering can't pick up bleed from adjacent tiles.
-        // "10" is the only two-char rank — shrink further so it fits.
-        const size = label.length > 1 ? 150 : 190;
+        // "10" is the only two-char rank — shrink so it fits.
+        const size = label.length > 1 ? 160 : 200;
         ctx.font = 'bold ' + size + 'px sans-serif';
         ctx.fillText(label, 125, 130);
     };
@@ -182,10 +180,9 @@ function paintSuitTile(glyph)
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        // Force a text-style suit (not a color emoji) and leave a
-        // transparent margin inside the 250px tile to prevent atlas bleed.
-        ctx.font = '180px "Arial Unicode MS", "DejaVu Sans", sans-serif';
-        ctx.fillText(glyph, 125, 130);
+        // Force a text-style suit, not a color emoji rendering.
+        ctx.font = '210px "Arial Unicode MS", "DejaVu Sans", sans-serif';
+        ctx.fillText(glyph, 125, 135);
     };
 }
 
