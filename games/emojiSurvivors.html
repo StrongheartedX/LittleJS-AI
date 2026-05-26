@@ -144,19 +144,37 @@ const ENEMY_TYPES = [
                                     splitInto: 'ant', splitCount: 3},
 ];
 
+// Elite variants — color-coded by additive glow + stat multipliers.
+// Spawn chance ramps from 0 → ~5% over the first 3 minutes (after a 30s
+// grace period) so early game stays clean.
+const ELITE_TYPES = {
+    red:    {hpMult: 1.5, speedMult: 1.5, dmgMult: 1.2, xpMult: 3,
+             sizeMult: 1.15, additive: new Color(.6,  .05, .05)},
+    gold:   {hpMult: 3.0, speedMult: 1.0, dmgMult: 1.0, xpMult: 5,
+             sizeMult: 1.2,  additive: new Color(.55, .42,  0)},
+    purple: {hpMult: 2.0, speedMult: 1.0, dmgMult: 1.8, xpMult: 4,
+             sizeMult: 1.2,  additive: new Color(.4,   0,  .55)},
+};
+const ELITE_KEYS = Object.keys(ELITE_TYPES);
+
 const enemies = [];
 
 class Enemy extends EngineObject
 {
-    constructor(pos, type)
+    constructor(pos, type, eliteKey = null)
     {
-        const sz = type.size != null ? type.size : 1.0;
+        const elite = eliteKey ? ELITE_TYPES[eliteKey] : null;
+        const baseSz = type.size != null ? type.size : 1.0;
+        const sz = baseSz * (elite ? elite.sizeMult : 1);
         super(pos, vec2(sz), sprites[type.sprite]);
         this.type     = type;
-        this.hp       = type.hp;
-        this.dmg      = type.dmg;
-        this.speed    = type.speed;
-        this.xpDrop   = type.xpDrop;
+        this.hp       = type.hp * (elite ? elite.hpMult : 1);
+        this.dmg      = type.dmg * (elite ? elite.dmgMult : 1);
+        this.speed    = type.speed * (elite ? elite.speedMult : 1);
+        this.xpDrop   = type.xpDrop * (elite ? elite.xpMult : 1);
+        this.isElite  = !!elite;
+        this.eliteKey = eliteKey;
+        this.eliteAdditive = elite ? elite.additive : null;
         this.damping = 1;
         this.friction = 1;
         this.gravityScale = 0;
@@ -177,6 +195,9 @@ class Enemy extends EngineObject
     {
         let tint = this.tint || WHITE;
         let additive = this.additive;
+        // elite glow acts as the base layer; status effects (burn etc.)
+        // override it because the status is more gameplay-relevant
+        if (!additive && this.eliteAdditive) additive = this.eliteAdditive;
         if (this.hitFlashTimer > 0)
         {
             this.hitFlashTimer -= 1 / 60;
@@ -849,7 +870,12 @@ function updateSpawner()
             if (pos.x >= ARENA_MIN_X && pos.x <= ARENA_MAX_X &&
                 pos.y >= ARENA_MIN_Y && pos.y <= ARENA_MAX_Y) break;
         }
-        new Enemy(pos, type);
+        // elite chance ramps 0 → 5% over 30s..210s
+        const eliteChance = time < 30 ? 0 : min(.05, (time - 30) / 3600);
+        const eliteKey = rand() < eliteChance
+            ? ELITE_KEYS[randInt(ELITE_KEYS.length)]
+            : null;
+        new Enemy(pos, type, eliteKey);
     }
 }
 
