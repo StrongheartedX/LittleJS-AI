@@ -30,6 +30,7 @@ tilesPixelated = false;
 // Constants
 
 const fallTime = .2;
+const swapTime = .15;
 const cameraOffset = vec2(0, -.5);
 const arenaSize = vec2(12.5, 8); // grid (12x6) + space for score line below
 const backgroundColor = hsl(0, 0, .12);
@@ -60,6 +61,10 @@ const tileTypeCount = tileColors.length;
 // State
 
 let level, levelSize, levelFall, fallTimer, dragStartPos, comboCount, score, bestScore;
+// When the player initiates a swap, the two tiles slide past each other before
+// the level data is actually swapped. If the swap doesn't produce a match the
+// animation reverses and they slide back. {a, b, t, reversing} or null.
+let swapAnim = null;
 let isPlaying = false;
 const gemSprites = []; // TileInfo per gem type, filled in gameInit
 
@@ -310,6 +315,7 @@ function gameReset()
     fallTimer = new Timer;
     dragStartPos = 0;
     levelFall = [];
+    swapAnim = null;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -317,6 +323,42 @@ function gameUpdate()
 {
     if (!isPlaying) return;
     if (bindPauseKey({when: () => isPlaying})) return;
+
+    // Swap animation: visuals slide first, level data swaps at the end. If no
+    // match results, the data swap is undone and a reverse animation plays.
+    if (swapAnim)
+    {
+        swapAnim.t += timeDelta;
+        if (swapAnim.t >= swapTime)
+        {
+            if (!swapAnim.reversing)
+            {
+                const aPos = swapAnim.a, bPos = swapAnim.b;
+                const aData = getTile(aPos), bData = getTile(bPos);
+                setTile(aPos, bData);
+                setTile(bPos, aData);
+                clearMatches();
+                if (fallTimer.isSet())
+                {
+                    sound_goodMove.play();
+                    swapAnim = null;
+                }
+                else
+                {
+                    sound_badMove.play();
+                    setTile(aPos, aData);
+                    setTile(bPos, bData);
+                    swapAnim.reversing = true;
+                    swapAnim.t = 0;
+                }
+            }
+            else
+            {
+                swapAnim = null;
+            }
+        }
+        return;
+    }
 
     if (fallTimer.isSet())
     {
@@ -381,20 +423,9 @@ function gameUpdate()
                     const endTile   = getTile(mouseTilePos);
                     if (startTile >= 0 && endTile >= 0)
                     {
-                        setTile(mouseTilePos, startTile);
-                        setTile(dragStartPos, endTile);
-
-                        clearMatches();
-
-                        // undo if the swap produced no matches
-                        if (!fallTimer.isSet())
-                        {
-                            sound_badMove.play();
-                            setTile(mouseTilePos, endTile);
-                            setTile(dragStartPos, startTile);
-                        }
-                        else
-                            sound_goodMove.play();
+                        // Kick off the slide animation; the actual data swap
+                        // (and match check) runs when the animation completes.
+                        swapAnim = { a: dragStartPos.copy(), b: mouseTilePos.copy(), t: 0, reversing: false };
                         dragStartPos = 0;
                     }
                 }
@@ -426,6 +457,15 @@ function gameRender()
     // playfield bg behind the gems
     drawRect(cameraPos.subtract(cameraOffset), levelSize, hsl(0, 0, 0));
 
+    // Smoothstep-eased progress along the active swap (0 → 1 forward, 1 → 0 reversing).
+    let swapProgress = 0;
+    if (swapAnim)
+    {
+        const t01 = min(swapAnim.t / swapTime, 1);
+        const ease = t01 * t01 * (3 - 2*t01);
+        swapProgress = swapAnim.reversing ? 1 - ease : ease;
+    }
+
     const pos = vec2();
     for (pos.x = levelSize.x; pos.x--;)
     for (pos.y = levelSize.y; pos.y--;)
@@ -433,7 +473,7 @@ function gameRender()
         const data = getTile(pos);
         if (data == -1) continue;
 
-        const drawPos = pos.add(vec2(.5));
+        let drawPos = pos.add(vec2(.5));
 
         // highlight the tile the player has grabbed
         if (dragStartPos && pos.x == dragStartPos.x && pos.y == dragStartPos.y)
@@ -442,6 +482,15 @@ function gameRender()
         // animate falling tiles in
         if (fallTimer.active() && levelFall[pos.x + pos.y * levelSize.x])
             drawPos.y += 1 - fallTimer.getPercent();
+
+        // slide the two swapping tiles toward each other (and back if reversing)
+        if (swapAnim)
+        {
+            if (pos.x === swapAnim.a.x && pos.y === swapAnim.a.y)
+                drawPos = swapAnim.a.lerp(swapAnim.b, swapProgress).add(vec2(.5));
+            else if (pos.x === swapAnim.b.x && pos.y === swapAnim.b.y)
+                drawPos = swapAnim.b.lerp(swapAnim.a, swapProgress).add(vec2(.5));
+        }
 
         const color = tileColors[data];
         drawRect(drawPos, vec2(.95), color);
