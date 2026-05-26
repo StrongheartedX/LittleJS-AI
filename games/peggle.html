@@ -34,6 +34,13 @@ let win, gameOver;
 let isPlaying;       // false while title is up
 let endDialogShown;  // prevents re-triggering the game-over dialog
 
+function setPlaying(p)
+{
+    isPlaying = p;
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
+
 let sfxShoot, sfxPeg, sfxOrange, sfxBucket, sfxLose, sfxWin;
 let sfxMenuNav, sfxMenuOK;
 
@@ -176,7 +183,7 @@ function buildMenus()
         title:    'PEGGLE',
         subtitle: 'knock out every orange peg',
         revealOnClick: false,
-        onPlay: () => { resetGame(); isPlaying = true; },
+        onPlay: () => { resetGame(); setPlaying(true); },
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
@@ -197,7 +204,7 @@ function buildMenus()
                 onClick: () => {
                     hideMenu('pause');
                     resetGame();
-                    isPlaying = false;
+                    setPlaying(false);
                     showMenu('title');
                 }},
         ],
@@ -233,6 +240,27 @@ function buildMenus()
                 'Made with LittleJS.'},
         ],
     });
+
+    createToolbar({
+        id:        'hud',
+        anchor:    'top-right',
+        direction: 'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen',
+                hideOnTouch: true, onClick: toggleFullscreen},
+            {type:'button', id:'menu', label:'☰', title:'Menu',
+                onClick: () => {
+                    if (isMenuVisible())
+                    {
+                        clearSubmenuStack();
+                        hideAllMenus();
+                    }
+                    else showMenu('pause');
+                }},
+        ],
+    });
+    // Toolbar is only meaningful during gameplay
+    getToolbar('hud').hide();
 }
 
 function showEndDialog()
@@ -243,8 +271,8 @@ function showEndDialog()
         message:  'Score: ' + score + '\nBest combo: x' + maxCombo,
         yesLabel: 'PLAY AGAIN',
         noLabel:  'QUIT',
-        onYes: () => { resetGame(); isPlaying = true; },
-        onNo:  () => { resetGame(); isPlaying = false; showMenu('title'); },
+        onYes: () => { resetGame(); setPlaying(true); },
+        onNo:  () => { resetGame(); setPlaying(false); showMenu('title'); },
     });
 }
 
@@ -624,11 +652,10 @@ function gameRenderPost()
 
     drawTextScreen('SCORE  ' + score,
         vec2(40, top), 32, hsl(0,0,1), 4, hsl(0,0,0), 'left');
+    drawTextScreen('ORANGE  ' + orangeLeft,
+        vec2(40, top + 30), 22, hsl(.08, 1, .65), 3, hsl(0,0,0), 'left');
     drawTextScreen('BALLS  ' + ballsRemaining + (activeBall ? '*' : ''),
         vec2(cx, top), 32, hsl(0,0,1), 4, hsl(0,0,0), 'center');
-    drawTextScreen('ORANGE  ' + orangeLeft,
-        vec2(mainCanvasSize.x - 40, top), 32,
-        hsl(.08, 1, .65), 4, hsl(0,0,0), 'right');
 
     if (comboCount >= 2 && activeBall)
     {
