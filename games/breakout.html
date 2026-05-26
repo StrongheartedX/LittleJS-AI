@@ -4,6 +4,7 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.15"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
 
@@ -105,6 +106,10 @@ const LASER_DURATION = 10;
 const FIREBALL_DURATION = 8;
 const SLOW_DURATION = 10;
 const SLOW_FACTOR = 0.65;
+
+// menu / session state
+let isPlaying = false;
+let highScore = 0;
 
 // game state
 let paddlePos, paddleSize;
@@ -518,6 +523,28 @@ function resetGame()
     resetBall();
 }
 
+function startNewGame()
+{
+    resetGame();
+    isPlaying = true;
+}
+
+function backToTitle()
+{
+    isPlaying = false;
+    clearSubmenuStack();
+    hideAllMenus();
+    // Reset for attract-mode rendering — a frozen world, not a black canvas.
+    resetGame();
+    isPlaying = false;
+    const t = getMenu('title');
+    if (t)
+    {
+        t.getItem('bestLabel')?.setLabel(`Best: ${highScore}`);
+        showMenu('title');
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
@@ -530,7 +557,86 @@ async function gameInit()
     sfxPower  = new SoundGenerator({ volume: .75, frequency: 740, release: .12, pitchJump: 260, pitchJumpTime: .03, shapeCurve: 1.1 });
     sfxLaser  = new SoundGenerator({ volume: .55, frequency: 980, release: .06, slide: 1.5, shapeCurve: 1.8 });
 
+    highScore = parseInt(localStorage.getItem('breakout.highScore') || '0', 10);
+
+    // One callback drives `paused` for every menu (including dialogs).
+    setMenuVisibilityCallback(v => paused = v);
+
+    // UI sounds
+    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+    setMenuSounds({
+        select:   () => sound_select.play(),
+        activate: () => sound_activate.play(),
+    });
+
+    createTitleMenu({
+        id: 'title',
+        title: 'BREAKOUT',
+        subtitle: 'Clear all 5 levels, then loop with rising speed',
+        revealOnClick: false,
+        canReveal: () => !isPlaying,
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text:`Best: ${highScore}`},
+        ],
+        items: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+        onPlay: startNewGame,
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        onHide: popMenu,
+        items: [
+            {type:'slider',   id:'sfxVol', label:'SFX VOLUME', value:.8, min:0, max:1,
+                persist:'breakout.sfxVolume',
+                onChange: v => setSoundVolume(v)},
+            {type:'checkbox', id:'shake',  label:'SCREEN SHAKE', value:true,
+                persist:'breakout.shake',
+                onChange: v => shakeEnabled = v},
+            {type:'separator'},
+            {type:'button',   label:'BACK', onClick: () => hideMenu('options')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:'A LittleJS breakout.\n\nMove the paddle with the mouse or A/D. ' +
+                'Click or Space to launch, fire lasers, and release sticky balls.\n\n' +
+                'Powerups: W=Wide M=Multi T=Sticky L=Laser F=Fire S=Slow 1UP=Life.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
+            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
+            {
+                showConfirmDialog({
+                    message: 'Quit to title?',
+                    onYes: backToTitle,
+                });
+            }},
+        ],
+    });
+
+    // Build the attract-mode backdrop world (frozen bricks/paddle/ball
+    // while the title is up), then show the title menu over it.
     resetGame();
+    isPlaying = false;
+    showMenu('title');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -538,8 +644,14 @@ function gameUpdate()
 {
     const dt = timeDelta;
 
+    if (!isPlaying)
+        return;
+
+    if (bindPauseKey({when: () => isPlaying && state !== 'lose'}))
+        return;
+
     if (keyWasPressed('KeyR'))
-        resetGame();
+        startNewGame();
 
     // paddle controls (keyboard overrides mouse)
     const left  = keyIsDown('ArrowLeft') || keyIsDown('KeyA');
@@ -773,6 +885,24 @@ function updateBalls(dt)
         if (lives <= 0)
         {
             state = 'lose';
+            isPlaying = false;
+
+            const isNewBest = score > highScore;
+            if (isNewBest)
+            {
+                highScore = score;
+                localStorage.setItem('breakout.highScore', String(highScore));
+            }
+
+            const msg = isNewBest
+                ? `New best! ${score}`
+                : `Final score: ${score}\nBest: ${highScore}`;
+            showAlertDialog({
+                title: 'GAME OVER',
+                icon: '💥',
+                message: msg,
+                onOk: backToTitle,
+            });
             return;
         }
 
@@ -899,60 +1029,48 @@ function gameRender()
 ///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
-    drawTextScreen(`Score ${score}`, vec2(16, 16), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'left');
-    drawTextScreen(`Wave ${wave}  Level ${level}/${LEVELS.length}`,
-        vec2(mainCanvasSize.x / 2, 16), 24, hsl(0, 0, 1), 4, hsl(0, 0, 0));
-    drawTextScreen(`Lives ${lives}`, vec2(mainCanvasSize.x - 16, 16), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'right');
-
-    if (combo >= 2)
+    if (isPlaying && state === 'serve')
     {
-        drawTextScreen(`x${combo} COMBO`,
-            vec2(mainCanvasSize.x / 2, 80),
-            32, hsl(.12, 1, .7), 4, hsl(0, 0, 0));
-    }
-
-    let status = '';
-    if (paddleExtra > 0) status += `WIDE +${paddleExtra.toFixed(0)}   `;
-    if (stickyTimer > 0) status += `STICKY ${stickyTimer.toFixed(0)}s   `;
-    if (laserTimer  > 0) status += `LASER ${laserTimer.toFixed(0)}s   `;
-    if (fireballTimer > 0) status += `FIRE ${fireballTimer.toFixed(0)}s   `;
-    if (slowTimer   > 0) status += `SLOW ${slowTimer.toFixed(0)}s   `;
-    if (balls.length > 1) status += `BALLS ${balls.length}`;
-    if (status)
-        drawTextScreen(status, vec2(mainCanvasSize.x / 2, 42), 22, hsl(0, 0, .95), 4, hsl(0, 0, 0));
-
-    if (state === 'serve')
-    {
-        drawTextScreen(`Click or Space to launch`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 70), 36,
-            hsl(0, 0, 1), 6, hsl(0, 0, 0));
-        drawTextScreen(`Move: Mouse or A/D · Restart: R`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 32), 22,
-            hsl(0, 0, .9), 4, hsl(0, 0, 0));
-    }
-    else if (state === 'win')
-    {
-        drawTextScreen(`YOU WIN!`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 + 20), 90,
-            hsl(.32, .8, .6), 10, hsl(0, 0, 0));
-        drawTextScreen(`Press R to play again`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 - 50), 32,
-            hsl(0, 0, 1), 6, hsl(0, 0, 0));
-    }
-    else if (state === 'lose')
-    {
-        drawTextScreen(`GAME OVER`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 + 20), 90,
-            hsl(0, 1, .6), 10, hsl(0, 0, 0));
-        drawTextScreen(`Press R to try again`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 - 50), 32,
+        drawTextScreen(`Click or Space to launch`,
+            vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 70), 36,
             hsl(0, 0, 1), 6, hsl(0, 0, 0));
     }
 
-    drawTextScreen(`W=Wide M=Multi T=Sticky L=Laser F=Fire S=Slow 1UP=Life`,
-        vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 18), 18, hsl(0, 0, .8), 4, hsl(0, 0, 0));
+    if (isPlaying)
+    {
+        drawTextScreen(`Score ${score}`, vec2(16, 16), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'left');
+        drawTextScreen(`Wave ${wave}  Level ${level}/${LEVELS.length}`,
+            vec2(mainCanvasSize.x / 2, 16), 24, hsl(0, 0, 1), 4, hsl(0, 0, 0));
+        drawTextScreen(`Lives ${lives}`, vec2(mainCanvasSize.x - 16, 16), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'right');
 
-    if (laserTimer > 0)
-        drawTextScreen(`Laser: Click/Space to shoot`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 40), 18,
-            hsl(0, 0, .9), 4, hsl(0, 0, 0));
+        if (combo >= 2)
+        {
+            drawTextScreen(`x${combo} COMBO`,
+                vec2(mainCanvasSize.x / 2, 80),
+                32, hsl(.12, 1, .7), 4, hsl(0, 0, 0));
+        }
 
-    if (stickyTimer > 0)
-        drawTextScreen(`Sticky: balls stick to paddle · Click/Space to release`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 58), 18,
-            hsl(0, 0, .9), 4, hsl(0, 0, 0));
+        let status = '';
+        if (paddleExtra > 0) status += `WIDE +${paddleExtra.toFixed(0)}   `;
+        if (stickyTimer > 0) status += `STICKY ${stickyTimer.toFixed(0)}s   `;
+        if (laserTimer  > 0) status += `LASER ${laserTimer.toFixed(0)}s   `;
+        if (fireballTimer > 0) status += `FIRE ${fireballTimer.toFixed(0)}s   `;
+        if (slowTimer   > 0) status += `SLOW ${slowTimer.toFixed(0)}s   `;
+        if (balls.length > 1) status += `BALLS ${balls.length}`;
+        if (status)
+            drawTextScreen(status, vec2(mainCanvasSize.x / 2, 42), 22, hsl(0, 0, .95), 4, hsl(0, 0, 0));
+
+        drawTextScreen(`W=Wide M=Multi T=Sticky L=Laser F=Fire S=Slow 1UP=Life`,
+            vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 18), 18, hsl(0, 0, .8), 4, hsl(0, 0, 0));
+
+        if (laserTimer > 0)
+            drawTextScreen(`Laser: Click/Space to shoot`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 40), 18,
+                hsl(0, 0, .9), 4, hsl(0, 0, 0));
+
+        if (stickyTimer > 0)
+            drawTextScreen(`Sticky: balls stick to paddle · Click/Space to release`, vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 58), 18,
+                hsl(0, 0, .9), 4, hsl(0, 0, 0));
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
