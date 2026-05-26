@@ -361,6 +361,27 @@ function detectCrashClears(grid)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Counter gem countdown tick
+
+function tickCounterGems(grid)
+{
+    let flipped = false;
+    for (let x = 0; x < BOARD_W; x++)
+    for (let y = 0; y < BOARD_H; y++)
+    {
+        const g = grid[x][y];
+        if (!g || g.type !== 'counter') continue;
+        g.countdown--;
+        if (g.countdown <= 0)
+        {
+            grid[x][y] = gemRegular(g.color);
+            flipped = true;
+        }
+    }
+    return flipped;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Placeholder Board
 
 class Board
@@ -652,6 +673,24 @@ function runUnitTests()
         g[2][0] = gemCounter(COLOR_Y, 3);
         cleared = detectCrashClears(g);
         assert(cleared.length === 3, 'crash: on-color active counter cleared by adjacency');
+    }
+
+    // --- Counter gem tick tests ---
+    {
+        let g = emptyGrid();
+        g[0][0] = gemCounter(COLOR_R, 3);
+        g[1][0] = gemCounter(COLOR_B, 1);
+        g[2][0] = gemRegular(COLOR_G);
+
+        let flipped = tickCounterGems(g);
+        assert(g[0][0].type === 'counter' && g[0][0].countdown === 2, 'tick: countdown 3→2');
+        assert(g[1][0].type === 'regular' && g[1][0].color === COLOR_B, 'tick: countdown 1→flip to regular');
+        assert(flipped === true, 'tick: returns true when a gem flipped');
+        assert(g[2][0].type === 'regular' && g[2][0].color === COLOR_G, 'tick: regular gem untouched');
+
+        flipped = tickCounterGems(g);
+        assert(flipped === false, 'tick: returns false when nothing flipped this round');
+        assert(g[0][0].countdown === 1, 'tick: countdown 2→1');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
