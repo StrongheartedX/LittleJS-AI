@@ -994,6 +994,16 @@ function gameUpdate()
 function gameUpdatePost()
 {
     cameraPos = player.pos;
+
+    // Input checks live here (NOT in gameRenderPost) because the engine
+    // clears the "was pressed" bit in inputUpdatePost which runs after
+    // gameUpdatePost but before gameRenderPost. gameUpdatePost runs every
+    // frame including while paused, so this works on the game-over menu.
+    if (keyWasPressed('KeyT')) playerAI = !playerAI;
+
+    if (gameOver &&
+        (keyWasPressed('KeyR') || (playerAI && gameOverFrameCount > 90)))
+        restartGame();
 }
 // Pick a deterministic per-cell value from a coordinate pair.
 function cellHash(x, y)
@@ -1098,19 +1108,8 @@ function drawHUD()
 
 function gameRenderPost()
 {
-    if (keyWasPressed('KeyT')) playerAI = !playerAI;
-
-    if (gameOver)
-    {
-        gameOverFrameCount++;
-        // AI auto-restarts ~1.5s after death so a balance run keeps looping
-        if (keyWasPressed('KeyR') || (playerAI && gameOverFrameCount > 90))
-            restartGame();
-    }
-    else
-    {
-        gameOverFrameCount = 0;
-    }
+    if (gameOver) gameOverFrameCount++;
+    else          gameOverFrameCount = 0;
 
     drawHUD();
 
