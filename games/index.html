@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LittleJS Games</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1f262f;
+    --border: #2a323d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-bg: #1f3a5f;
+    --chip-bg: #2a323d;
+    --chip-text: #adbac7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+  }
+
+  /* ---- Sidebar ---- */
+  #sidebar {
+    width: 320px;
+    flex: 0 0 320px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #header h1 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .3px;
+  }
+  #header h1 .count {
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 6px;
+  }
+  #search {
+    width: 100%;
+    padding: 7px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+
+  #list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0;
+  }
+  #list::-webkit-scrollbar { width: 10px; }
+  #list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+
+  .card {
+    padding: 8px 16px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    transition: background .08s;
+  }
+  .card:hover { background: var(--panel-2); }
+  .card.selected {
+    background: var(--accent-bg);
+    border-left-color: var(--accent);
+  }
+  .card .title {
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .card .body {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height .15s, opacity .15s, margin-top .15s;
+  }
+  .card:hover .body, .card.selected .body {
+    max-height: 200px;
+    opacity: 1;
+    margin-top: 6px;
+  }
+  .card .desc {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin-bottom: 6px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    text-transform: lowercase;
+    letter-spacing: .3px;
+  }
+  .empty {
+    padding: 20px 16px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* ---- Stage ---- */
+  #stage {
+    flex: 1;
+    position: relative;
+    background: #000;
+    overflow: hidden;
+  }
+  #frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+  #placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+    background:
+      radial-gradient(circle at 50% 40%, #1a2230 0%, #0a0d12 70%);
+  }
+  #placeholder h2 {
+    color: var(--text);
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    letter-spacing: .5px;
+  }
+  #placeholder p { margin: 4px 0; font-size: 13px; }
+
+  /* ---- Top-right controls ---- */
+  #controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity .15s;
+    pointer-events: none;
+  }
+  #stage:hover #controls { opacity: 1; pointer-events: auto; }
+  .btn {
+    background: rgba(22, 27, 34, .85);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    border-radius: 5px;
+    font: 12px/1 -apple-system, sans-serif;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .btn:hover { background: var(--accent-bg); border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div id="header">
+    <h1>LittleJS Games <span class="count" id="count"></span></h1>
+    <input id="search" type="text" placeholder="Search..." autocomplete="off" spellcheck="false">
+  </div>
+  <div id="list"></div>
+</aside>
+
+<main id="stage">
+  <div id="placeholder">
+    <h2>LittleJS Games</h2>
+    <p>Pick a game from the sidebar to start playing.</p>
+    <p style="margin-top:14px;font-size:12px;">Hover a card to see its description.</p>
+  </div>
+  <iframe id="frame" allow="autoplay; gamepad; fullscreen" style="display:none;"></iframe>
+  <div id="controls">
+    <button class="btn" id="reloadBtn" title="Reload the current game">Reload</button>
+    <a class="btn" id="openBtn" target="_blank" rel="noopener" title="Open in a new tab">Open ↗</a>
+  </div>
+</main>
+
+<script>
+'use strict';
+
+// name = title shown in sidebar, file = filename in games/, desc = one-line,
+// tags = lowercase chips. Keep desc short — these are browse-only summaries.
+const GAMES = [
+  { file: '2048.html',           name: '2048',            desc: 'Slide numbered tiles to combine matching pairs.',          tags: ['puzzle','grid'] },
+  { file: 'asteroids.html',      name: 'Asteroids',       desc: 'Rotate-and-thrust shooter — blast drifting space rocks.', tags: ['arcade','shooter'] },
+  { file: 'baseball.html',       name: 'Baseball',        desc: 'Pitch, swing, and run the bases.',                         tags: ['sports'] },
+  { file: 'basketball.html',     name: 'Pop-a-Shot',      desc: 'Sink as many shots as you can before the clock runs out.', tags: ['sports','arcade'] },
+  { file: 'breakout.html',       name: 'Breakout',        desc: 'Bounce a ball off a paddle to clear bricks.',              tags: ['arcade','paddle'] },
+  { file: 'captureGo.html',      name: 'Capture Go',      desc: 'Simplified Go — capture stones by surrounding them.',      tags: ['board','strategy'] },
+  { file: 'centipede.html',      name: 'Centipede',       desc: 'Shoot the descending centipede before it reaches you.',    tags: ['arcade','shooter'] },
+  { file: 'checkers.html',       name: 'Checkers',        desc: 'Classic 8×8 jump-to-capture board game.',                  tags: ['board','strategy'] },
+  { file: 'chess.html',          name: 'Chess',           desc: 'Two-player chess with full standard rules.',               tags: ['board','strategy'] },
+  { file: 'columns.html',        name: 'Columns',         desc: 'Match three jewels by rotating falling columns.',          tags: ['puzzle','falling'] },
+  { file: 'combat.html',         name: 'Combat',          desc: 'Two-player tank duels.',                                   tags: ['arcade','multiplayer'] },
+  { file: 'connect4.html',       name: 'Connect 4',       desc: 'Drop discs to line up four in a row.',                     tags: ['board','strategy'] },
+  { file: 'defender.html',       name: 'Defender',        desc: 'Side-scrolling shooter — protect humans from aliens.',     tags: ['arcade','shooter'] },
+  { file: 'drMario.html',        name: 'Dr. Mario',       desc: 'Match falling pills with viruses to clear them.',          tags: ['puzzle','falling'] },
+  { file: 'flappyBird.html',     name: 'Flappy Bird',     desc: 'Tap to flap through pipe gaps.',                           tags: ['arcade','one-button'] },
+  { file: 'frogger.html',        name: 'Frogger',         desc: 'Hop across traffic and rivers to safety.',                 tags: ['arcade'] },
+  { file: 'geometryDash.html',   name: 'Geometry Dash',   desc: 'Rhythm-jump through spike obstacles.',                     tags: ['arcade','runner'] },
+  { file: 'gradius.html',        name: 'Gradius',         desc: 'Power up your ship and blast through horizontal levels.',  tags: ['shooter','scrolling'] },
+  { file: 'iterate-test.html',   name: 'Iterate Test',    desc: 'Texture atlas test fixture — not a real game.',            tags: ['test'] },
+  { file: 'jetpackDash.html',    name: 'Jetpack Dash',    desc: 'Boost upward to dodge hazards.',                           tags: ['arcade','runner'] },
+  { file: 'joust.html',          name: 'Joust',           desc: 'Flap-jump knight combat — outheight your enemy.',          tags: ['arcade'] },
+  { file: 'kaboom.html',         name: 'Kaboom',          desc: 'Catch bombs dropped by a mad bomber.',                     tags: ['arcade','paddle'] },
+  { file: 'lunarLander.html',    name: 'Lunar Lander',    desc: 'Burn fuel to touch down softly.',                          tags: ['physics','arcade'] },
+  { file: 'mario.html',          name: 'Mario',           desc: 'Platformer with bricks, ? blocks, and a flagpole.',        tags: ['platformer'] },
+  { file: 'match3.html',         name: 'Match 3',         desc: 'Swap adjacent gems to make matches of three.',             tags: ['puzzle','grid'] },
+  { file: 'microRacer.html',     name: 'Micro Racer',     desc: 'Top-down racing on a tight track.',                        tags: ['racing'] },
+  { file: 'minesweeper.html',    name: 'Minesweeper',     desc: 'Reveal cells without hitting a mine.',                     tags: ['puzzle','grid'] },
+  { file: 'miniGolf.html',       name: 'Mini Golf',       desc: 'Aim and putt across miniature courses.',                   tags: ['sports','physics'] },
+  { file: 'missileCommand.html', name: 'Missile Command', desc: 'Defend cities from incoming nukes.',                       tags: ['arcade','shooter'] },
+  { file: 'moonPatrol.html',     name: 'Moon Patrol',     desc: 'Side-scrolling moon buggy — jump craters, shoot enemies.', tags: ['arcade','scrolling'] },
+  { file: 'mrDriller.html',      name: 'Mr. Driller',     desc: 'Drill down through colored blocks while managing air.',    tags: ['puzzle','action'] },
+  { file: 'orbitswarm.html',     name: 'OrbitSwarm',      desc: 'Orbit a star and shoot the incoming swarm.',               tags: ['arcade','shooter'] },
+  { file: 'othello.html',        name: 'Othello',         desc: 'Flank to flip — capture the most stones.',                 tags: ['board','strategy'] },
+  { file: 'pacman.html',         name: 'Pac-Man',         desc: 'Eat dots and dodge ghosts in a maze.',                     tags: ['arcade','maze'] },
+  { file: 'peggle.html',         name: 'Peggle',          desc: 'Aim balls at pegs to clear the board.',                    tags: ['physics','puzzle'] },
+  { file: 'pinball.html',        name: 'Pinball',         desc: 'Launch a ball, hit the flippers, chase the score.',        tags: ['physics','arcade'] },
+  { file: 'plinko.html',         name: 'Plinko',          desc: 'Drop chips down a peg field for prizes.',                  tags: ['physics','arcade'] },
+  { file: 'pokemon.html',        name: 'Pokemon',         desc: 'Top-down monster-collector RPG prototype.',                tags: ['rpg'] },
+  { file: 'polePosition.html',   name: 'Pole Position',   desc: 'Pseudo-3D racing — steer through the curves.',             tags: ['racing'] },
+  { file: 'pong.html',           name: 'Pong',            desc: 'Two-paddle bounce, first to score wins.',                  tags: ['arcade','paddle'] },
+  { file: 'pool.html',           name: 'Pool',            desc: '8-ball pool with cue physics.',                            tags: ['sports','physics'] },
+  { file: 'puzzleFighter.html',  name: 'Puzzle Fighter',  desc: 'Stack falling gems to build chain combos.',                tags: ['puzzle','falling'] },
+  { file: 'riverRaid.html',      name: 'River Raid',      desc: 'Vertical-scrolling river shooter — watch your fuel.',      tags: ['shooter','scrolling'] },
+  { file: 'robotron.html',       name: 'Robotron',        desc: 'Twin-stick shooter — save the humans.',                    tags: ['arcade','shooter','twin-stick'] },
+  { file: 'skiing.html',         name: 'Skiing',          desc: 'Slalom through gates downhill.',                           tags: ['arcade','racing'] },
+  { file: 'snake.html',          name: 'Snake',           desc: 'Eat to grow, don’t crash into yourself.',             tags: ['arcade','grid'] },
+  { file: 'snood.html',          name: 'Snood',           desc: 'Aim and shoot snoods to clear the board.',                 tags: ['puzzle','physics'] },
+  { file: 'sokoban.html',        name: 'Sokoban',         desc: 'Push boxes onto target squares.',                          tags: ['puzzle','grid'] },
+  { file: 'spaceInvaders.html',  name: 'Space Invaders',  desc: 'Shoot descending alien formations.',                       tags: ['arcade','shooter'] },
+  { file: 'spyhunter.html',      name: 'Spy Hunter',      desc: 'Top-down driving with car combat.',                        tags: ['arcade','driving'] },
+  { file: 'tetris.html',         name: 'Tetris',          desc: 'Stack falling tetrominoes to clear lines.',                tags: ['puzzle','falling'] },
+];
+
+GAMES.sort((a, b) => a.name.localeCompare(b.name));
+
+const listEl = document.getElementById('list');
+const searchEl = document.getElementById('search');
+const countEl = document.getElementById('count');
+const frameEl = document.getElementById('frame');
+const placeholderEl = document.getElementById('placeholder');
+const reloadBtn = document.getElementById('reloadBtn');
+const openBtn = document.getElementById('openBtn');
+
+let currentFile = null;
+
+function makeCard(g) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.file = g.file;
+  card.innerHTML =
+    '<div class="title"></div>' +
+    '<div class="body">' +
+      '<div class="desc"></div>' +
+      '<div class="chips"></div>' +
+    '</div>';
+  card.querySelector('.title').textContent = g.name;
+  card.querySelector('.desc').textContent = g.desc;
+  const chipsEl = card.querySelector('.chips');
+  for (const t of g.tags) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = t;
+    chipsEl.appendChild(chip);
+  }
+  card.addEventListener('click', () => selectGame(g.file));
+  return card;
+}
+
+function render(filter) {
+  listEl.innerHTML = '';
+  const q = filter.trim().toLowerCase();
+  let shown = 0;
+  for (const g of GAMES) {
+    if (q) {
+      const hay = (g.name + ' ' + g.desc + ' ' + g.tags.join(' ')).toLowerCase();
+      if (!hay.includes(q)) continue;
+    }
+    const card = makeCard(g);
+    if (g.file === currentFile) card.classList.add('selected');
+    listEl.appendChild(card);
+    shown++;
+  }
+  if (shown === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No games match "' + filter + '".';
+    listEl.appendChild(empty);
+  }
+  countEl.textContent = '(' + shown + (q ? ' / ' + GAMES.length : '') + ')';
+}
+
+function selectGame(file) {
+  if (!GAMES.some(g => g.file === file)) return;
+  currentFile = file;
+  // Cache-bust on every load so edits to a game show up without manual reload.
+  frameEl.src = file + '?t=' + Date.now();
+  frameEl.style.display = 'block';
+  placeholderEl.style.display = 'none';
+  openBtn.href = file;
+  // Update hash without triggering hashchange handler.
+  if (location.hash !== '#' + file) {
+    history.replaceState(null, '', '#' + file);
+  }
+  // Re-mark selection in current list.
+  for (const c of listEl.querySelectorAll('.card')) {
+    c.classList.toggle('selected', c.dataset.file === file);
+  }
+}
+
+function loadFromHash() {
+  const file = decodeURIComponent(location.hash.replace(/^#/, ''));
+  if (file && GAMES.some(g => g.file === file)) selectGame(file);
+}
+
+searchEl.addEventListener('input', () => render(searchEl.value));
+window.addEventListener('hashchange', loadFromHash);
+reloadBtn.addEventListener('click', () => {
+  if (currentFile) frameEl.src = currentFile + '?t=' + Date.now();
+});
+
+// Keyboard nav: ↑/↓ to move selection, Enter to focus the iframe.
+document.addEventListener('keydown', e => {
+  if (document.activeElement === searchEl && e.key !== 'Escape') return;
+  const cards = Array.from(listEl.querySelectorAll('.card'));
+  if (!cards.length) return;
+  const idx = cards.findIndex(c => c.classList.contains('selected'));
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const next = cards[Math.min(cards.length - 1, idx + 1)] || cards[0];
+    selectGame(next.dataset.file);
+    next.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const prev = cards[Math.max(0, idx - 1)] || cards[0];
+    selectGame(prev.dataset.file);
+    prev.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === '/' && document.activeElement !== searchEl) {
+    e.preventDefault();
+    searchEl.focus();
+    searchEl.select();
+  } else if (e.key === 'Escape' && document.activeElement === searchEl) {
+    searchEl.value = '';
+    render('');
+    searchEl.blur();
+  }
+});
+
+render('');
+loadFromHash();
+</script>
+</body>
+</html>
