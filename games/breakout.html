@@ -22,6 +22,13 @@ cameraScale = 32;
 // world size
 const levelSize = vec2(38, 20);
 
+// brick types
+const BRICK_NORMAL = 0;
+const BRICK_SILVER = 1;
+const BRICK_GOLD   = 2;
+
+const BRICK_SCORE = [100, 200, 0]; // indexed by type
+
 // tuning
 const SPECIAL_BRICKS_PER_LEVEL = 8; // only these drop powerups
 const PADDLE_BASE = vec2(6, .7);
@@ -179,13 +186,25 @@ function resetBricks()
     {
         const t = percent(y, 12, levelSize.y - 2);
         const color = hsl(lerp(.55, .05, t), .9, .6);
-        bricks.push({ pos: vec2(x, y), size: brickSize, color, alive: true, special: false, dropType: '' });
+        bricks.push({
+            pos: vec2(x, y),
+            size: brickSize,
+            color,
+            alive: true,
+            special: false,
+            dropType: '',
+            type: BRICK_NORMAL,
+            hp: 1,
+            maxHp: 1,
+        });
     }
 
     // pick special bricks and ASSIGN their drop in advance
     const n = min(SPECIAL_BRICKS_PER_LEVEL, bricks.length);
     const idx = [];
-    for (let i = 0; i < bricks.length; ++i) idx.push(i);
+    for (let i = 0; i < bricks.length; ++i)
+        if (bricks[i].type !== BRICK_GOLD)
+            idx.push(i);
 
     for (let i = idx.length - 1; i > 0; --i)
     {
@@ -215,6 +234,26 @@ function spawnPowerupFromBrick(brick)
         size: vec2(1.2, .8),
         type: brick.dropType,
     });
+}
+
+// Returns true if the brick was destroyed this call.
+function damageBrick(brick)
+{
+    if (brick.type === BRICK_GOLD)
+        return false;
+
+    brick.hp--;
+    if (brick.hp > 0)
+    {
+        sfxBounce.play();
+        return false;
+    }
+
+    brick.alive = false;
+    score += BRICK_SCORE[brick.type];
+    sfxBrick.play();
+    spawnPowerupFromBrick(brick);
+    return true;
 }
 
 function applyPowerup(type)
@@ -385,11 +424,12 @@ function updateBullets(dt)
             if (!isOverlapping(s.pos, s.size, b.pos, b.size))
                 continue;
 
-            b.alive = false;
-            score += 100;
-            sfxBrick.play();
-            spawnPowerupFromBrick(b);
-
+            if (b.type === BRICK_GOLD)
+            {
+                bullets.splice(i, 1);
+                break;
+            }
+            damageBrick(b);
             bullets.splice(i, 1);
             break;
         }
@@ -445,10 +485,7 @@ function updateBalls(dt)
                 continue;
 
             resolveBallRect(ball, b.pos, b.size);
-            b.alive = false;
-            score += 100;
-            sfxBrick.play();
-            spawnPowerupFromBrick(b);
+            damageBrick(b);
             ball.vel = ball.vel.normalize(ballSpeed);
             break;
         }
@@ -499,15 +536,27 @@ function gameRender()
     {
         if (!b.alive) continue;
 
-        if (b.special)
+        const inset = b.size.subtract(vec2(.08, .08));
+        if (b.type === BRICK_GOLD)
+        {
+            drawRect(b.pos, b.size.subtract(vec2(.02, .02)), hsl(.13, .85, .55));
+            drawRect(b.pos, inset, hsl(.13, .95, .7));
+        }
+        else if (b.type === BRICK_SILVER)
+        {
+            const damaged = b.hp < b.maxHp;
+            drawRect(b.pos, b.size.subtract(vec2(.02, .02)), hsl(0, 0, damaged ? .35 : .55));
+            drawRect(b.pos, inset, hsl(0, 0, damaged ? .55 : .82));
+        }
+        else if (b.special)
         {
             const frame = powerupColor(b.dropType);
             drawRect(b.pos, b.size.subtract(vec2(.02, .02)), frame);
-            drawRect(b.pos, b.size.subtract(vec2(.18, .18)), b.color);
+            drawRect(b.pos, inset, b.color);
             drawPowerLetter(b.pos, b.dropType);
         }
         else
-            drawRect(b.pos, b.size.subtract(vec2(.08, .08)), b.color);
+            drawRect(b.pos, inset, b.color);
     }
 
     // powerups
