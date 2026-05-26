@@ -157,11 +157,87 @@ const ELITE_TYPES = {
 };
 const ELITE_KEYS = Object.keys(ELITE_TYPES);
 
+// Boss schedule — each boss spawns once when elapsedTime crosses .time.
+// Each carries an Enemy-compatible synth so Enemy class handles AI/contact.
+const BOSS_SCHEDULE = [
+    {time: 180, key: 'giantBat',   sprite: 'bat',    name: 'Giant Bat',
+        hp: 300, dmg: 20, speed: 2.0, size: 3.5, xpDrop: 0},
+    {time: 300, key: 'bigZombie',  sprite: 'zombie', name: 'Big Zombie',
+        hp: 700, dmg: 30, speed: 1.0, size: 4.0, xpDrop: 0},
+    {time: 480, key: 'clownKing',  sprite: 'clown',  name: 'Clown King',
+        hp: 900, dmg: 25, speed: 1.5, size: 3.5, xpDrop: 0,
+        splitInto: 'clown', splitCount: 4},
+];
+
+const bossesSpawned = new Set();
+let activeBoss = null;
+
+class Chest extends EngineObject
+{
+    constructor(pos)
+    {
+        super(pos, vec2(1.4), sprites.chest);
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.setCollision(false, false, false, false);
+        this.velocity = vec2();
+        this.spawnTime = time;
+    }
+
+    update()
+    {
+        super.update();
+        this.renderOrder = -this.pos.y + 100;   // float above ground entities
+        // bobbing wiggle so the chest catches the eye in a busy screen
+        const age = time - this.spawnTime;
+        this.angle = Math.sin(age * 4) * .12;
+        if (player.pos.distance(this.pos) < 1.2)
+        {
+            this.open();
+            this.destroy();
+        }
+    }
+
+    open()
+    {
+        // grant 3 random upgrades like a triple level-up
+        for (let i = 0; i < 3; ++i)
+        {
+            const choices = buildUpgradeChoices();
+            if (!choices.length) break;
+            choices[randInt(choices.length)].apply();
+        }
+        // fireworks burst — radial chainFlashes for the reward moment
+        for (let i = 0; i < 16; ++i)
+        {
+            const a = i * 2 * PI / 16;
+            const tip = this.pos.add(vec2().setAngle(a, 3));
+            chainFlashes.push({a: this.pos.copy(), b: tip, t: time + .5});
+        }
+        if (typeof showMenuToast === 'function')
+        {
+            showMenuToast({icon: '🎁', title: 'Chest!',
+                           text: '+3 upgrades', duration: 2.5});
+        }
+    }
+
+    render()
+    {
+        const age = time - this.spawnTime;
+        // pulsing gold additive so the chest screams "come collect me"
+        const pulse = .5 + .5 * Math.sin(age * 6);
+        drawEmoji(this.pos, this.size, sprites.chest, WHITE,
+                  new Color(.4 * pulse, .3 * pulse, 0), this.angle);
+    }
+}
+
 const enemies = [];
 
 class Enemy extends EngineObject
 {
-    constructor(pos, type, eliteKey = null)
+    constructor(pos, type, eliteKey = null, bossDef = null)
     {
         const elite = eliteKey ? ELITE_TYPES[eliteKey] : null;
         const baseSz = type.size != null ? type.size : 1.0;
@@ -169,12 +245,18 @@ class Enemy extends EngineObject
         super(pos, vec2(sz), sprites[type.sprite]);
         this.type     = type;
         this.hp       = type.hp * (elite ? elite.hpMult : 1);
+        this.maxHp    = this.hp;
         this.dmg      = type.dmg * (elite ? elite.dmgMult : 1);
         this.speed    = type.speed * (elite ? elite.speedMult : 1);
         this.xpDrop   = type.xpDrop * (elite ? elite.xpMult : 1);
         this.isElite  = !!elite;
         this.eliteKey = eliteKey;
         this.eliteAdditive = elite ? elite.additive : null;
+        this.isBoss   = !!bossDef;
+        this.bossDef  = bossDef;
+        // bosses always glow gold so they read against a swarm of regulars
+        if (this.isBoss && !this.eliteAdditive)
+            this.eliteAdditive = new Color(.55, .42, 0);
         this.damping = 1;
         this.friction = 1;
         this.gravityScale = 0;
@@ -268,12 +350,16 @@ class Enemy extends EngineObject
             this.pos = this.pos.add(away);
         }
 
-        // despawn if dragged too far from the player or fully outside arena
-        const farFromPlayer = player.pos.distance(this.pos) > 50;
-        const outsideArena = this.pos.x < ARENA_MIN_X - 2 || this.pos.x > ARENA_MAX_X + 2 ||
-                             this.pos.y < ARENA_MIN_Y - 2 || this.pos.y > ARENA_MAX_Y + 2;
-        if (farFromPlayer || outsideArena)
-            this.destroy();
+        // despawn if dragged too far from the player or fully outside arena —
+        // bosses are exempt (they persist until killed)
+        if (!this.isBoss)
+        {
+            const farFromPlayer = player.pos.distance(this.pos) > 50;
+            const outsideArena = this.pos.x < ARENA_MIN_X - 2 || this.pos.x > ARENA_MAX_X + 2 ||
+                                 this.pos.y < ARENA_MIN_Y - 2 || this.pos.y > ARENA_MAX_Y + 2;
+            if (farFromPlayer || outsideArena)
+                this.destroy();
+        }
     }
 
     destroy()
@@ -283,24 +369,41 @@ class Enemy extends EngineObject
         if (this.hp <= 0)  // only drop on death, not despawn
         {
             killCount++;
-            // split into smaller enemies if the type defines a split
-            if (this.type.splitInto)
+            // split into smaller enemies if the type or boss def defines a split
+            const splitInto = this.type.splitInto ||
+                              (this.bossDef && this.bossDef.splitInto);
+            if (splitInto)
             {
-                const child = ENEMY_TYPES.find(t => t.key === this.type.splitInto);
+                const child = ENEMY_TYPES.find(t => t.key === splitInto);
                 if (child)
                 {
-                    const count = this.type.splitCount || 3;
+                    const count = this.bossDef && this.bossDef.splitCount
+                                ? this.bossDef.splitCount
+                                : (this.type.splitCount || 3);
+                    // bosses spread their spawn ring wider since they're big
+                    const spread = this.isBoss ? this.size.x * .5 : .6;
                     for (let i = 0; i < count; ++i)
                     {
-                        const offset = vec2().setAngle(rand(2 * PI), .6);
+                        const offset = vec2().setAngle(rand(2 * PI), spread);
                         new Enemy(this.pos.add(offset), child);
                     }
                 }
             }
-            if (rand() < .1)
+            if (this.isBoss)
+            {
+                // bosses drop a 🎁 chest instead of a gem/heart
+                new Chest(this.pos.copy());
+                if (activeBoss === this) activeBoss = null;
+            }
+            else if (rand() < .1)
                 new Pickup(this.pos.copy(), sprites.heart, 'heart', 20);
             else
                 new Pickup(this.pos.copy(), sprites.gem, 'gem', this.xpDrop);
+        }
+        else if (this.isBoss && activeBoss === this)
+        {
+            // covers the despawn-by-restart edge case
+            activeBoss = null;
         }
         super.destroy();
     }
@@ -845,8 +948,40 @@ function pickWeightedType(elapsed)
     return ENEMY_TYPES[0];
 }
 
+function spawnBoss(def)
+{
+    // synthesize an ENEMY_TYPES-compatible record so Enemy can consume it
+    const synth = {
+        key:        def.key,
+        sprite:     def.sprite,
+        hp:         def.hp,
+        dmg:        def.dmg,
+        speed:      def.speed,
+        xpDrop:     def.xpDrop,
+        size:       def.size,
+        splitInto:  def.splitInto,
+        splitCount: def.splitCount,
+    };
+    const pos = player.pos.add(vec2().setAngle(rand(2 * PI), 22));
+    const boss = new Enemy(pos, synth, null, def);
+    activeBoss = boss;
+    if (typeof showMenuToast === 'function')
+        showMenuToast({icon: '⚠️', title: 'BOSS', text: def.name,
+                       duration: 3, position: 'top-right'});
+}
+
 function updateSpawner()
 {
+    // boss schedule check — fires once per boss when elapsedTime crosses .time
+    for (const boss of BOSS_SCHEDULE)
+    {
+        if (elapsedTime >= boss.time && !bossesSpawned.has(boss.key))
+        {
+            bossesSpawned.add(boss.key);
+            spawnBoss(boss);
+        }
+    }
+
     // ramp the spawn interval from base down to 0.08s over the first 90 seconds
     spawner.interval = lerp(min(time / 90, 1), enemySpawnIntervalBase, 0.08);
 
@@ -980,9 +1115,10 @@ async function gameInit()
     sprites.bomb      = drawToTexture(20, paintEmoji('💣'), 'a black bomb with fuse');
     sprites.ice       = drawToTexture(21, paintEmoji('🧊'), 'a clear ice cube');
 
-    // pickups 24-25
+    // pickups 24-26
     sprites.gem       = drawToTexture(24, paintEmoji('💎'), 'a cyan diamond gem');
     sprites.heart     = drawToTexture(25, paintEmoji('❤️'), 'a red heart');
+    sprites.chest     = drawToTexture(26, paintEmoji('🎁'), 'a wrapped gift box with bow');
 
     // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
     sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
@@ -1156,7 +1292,8 @@ function restartGame()
     for (const obj of engineObjects.slice())
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
-            obj instanceof Pickup || obj instanceof Bomb || obj instanceof FireZone)
+            obj instanceof Pickup || obj instanceof Bomb || obj instanceof FireZone ||
+            obj instanceof Chest)
             obj.destroy();
     }
 
@@ -1167,6 +1304,8 @@ function restartGame()
     killCount = 0;
     gameOver = false;
     gameOverFrameCount = 0;
+    bossesSpawned.clear();
+    activeBoss = null;
 
     player = new Player();
     player.weapons = [new FireballWeapon()];
@@ -1303,10 +1442,25 @@ function formatTime(s)
     return m + ':' + (sec < 10 ? '0' : '') + sec;
 }
 
+function drawBossHpBar()
+{
+    if (!activeBoss || activeBoss.destroyed) return;
+    const cs = mainCanvasSize;
+    const w = cs.x * .55, h = 18;
+    const x = cs.x / 2, y = 130;
+    drawRect(vec2(x, y), vec2(w, h), new Color(0, 0, 0, .75), 0, false, true);
+    const frac = max(0, activeBoss.hp / activeBoss.maxHp);
+    drawRect(vec2(x - w/2 + w*frac/2, y), vec2(w * frac, h),
+             new Color(1, .2, .15), 0, false, true);
+    drawTextScreen('⚠️ ' + activeBoss.bossDef.name + ' ⚠️',
+                   vec2(x, y - 14), 22, new Color(1, .9, .7), 3, BLACK);
+}
+
 function drawHUD()
 {
     const cs = mainCanvasSize;
     const pad = 20;
+    drawBossHpBar();
 
     // HP bar — top-left
     const hpW = 240, hpH = 28;
