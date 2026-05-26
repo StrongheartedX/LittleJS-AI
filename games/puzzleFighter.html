@@ -768,6 +768,7 @@ class GameMatch
         {
             dropCounterGems(me.grid, me.incomingQueue, opp.character.pattern, me.nextOutgoingCountdown);
             me.incomingQueue = 0;
+            sCounterLand?.play();
         }
 
         // Outgoing
@@ -846,6 +847,7 @@ let p1Board, p2Board;
 let p1Controller, p2Controller;
 let currentMatch;
 let controllers;
+let sMove, sRotate, sSoft, sLock, sClear, sCrash, sCountTick, sAllClear, sCounterLand, sGameOver;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Rendering
@@ -968,6 +970,86 @@ function drawBoardGems(board, boardIndex)
     }
 }
 
+function drawPortrait(character, pos, sizePx, ctx)
+{
+    const c = character.color;
+    const s = sizePx;
+    ctx = ctx || mainContext;
+    const r = s * .5;
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    if (character.portrait === 'circle')
+    {
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2);
+        ctx.fillStyle = c.toString(); ctx.fill();
+    }
+    else if (character.portrait === 'triangle')
+    {
+        ctx.beginPath();
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r*.95, r*.7);
+        ctx.lineTo(-r*.95, r*.7);
+        ctx.closePath();
+        ctx.fillStyle = c.toString(); ctx.fill();
+    }
+    else if (character.portrait === 'diamond')
+    {
+        ctx.beginPath();
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r, 0);
+        ctx.lineTo(0, r);
+        ctx.lineTo(-r, 0);
+        ctx.closePath();
+        ctx.fillStyle = c.toString(); ctx.fill();
+    }
+    else if (character.portrait === 'star')
+    {
+        const pts = 5;
+        ctx.beginPath();
+        for (let i = 0; i < pts * 2; i++)
+        {
+            const angle = (i / (pts * 2)) * Math.PI * 2 - Math.PI / 2;
+            const radius = (i % 2 === 0) ? r : r * 0.45;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = c.toString(); ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawSimpleGem(ctx, gem, cx, cy, sz)
+{
+    ctx.save();
+    const c = (gem.type === 'diamond') ? rgb(1,1,1,.9) : GEM_COLORS[gem.color];
+    if (gem.type === 'crash')
+    {
+        ctx.beginPath(); ctx.arc(cx, cy, sz/2, 0, Math.PI*2);
+        ctx.fillStyle = c.toString(); ctx.fill();
+    }
+    else if (gem.type === 'diamond')
+    {
+        ctx.translate(cx, cy); ctx.rotate(Math.PI/4);
+        ctx.fillStyle = c.toString();
+        ctx.fillRect(-sz/2, -sz/2, sz, sz);
+    }
+    else
+    {
+        ctx.fillStyle = c.toString();
+        ctx.fillRect(cx - sz/2, cy - sz/2, sz, sz);
+        if (gem.type === 'counter')
+        {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold ' + Math.floor(sz*.8) + 'px sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(gem.countdown, cx, cy);
+        }
+    }
+    ctx.restore();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Piece generation (placeholder random; replaced by shared sequence in Task 14)
 
@@ -1009,10 +1091,10 @@ class HumanController
 
         if (!this.hardDropping)
         {
-            if (anyPressed(km.left))   pieceTryMove(board.grid, board.active, -1, 0);
-            if (anyPressed(km.right))  pieceTryMove(board.grid, board.active,  1, 0);
-            if (anyPressed(km.rotCCW)) pieceTryRotate(board.grid, board.active, -1);
-            if (anyPressed(km.rotCW))  pieceTryRotate(board.grid, board.active,  1);
+            if (anyPressed(km.left)   && pieceTryMove(board.grid, board.active, -1, 0)) sMove?.play();
+            if (anyPressed(km.right)  && pieceTryMove(board.grid, board.active,  1, 0)) sMove?.play();
+            if (anyPressed(km.rotCCW) && pieceTryRotate(board.grid, board.active, -1))  sRotate?.play();
+            if (anyPressed(km.rotCW)  && pieceTryRotate(board.grid, board.active,  1))  sRotate?.play();
 
             if (anyPressed(km.hardDrop))
             {
@@ -1062,6 +1144,11 @@ function boardTick(board, controller, onLock)
                 board.chain = res.waves;
 
                 tickCounterGems(board.grid);
+                sLock?.play();
+                if (res.allClear) sAllClear?.play();
+                else if (res.waves > 1) sCrash?.play();
+                else if (res.totalDamage > 0) sClear?.play();
+                if (board.gameOver) sGameOver?.play();
                 if (onLock) onLock(board, res);
                 return;
             }
@@ -1981,6 +2068,23 @@ async function gameInit()
     cameraScale = 38;
 
     setupMenus();
+
+    sMove    = new SoundGenerator({frequency:520,release:.05,volume:.4,shapeCurve:1.5});
+    sRotate  = new SoundGenerator({frequency:720,release:.06,volume:.5,slide:-.2});
+    sSoft    = new SoundGenerator({frequency:260,release:.04,volume:.3});
+    sLock    = new SoundGenerator({frequency:180,release:.09,volume:.6,noise:.05});
+    sClear   = new SoundGenerator({frequency:820,release:.12,volume:.7,slide:.4,delay:.02});
+    sCrash   = new SoundGenerator({frequency:140,release:.2,volume:.8,noise:.2,bitCrush:.2,delay:.05});
+    sCountTick = new SoundGenerator({frequency:380,release:.05,volume:.3,slide:-.1});
+    sAllClear  = new SoundGenerator({frequency:880,release:.4,volume:.9,slide:1});
+    sCounterLand = new SoundGenerator({frequency:120,release:.12,volume:.6,noise:.1});
+    sGameOver  = new SoundGenerator({frequency:120,release:.6,volume:.9,slide:-.5,noise:.1});
+
+    setMenuSounds({
+        select: new Sound([1,.1,400,,.05,.1,1]),
+        activate: new Sound([1,.1,600,,.05,.1,2]),
+    });
+
     matchState = 'title';
     showMenu('title');
 
@@ -2021,23 +2125,45 @@ function gameRender()
 }
 function gameRenderPost()
 {
-    if (currentMatch)
+    if (matchState === 'playing' && currentMatch)
     {
+        const ctx = mainContext;
         const cx = mainCanvasSize.x / 2;
-        drawTextScreen(currentMatch.boards[0].character.name, vec2(cx - 280, 36), 30, hsl(.6,1,.9), 4, hsl(0,0,0));
-        drawTextScreen(currentMatch.boards[1].character.name, vec2(cx + 280, 36), 30, hsl(.0,1,.9), 4, hsl(0,0,0));
 
-        drawTextScreen('Score: ' + currentMatch.boards[0].score, vec2(cx - 280, 70), 22, hsl(0,0,1), 3, hsl(0,0,0));
-        drawTextScreen('Score: ' + currentMatch.boards[1].score, vec2(cx + 280, 70), 22, hsl(0,0,1), 3, hsl(0,0,0));
-
-        drawTextScreen('Incoming: ' + currentMatch.boards[0].incomingQueue, vec2(cx - 280, 100), 18, hsl(.1,1,.7), 3, hsl(0,0,0));
-        drawTextScreen('Incoming: ' + currentMatch.boards[1].incomingQueue, vec2(cx + 280, 100), 18, hsl(.1,1,.7), 3, hsl(0,0,0));
-
-        if (currentMatch.winner >= 0)
+        for (let i = 0; i < 2; i++)
         {
-            drawTextScreen((currentMatch.winner === 0 ? 'PLAYER 1' : 'PLAYER 2') + ' WINS',
-                vec2(cx, mainCanvasSize.y/2 - 20), 80, rgb(1,.4,.3), 8, hsl(0,0,0));
-            drawTextScreen('Press R to restart', vec2(cx, mainCanvasSize.y/2 + 60), 30, hsl(0,0,1), 4);
+            const b = currentMatch.boards[i];
+            const px = i === 0 ? cx - 260 : cx + 260;
+            const py = 80;
+
+            drawPortrait(b.character, vec2(px, py), 60, ctx);
+            drawTextScreen(b.character.name, vec2(px, py + 50), 22, hsl(0,0,1), 4, hsl(0,0,0));
+
+            drawTextScreen('SCORE ' + b.score, vec2(px, py + 90), 18, hsl(.16,1,.8), 3, hsl(0,0,0));
+            drawTextScreen('CHAIN ' + b.chain, vec2(px, py + 115), 16, hsl(.55,1,.8), 3, hsl(0,0,0));
+
+            const inc = b.incomingQueue;
+            if (inc > 0)
+            {
+                let label = 'CAUTION';
+                let col = rgb(1, 1, .3);
+                if (inc > 30) { label = 'DANGER';  col = rgb(1, .3, .3); }
+                else if (inc > 10) { label = 'WARNING'; col = rgb(1, .6, .2); }
+                drawTextScreen(label, vec2(px, py + 150), 22, col, 4, hsl(0,0,0));
+                drawTextScreen('INCOMING ' + inc, vec2(px, py + 175), 18, hsl(0,0,1), 3, hsl(0,0,0));
+            }
+
+            const npx = px;
+            const npy = py + 230;
+            drawTextScreen('NEXT', vec2(npx, npy), 16, hsl(0,0,.7), 2);
+            const nextIdx = currentMatch.seqIndex[i];
+            const nextPiece = currentMatch.sequence[nextIdx];
+            if (nextPiece)
+            {
+                const ws = 22;
+                drawSimpleGem(ctx, nextPiece.b, npx, npy + 25, ws);
+                drawSimpleGem(ctx, nextPiece.a, npx, npy + 50, ws);
+            }
         }
     }
 }
