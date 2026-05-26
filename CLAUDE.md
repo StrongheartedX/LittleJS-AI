@@ -37,6 +37,10 @@ Project constraints
 - For custom feel (variable gravity, SMB-style coyote/buffer/jump-cut, etc.) keep the auto-resolution but opt out of the engine's own motion: `damping = 1`, `friction = 1`, `restitution = 0`, `gravityScale = 0`. Apply your own per-frame velocity/gravity in `update()`; the engine still moves `pos += velocity` and resolves collisions for you. `this.groundObject` (set by the engine on landing, cleared on next frame's friction step) is the standard onGround flag. For "wasFalling" to pick the right axis, set global `gravity` to a small negative-y value (e.g. `vec2(0, -.001)`) — sign is what matters.
 - Do tile reactions (block break, ? block contents, ladder pass-through, one-way platforms) inside `collideWithTile(tileData, pos)`. The `pos` arg is the tile's integer index corner (not center); compute `d = pos.y - this.pos.y` — `d > 0` means tile is above (head bump), `d < 0` means below (landing). Modify the tile (`setTile`/`clearCollisionData`), spawn objects, play sfx, and `return false` if the tile should now be passable (zero `velocity.y` yourself to stop the jump); `return true` to keep it solid. The engine calls `collideWithTile` multiple times per physics step (newPos, oldPos, axis-only) so debounce one-shot effects via a `Set` on the player cleared in `update()`. See [games/mario.html](games/mario.html) for ? block / brick / Big-Mario brick-break.
 
+Scratch files / temp
+- Write throwaway scripts, one-shot transforms, debug dumps, and any other temporary file to `local/temp/` inside this project (the `local/` folder is already gitignored). Never write to `c:\tmp\`, `%TEMP%`, or anywhere outside this project directory.
+- Delete one-shot files once their job is done unless the user asks to keep them.
+
 How to respond
 - Ask up to 3 quick questions only if needed (controls, goal, win/lose). Otherwise start immediately.
 - Make the smallest working version first, then iterate.
