@@ -31,6 +31,12 @@ const GEM_COLORS = [
     rgb(1, .9, .2),    // 3 Y
 ];
 
+// Board world-space layout
+const BOARD_GAP = 8;
+const BOARD_X_P1 = -BOARD_GAP/2 - BOARD_W;
+const BOARD_X_P2 = BOARD_GAP/2;
+const BOARD_Y = -BOARD_H_VISIBLE / 2;
+
 ///////////////////////////////////////////////////////////////////////////////
 // Gem factories
 
@@ -702,6 +708,104 @@ class Board
 let p1Board, p2Board;
 
 ///////////////////////////////////////////////////////////////////////////////
+// Rendering
+
+function boardOrigin(boardIndex)
+{
+    return vec2(boardIndex === 0 ? BOARD_X_P1 : BOARD_X_P2, BOARD_Y);
+}
+
+function cellPos(boardIndex, x, y)
+{
+    return boardOrigin(boardIndex).add(vec2(x + 0.5, y + 0.5));
+}
+
+function drawGem(pos, gem, isActive)
+{
+    if (gem.type === 'regular')
+    {
+        drawRect(pos, vec2(.92, .92), GEM_COLORS[gem.color]);
+        drawRect(pos.add(vec2(-.18, .18)), vec2(.22, .22), rgb(1,1,1,.25));
+        if (isActive) drawRect(pos, vec2(1.02, 1.02), rgb(1,1,1,.18));
+    }
+    else if (gem.type === 'crash')
+    {
+        const c = GEM_COLORS[gem.color];
+        drawCircle(pos, 1.10, rgb(1,1,1,.05));
+        drawCircle(pos, .92, c);
+        drawCircle(pos.add(vec2(-.18, .18)), .26, rgb(1,1,1,.40));
+        const tw = .5 + .5 * Math.sin(time*6 + pos.x*2 + pos.y*3);
+        drawCircle(pos.add(vec2(.18, .20)), .22 + .04*tw, rgb(1,1,1,.30 + .15*tw));
+        if (isActive) drawCircle(pos, 1.00, rgb(1,1,1,.18));
+    }
+    else if (gem.type === 'counter')
+    {
+        const pulse = gem.countdown <= 2 ? .5 + .5*Math.sin(time*8) : 1;
+        const c = GEM_COLORS[gem.color];
+        drawRect(pos, vec2(.92, .92), c.scale(.6 + .4*pulse));
+        drawRect(pos, vec2(.92, .92), rgb(1,1,1,.12));
+        drawText('' + gem.countdown, pos, .9, rgb(1,1,1), .08, rgb(0,0,0));
+    }
+    else if (gem.type === 'diamond')
+    {
+        drawRect(pos, vec2(.9, .9), rgb(1,1,1,.85), Math.PI/4);
+        drawRect(pos, vec2(.5, .5), rgb(.85,.95,1,.95), Math.PI/4);
+        drawCircle(pos, .2, rgb(1,1,1,.9));
+    }
+}
+
+function drawBoardFrame(boardIndex)
+{
+    const origin = boardOrigin(boardIndex);
+    const center = origin.add(vec2(BOARD_W/2, BOARD_H_VISIBLE/2));
+    drawRect(center, vec2(BOARD_W + .2, BOARD_H_VISIBLE + .2), rgb(0,0,0,.7));
+    drawRect(center, vec2(BOARD_W, BOARD_H_VISIBLE), rgb(.08, .08, .1));
+    for (let x = 0; x <= BOARD_W; x++)
+        drawLine(origin.add(vec2(x, 0)), origin.add(vec2(x, BOARD_H_VISIBLE)), .03, rgb(1,1,1,.06));
+    for (let y = 0; y <= BOARD_H_VISIBLE; y++)
+        drawLine(origin.add(vec2(0, y)), origin.add(vec2(BOARD_W, y)), .03, rgb(1,1,1,.06));
+}
+
+function drawBoardGems(board, boardIndex)
+{
+    // Power-gem connectors
+    for (let x = 0; x < BOARD_W; x++)
+    for (let y = 0; y < BOARD_H_VISIBLE; y++)
+    {
+        const g = board.grid[x][y];
+        if (!g || g.type !== 'regular' || g.powerGemId < 0) continue;
+        if (x + 1 < BOARD_W)
+        {
+            const r = board.grid[x+1][y];
+            if (r && r.type === 'regular' && r.powerGemId === g.powerGemId)
+            {
+                const p1 = cellPos(boardIndex, x, y);
+                const p2 = cellPos(boardIndex, x+1, y);
+                drawRect(p1.lerp(p2, .5), vec2(.22, .86), GEM_COLORS[g.color]);
+            }
+        }
+        if (y + 1 < BOARD_H_VISIBLE)
+        {
+            const u = board.grid[x][y+1];
+            if (u && u.type === 'regular' && u.powerGemId === g.powerGemId)
+            {
+                const p1 = cellPos(boardIndex, x, y);
+                const p2 = cellPos(boardIndex, x, y+1);
+                drawRect(p1.lerp(p2, .5), vec2(.86, .22), GEM_COLORS[g.color]);
+            }
+        }
+    }
+    // Gems themselves
+    for (let x = 0; x < BOARD_W; x++)
+    for (let y = 0; y < BOARD_H_VISIBLE; y++)
+    {
+        const g = board.grid[x][y];
+        if (!g) continue;
+        drawGem(cellPos(boardIndex, x, y), g, false);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Unit tests (stub - tasks add cases here)
 
 function runUnitTests()
@@ -1202,10 +1306,22 @@ async function gameInit()
 {
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
-    cameraScale = 32;
+    cameraScale = 38;
 
     p1Board = new Board();
     p2Board = new Board();
+
+    // Visual test population
+    p1Board.grid[0][0] = gemRegular(COLOR_R);
+    p1Board.grid[1][0] = gemRegular(COLOR_R);
+    p1Board.grid[0][1] = gemRegular(COLOR_R);
+    p1Board.grid[1][1] = gemRegular(COLOR_R);
+    mergePowerGems(p1Board.grid);
+    p1Board.grid[2][0] = gemCrash(COLOR_B);
+    p1Board.grid[3][0] = gemCounter(COLOR_Y, 3);
+
+    p2Board.grid[2][4] = gemDiamond();
+    p2Board.grid[2][3] = gemRegular(COLOR_G);
 
     runUnitTests();
 }
@@ -1215,6 +1331,10 @@ function gameUpdatePost() { cameraPos = vec2(0, 0); }
 function gameRender()
 {
     drawRectGradient(cameraPos, getCameraSize(), rgb(.06,.06,.08), rgb(.01,.01,.02));
+    drawBoardFrame(0);
+    drawBoardFrame(1);
+    if (p1Board) drawBoardGems(p1Board, 0);
+    if (p2Board) drawBoardGems(p2Board, 1);
 }
 function gameRenderPost()
 {
