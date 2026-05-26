@@ -555,6 +555,19 @@
     100% { opacity: 0; transform: translateY(-60px) rotate(540deg) scale(.4); }
   }
 
+  /* Respect OS-level "reduce motion" preference — kill the playful animations
+     that aren't required for understanding the page. Starfield + sparkle JS
+     loops are skipped in setupStarfield / setupSparkles for the same reason. */
+  @media (prefers-reduced-motion: reduce) {
+    .tile,
+    .tile:hover .emoji,
+    .quick-btn .icon.rolling,
+    .sparkle,
+    #welcome-logo,
+    #sidebar-logo { animation: none !important; }
+    .tile { opacity: 1; transform: none; }
+  }
+
   /* ===================== Mobile / narrow viewport ===================== */
   @media (max-width: 720px) {
     /* Sidebar becomes an overlay drawer — hidden offscreen by default,
@@ -708,6 +721,12 @@ const CATEGORIES = [
 ];
 const catByKey = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
 const LAST_GAME_KEY = 'littlejs-games-last';
+const RECENT_KEY    = 'littlejs-games-recent';
+const RECENT_LIMIT  = 8;
+const BASE_TITLE    = document.title;
+// Honor the user's OS-level "reduce motion" preference for sparkles, starfield,
+// dice-roll wait, and CSS animations (handled via @media prefers-reduced-motion).
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const sidebarLogoWrap = document.getElementById('sidebar-logo-wrap');
 const listEl = document.getElementById('list');
@@ -723,6 +742,16 @@ let currentFile = null;
 let activeCategory = 'all'; // sidebar filter
 
 // ===================== Sidebar list =====================
+
+// Recently-played history (newest first). Stored as an array of filenames.
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+}
+function pushRecent(file) {
+  const next = [file, ...getRecent().filter(f => f !== file)].slice(0, RECENT_LIMIT);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+}
 
 function makeCard(g) {
   const card = document.createElement('div');
@@ -857,15 +886,17 @@ function buildWelcome() {
   rand.className = 'quick-btn';
   rand.innerHTML = '<span class="icon">🎲</span>Random Game';
   rand.addEventListener('click', () => {
+    const pick = () => {
+      const g = playable[Math.floor(Math.random() * playable.length)];
+      selectGame(g.file);
+    };
+    if (reducedMotion) { pick(); return; }
     const icon = rand.querySelector('.icon');
     // Re-add the class so the animation restarts on subsequent clicks.
     icon.classList.remove('rolling');
     void icon.offsetWidth;
     icon.classList.add('rolling');
-    setTimeout(() => {
-      const g = playable[Math.floor(Math.random() * playable.length)];
-      selectGame(g.file);
-    }, 260);
+    setTimeout(pick, 260);
   });
   quick.appendChild(rand);
 
@@ -875,6 +906,13 @@ function buildWelcome() {
   const topGames = GAMES.filter(g => g.top != null).sort((a, b) => a.top - b.top);
   if (topGames.length) {
     welcomeEl.appendChild(buildRow('Top Picks', '⭐', topGames, true, null));
+  }
+
+  // Recently Played — only renders once the user has launched at least one
+  // game. Sits right under Top Picks so it's the first personal section.
+  const recentGames = getRecent().map(f => gameByFile[f]).filter(Boolean);
+  if (recentGames.length) {
+    welcomeEl.appendChild(buildRow('Recently Played', '🕘', recentGames, false, null));
   }
 
   // Category rows — each row tints its bar + emoji in the category color.
@@ -999,6 +1037,7 @@ function loadIframe(url) {
 function showWelcome(pushHistory = true) {
   const wasGame = currentFile !== null;
   currentFile = null;
+  document.title = BASE_TITLE;
   loadIframe('about:blank');
   frameEl.style.display = 'none';
   welcomeEl.style.display = 'block';
@@ -1023,6 +1062,8 @@ function selectGame(file, pushHistory = true) {
   if (!g) return;
   const wasLibrary = currentFile === null;
   currentFile = file;
+  document.title = g.name + ' · ' + BASE_TITLE;
+  pushRecent(file);
   // Cache-bust so edits to a game show up without manual reload.
   loadIframe(file + '?t=' + Date.now());
   frameEl.style.display = 'block';
@@ -1127,6 +1168,7 @@ document.addEventListener('keydown', e => {
 // ===================== Ambient effects (starfield + logo sparkles) =====================
 
 function setupStarfield() {
+  if (reducedMotion) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'starfield';
   const stage = document.getElementById('stage');
@@ -1168,6 +1210,7 @@ function setupStarfield() {
 }
 
 function setupSparkles() {
+  if (reducedMotion) return;
   // Small white rotating square that rises off the logo. ~1.5/sec while
   // welcome is up; capped variation in size + a touch of horizontal jitter
   // so they don't look like a regular grid.
