@@ -242,15 +242,7 @@ class Ball
             this.dead = true;
     }
 
-    render()
-    {
-        drawCircle(this.pos, BALL_RADIUS * 2, COLOR_BALL, .07, COLOR_BALL_DK);
-        // seam line for spin readability
-        const r = BALL_RADIUS * .9;
-        const c = Math.cos(this.rot) * r, s = Math.sin(this.rot) * r;
-        drawLine(this.pos.add(vec2(c, s)),   this.pos.add(vec2(-c, -s)),   .07, COLOR_BALL_DK);
-        drawLine(this.pos.add(vec2(-s, c)),  this.pos.add(vec2(s, -c)),    .05, COLOR_BALL_DK);
-    }
+    render() { drawBasketball(this.pos, this.rot); }
 }
 
 //------------------------------------------------------------------------------
@@ -548,18 +540,10 @@ function drawCourt()
 {
     // wood floor
     drawRect(vec2(0, FLOOR_Y - 1.5), vec2(LEVEL_RIGHT*2 + 4, 3), COLOR_FLOOR);
-    // floor planks (subtle horizontal stripes)
-    for (let i = -3; i <= 3; i++)
-    {
-        const y = FLOOR_Y - 0.3 - i * 0.45;
-        if (y < FLOOR_Y - 3) continue;
-        drawLine(vec2(LEVEL_LEFT-2, y), vec2(LEVEL_RIGHT+2, y), .03, hsl(.08, .55, .25, .5));
-    }
+    // top edge of the floor (subtle highlight where it meets the back wall)
+    drawLine(vec2(LEVEL_LEFT - 2, FLOOR_Y), vec2(LEVEL_RIGHT + 2, FLOOR_Y), .08, hsl(.08, .55, .42));
     // free-throw stripe under spawn
-    drawLine(vec2(SPAWN_POS.x - 1.5, FLOOR_Y + .02), vec2(SPAWN_POS.x + 1.5, FLOOR_Y + .02), .15, COLOR_LINE);
-
-    // back wall (subtle horizon band)
-    drawRect(vec2(0, LEVEL_TOP - 1.5), vec2(LEVEL_RIGHT*2 + 4, 3), hsl(.62, .25, .12, .6));
+    drawLine(vec2(SPAWN_POS.x - 1.5, FLOOR_Y + .04), vec2(SPAWN_POS.x + 1.5, FLOOR_Y + .04), .14, COLOR_LINE);
 }
 
 function drawHoopAssembly()
@@ -606,12 +590,54 @@ function drawHoopAssembly()
 
 function drawRackedBall()
 {
-    // ball waiting to be thrown
-    drawCircle(SPAWN_POS, BALL_RADIUS * 2, COLOR_BALL, .07, COLOR_BALL_DK);
-    drawLine(SPAWN_POS.add(vec2(-BALL_RADIUS*.85, 0)), SPAWN_POS.add(vec2(BALL_RADIUS*.85, 0)), .07, COLOR_BALL_DK);
-    drawLine(SPAWN_POS.add(vec2(0, -BALL_RADIUS*.85)), SPAWN_POS.add(vec2(0, BALL_RADIUS*.85)), .05, COLOR_BALL_DK);
+    drawBasketball(SPAWN_POS, 0);
     // a small platform under it
     drawRect(SPAWN_POS.add(vec2(0, -BALL_RADIUS - .35)), vec2(2.2, .4), hsl(0, 0, .25));
+}
+
+// Draws a basketball: orange body, dark seam pattern (one diameter + one
+// perpendicular + two side curves, all rotating with `rot`), and a soft
+// highlight in the upper-left for shape.
+function drawBasketball(pos, rot)
+{
+    const r  = BALL_RADIUS;
+    const cs = Math.cos(rot), sn = Math.sin(rot);
+
+    // body
+    drawCircle(pos, r * 2, COLOR_BALL, .07, COLOR_BALL_DK);
+
+    // soft top-left highlight (does not rotate — represents the light source)
+    drawCircle(pos.add(vec2(-r * .35, r * .35)), r * .8, hsl(.1, 1, .82, .6));
+
+    // two straight diameter seams at 90° to each other
+    const lw = .07;
+    const seamR = r * .96;
+    const a = vec2( cs * seamR,  sn * seamR);
+    const b = vec2(-sn * seamR,  cs * seamR);
+    drawLine(pos.subtract(a), pos.add(a), lw, COLOR_BALL_DK);
+    drawLine(pos.subtract(b), pos.add(b), lw * .85, COLOR_BALL_DK);
+
+    // two side curves — elliptical arcs at ±halfWidth, drawn as a polyline.
+    // Each arc is sampled in the ball's local frame (before rotation), then
+    // rotated into world space so the curves spin with the ball.
+    const N = 12;
+    const halfWidth = r * .58;
+    for (const sign of [-1, 1])
+    {
+        let prev = null;
+        for (let i = 0; i <= N; i++)
+        {
+            const t = i / N;
+            const ang = t * Math.PI - Math.PI / 2;
+            const lx = sign * halfWidth * Math.cos(ang);
+            const ly = r * .94 * Math.sin(ang);
+            const x = lx * cs - ly * sn;
+            const y = lx * sn + ly * cs;
+            const p = pos.add(vec2(x, y));
+            if (prev) drawLine(prev, p, lw * .85, COLOR_BALL_DK);
+            prev = p;
+        }
+    }
 }
 
 function drawAimReticleAndArc()
