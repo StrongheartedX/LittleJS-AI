@@ -18,6 +18,14 @@
     --accent-bg: #1a2f4d;
     --chip-bg: #232b3c;
     --chip-text: #adbac7;
+
+    /* Per-category accent + translucent fill, applied via --cat-color / --cat-bg
+       CSS vars set on chips/tiles/row headers at build time. */
+    --cat-arcade:  #58a6ff;   --cat-arcade-bg:  rgba(88,166,255,.18);
+    --cat-shooter: #ff7eb6;   --cat-shooter-bg: rgba(255,126,182,.18);
+    --cat-puzzle:  #bb86fc;   --cat-puzzle-bg:  rgba(187,134,252,.18);
+    --cat-board:   #f7c948;   --cat-board-bg:   rgba(247,201,72,.18);
+    --cat-sports:  #4ade80;   --cat-sports-bg:  rgba(74,222,128,.18);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
@@ -91,9 +99,9 @@
   }
   .chip-filter:hover { background: var(--panel-2); color: var(--text); }
   .chip-filter.active {
-    background: var(--accent-bg);
+    background: var(--cat-bg, var(--accent-bg));
     color: var(--text);
-    border-color: var(--accent);
+    border-color: var(--cat-color, var(--accent));
   }
 
   #list { flex: 1; overflow-y: auto; padding: 6px 0; }
@@ -112,7 +120,15 @@
     background: var(--accent-bg);
     border-left-color: var(--accent);
   }
-  .card .title { font-weight: 500; font-size: 14px; }
+  .card .title {
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card .title .emoji { font-size: 18px; line-height: 1; flex: 0 0 auto; }
+  .card .title .name { flex: 1; min-width: 0; }
   .card .body {
     max-height: 0;
     overflow: hidden;
@@ -256,6 +272,24 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding: 12px 4px 14px;     /* top padding gives hover-lift room */
+    cursor: grab;
+  }
+  .row .tiles.dragging { cursor: grabbing; }
+  .row .tiles.dragging .tile { pointer-events: none; }
+
+  /* Row header — small colored bar + category emoji */
+  .row h2 .row-bar {
+    display: inline-block;
+    width: 4px;
+    height: 14px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    border-radius: 2px;
+    background: var(--cat-color, var(--accent));
+  }
+  .row h2 .row-emoji {
+    margin-right: 6px;
+    filter: drop-shadow(0 0 6px var(--cat-color, var(--accent)));
   }
   .row .tiles::-webkit-scrollbar { height: 8px; }
   .row .tiles::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -297,20 +331,43 @@
 
   .tile {
     flex: 0 0 auto;
+    position: relative;
     background: linear-gradient(135deg, var(--panel) 0%, var(--panel-2) 100%);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px;
+    padding-left: 18px;            /* room for the category color stripe */
     cursor: pointer;
+    overflow: hidden;
     transition: transform .15s, border-color .15s, box-shadow .15s;
     display: flex;
-    flex-direction: column;
+    gap: 12px;
+  }
+  /* Category color stripe down the left edge */
+  .tile::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--cat-color, var(--border));
   }
   .tile:hover {
     transform: translateY(-4px) scale(1.02);
-    border-color: var(--accent);
+    border-color: var(--cat-color, var(--accent));
     box-shadow: 0 10px 28px rgba(0, 0, 0, .45),
-                0 0 0 1px rgba(88, 166, 255, .3);
+                0 0 0 1px var(--cat-color, rgba(88, 166, 255, .3));
+  }
+  .tile .emoji {
+    font-size: 32px;
+    line-height: 1;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .5));
+  }
+  .tile .info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   .tile .name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .tile .desc {
@@ -320,6 +377,7 @@
     flex: 1;
   }
   .tile .chips { margin-top: 8px; }
+  .tiles.top .tile .emoji { font-size: 44px; }
 
   /* Top picks — larger tiles with a gradient face */
   .tiles.top .tile {
@@ -379,70 +437,73 @@
 'use strict';
 
 // category: row grouping in the welcome screen (one per game).
+// emoji:    single grapheme used as "boxart" on tiles + sidebar cards.
 // tags:     descriptive chips on the card.
 // top:      1..N — appears in the "Top Picks" row at that rank. Unset = not featured.
 const GAMES = [
-  { file:'2048.html',           name:'2048',            category:'puzzle',  desc:'Slide numbered tiles to combine matching pairs.',          tags:['puzzle','grid'] },
-  { file:'asteroids.html',      name:'Asteroids',       category:'shooter', desc:'Rotate-and-thrust shooter — blast drifting space rocks.', tags:['arcade','shooter'], top:10 },
-  { file:'baseball.html',       name:'Baseball',        category:'sports',  desc:'Pitch, swing, and run the bases.',                         tags:['sports'] },
-  { file:'basketball.html',     name:'Pop-a-Shot',      category:'sports',  desc:'Sink as many shots as you can before the clock runs out.', tags:['sports','arcade'] },
-  { file:'breakout.html',       name:'Breakout',        category:'arcade',  desc:'Bounce a ball off a paddle to clear bricks.',              tags:['arcade','paddle'] },
-  { file:'captureGo.html',      name:'Capture Go',      category:'board',   desc:'Simplified Go — capture stones by surrounding them.',      tags:['board','strategy'] },
-  { file:'centipede.html',      name:'Centipede',       category:'shooter', desc:'Shoot the descending centipede before it reaches you.',    tags:['arcade','shooter'] },
-  { file:'checkers.html',       name:'Checkers',        category:'board',   desc:'Classic 8×8 jump-to-capture board game.',                  tags:['board','strategy'] },
-  { file:'chess.html',          name:'Chess',           category:'board',   desc:'Two-player chess with full standard rules.',               tags:['board','strategy'] },
-  { file:'columns.html',        name:'Columns',         category:'puzzle',  desc:'Match three jewels by rotating falling columns.',          tags:['puzzle','falling'] },
-  { file:'combat.html',         name:'Combat',          category:'arcade',  desc:'Two-player tank duels.',                                   tags:['arcade','multiplayer'] },
-  { file:'connect4.html',       name:'Connect 4',       category:'board',   desc:'Drop discs to line up four in a row.',                     tags:['board','strategy'] },
-  { file:'defender.html',       name:'Defender',        category:'shooter', desc:'Side-scrolling shooter — protect humans from aliens.',     tags:['arcade','shooter'] },
-  { file:'drMario.html',        name:'Dr. Mario',       category:'puzzle',  desc:'Match falling pills with viruses to clear them.',          tags:['puzzle','falling'] },
-  { file:'flappyBird.html',     name:'Flappy Bird',     category:'arcade',  desc:'Tap to flap through pipe gaps.',                           tags:['arcade','one-button'] },
-  { file:'frogger.html',        name:'Frogger',         category:'arcade',  desc:'Hop across traffic and rivers to safety.',                 tags:['arcade'], top:5},
-  { file:'geometryDash.html',   name:'Geometry Dash',   category:'arcade',  desc:'Rhythm-jump through spike obstacles.',                     tags:['arcade','runner'] },
-  { file:'gradius.html',        name:'Gradius',         category:'shooter', desc:'Power up your ship and blast through horizontal levels.',  tags:['shooter','scrolling'] },
-  { file:'jetpackDash.html',    name:'Jetpack Dash',    category:'arcade',  desc:'Boost upward to dodge hazards.',                           tags:['arcade','runner'] },
-  { file:'joust.html',          name:'Joust',           category:'arcade',  desc:'Flap-jump knight combat — outheight your enemy.',          tags:['arcade'] },
-  { file:'kaboom.html',         name:'Kaboom',          category:'arcade',  desc:'Catch bombs dropped by a mad bomber.',                     tags:['arcade','paddle'] },
-  { file:'lunarLander.html',    name:'Lunar Lander',    category:'arcade',  desc:'Burn fuel to touch down softly.',                          tags:['physics','arcade'] },
-  { file:'match3.html',         name:'Match 3',         category:'puzzle',  desc:'Swap adjacent gems to make matches of three.',             tags:['puzzle','grid'] },
-  { file:'microRacer.html',     name:'Micro Racer',     category:'arcade',  desc:'Top-down racing on a tight track.',                        tags:['racing'] },
-  { file:'minesweeper.html',    name:'Minesweeper',     category:'puzzle',  desc:'Reveal cells without hitting a mine.',                     tags:['puzzle','grid'] },
-  { file:'miniGolf.html',       name:'Mini Golf',       category:'sports',  desc:'Aim and putt across miniature courses.',                   tags:['sports','physics'] },
-  { file:'missileCommand.html', name:'Missile Command', category:'shooter', desc:'Defend cities from incoming nukes.',                       tags:['arcade','shooter'], top:1 },
-  { file:'moonPatrol.html',     name:'Moon Patrol',     category:'arcade',  desc:'Side-scrolling moon buggy — jump craters, shoot enemies.', tags:['arcade','scrolling'] },
-  { file:'mrDriller.html',      name:'Mr. Driller',     category:'puzzle',  desc:'Drill down through colored blocks while managing air.',    tags:['puzzle','action'] },
-  { file:'orbitswarm.html',     name:'OrbitSwarm',      category:'shooter', desc:'Orbit a star and shoot the incoming swarm.',               tags:['arcade','shooter'] },
-  { file:'othello.html',        name:'Othello',         category:'board',   desc:'Flank to flip — capture the most stones.',                 tags:['board','strategy'] },
-  { file:'pacman.html',         name:'Pac-Man',         category:'arcade',  desc:'Eat dots and dodge ghosts in a maze.',                     tags:['arcade','maze'], top:4 },
-  { file:'peggle.html',         name:'Peggle',          category:'puzzle',  desc:'Aim balls at pegs to clear the board.',                    tags:['physics','puzzle'] },
-  { file:'pinball.html',        name:'Pinball',         category:'arcade',  desc:'Launch a ball, hit the flippers, chase the score.',        tags:['physics','arcade']},
-  { file:'plinko.html',         name:'Plinko',          category:'puzzle',  desc:'Drop chips down a peg field for prizes.',                  tags:['physics','arcade'] },
-  { file:'polePosition.html',   name:'Pole Position',   category:'arcade',  desc:'Pseudo-3D racing — steer through the curves.',             tags:['racing'] },
-  { file:'pong.html',           name:'Pong',            category:'arcade',  desc:'Two-paddle bounce, first to score wins.',                  tags:['arcade','paddle'] },
-  { file:'pool.html',           name:'Pool',            category:'sports',  desc:'8-ball pool with cue physics.',                            tags:['sports','physics'], top:5 },
-  { file:'puzzleFighter.html',  name:'Puzzle Fighter',  category:'puzzle',  desc:'Stack falling gems to build chain combos.',                tags:['puzzle','falling'] },
-  { file:'riverRaid.html',      name:'River Raid',      category:'shooter', desc:'Vertical-scrolling river shooter — watch your fuel.',      tags:['shooter','scrolling'] },
-  { file:'robotron.html',       name:'Robotron',        category:'shooter', desc:'Twin-stick shooter — save the humans.',                    tags:['arcade','shooter','twin-stick'], top:3 },
-  { file:'skiing.html',         name:'Skiing',          category:'arcade',  desc:'Slalom through gates downhill.',                           tags:['arcade','racing'] },
-  { file:'snake.html',          name:'Snake',           category:'arcade',  desc:'Eat to grow, don’t crash into yourself.',             tags:['arcade','grid'] },
-  { file:'snood.html',          name:'Snood',           category:'puzzle',  desc:'Aim and shoot snoods to clear the board.',                 tags:['puzzle','physics'] },
-  { file:'sokoban.html',        name:'Sokoban',         category:'puzzle',  desc:'Push boxes onto target squares.',                          tags:['puzzle','grid'] },
-  { file:'spaceInvaders.html',  name:'Space Invaders',  category:'shooter', desc:'Shoot descending alien formations.',                       tags:['arcade','shooter'], top:10 },
-  { file:'spyhunter.html',      name:'Spy Hunter',      category:'arcade',  desc:'Top-down driving with car combat.',                        tags:['arcade','driving'] },
-  { file:'tetris.html',         name:'Tetris',          category:'puzzle',  desc:'Stack falling tetrominoes to clear lines.',                tags:['puzzle','falling'], top:10 },
+  { file:'2048.html',           name:'2048', emoji:'🔢',            category:'puzzle',  desc:'Slide numbered tiles to combine matching pairs.',          tags:['puzzle','grid'] },
+  { file:'asteroids.html',      name:'Asteroids', emoji:'🌑',       category:'shooter', desc:'Rotate-and-thrust shooter — blast drifting space rocks.', tags:['arcade','shooter'], top:10 },
+  { file:'baseball.html',       name:'Baseball', emoji:'⚾',        category:'sports',  desc:'Pitch, swing, and run the bases.',                         tags:['sports'] },
+  { file:'basketball.html',     name:'Pop-a-Shot', emoji:'🏀',      category:'sports',  desc:'Sink as many shots as you can before the clock runs out.', tags:['sports','arcade'] },
+  { file:'breakout.html',       name:'Breakout', emoji:'🧱',        category:'arcade',  desc:'Bounce a ball off a paddle to clear bricks.',              tags:['arcade','paddle'] },
+  { file:'captureGo.html',      name:'Capture Go', emoji:'⚫',      category:'board',   desc:'Simplified Go — capture stones by surrounding them.',      tags:['board','strategy'] },
+  { file:'centipede.html',      name:'Centipede', emoji:'🐛',       category:'shooter', desc:'Shoot the descending centipede before it reaches you.',    tags:['arcade','shooter'] },
+  { file:'checkers.html',       name:'Checkers', emoji:'🔴',        category:'board',   desc:'Classic 8×8 jump-to-capture board game.',                  tags:['board','strategy'] },
+  { file:'chess.html',          name:'Chess', emoji:'♟️',           category:'board',   desc:'Two-player chess with full standard rules.',               tags:['board','strategy'] },
+  { file:'columns.html',        name:'Columns', emoji:'💎',         category:'puzzle',  desc:'Match three jewels by rotating falling columns.',          tags:['puzzle','falling'] },
+  { file:'combat.html',         name:'Combat', emoji:'🪖',          category:'arcade',  desc:'Two-player tank duels.',                                   tags:['arcade','multiplayer'] },
+  { file:'connect4.html',       name:'Connect 4', emoji:'🟡',       category:'board',   desc:'Drop discs to line up four in a row.',                     tags:['board','strategy'] },
+  { file:'defender.html',       name:'Defender', emoji:'🛸',        category:'shooter', desc:'Side-scrolling shooter — protect humans from aliens.',     tags:['arcade','shooter'] },
+  { file:'drMario.html',        name:'Dr. Mario', emoji:'💊',       category:'puzzle',  desc:'Match falling pills with viruses to clear them.',          tags:['puzzle','falling'] },
+  { file:'flappyBird.html',     name:'Flappy Bird', emoji:'🐦',     category:'arcade',  desc:'Tap to flap through pipe gaps.',                           tags:['arcade','one-button'] },
+  { file:'frogger.html',        name:'Frogger', emoji:'🐸',         category:'arcade',  desc:'Hop across traffic and rivers to safety.',                 tags:['arcade'], top:5},
+  { file:'geometryDash.html',   name:'Geometry Dash', emoji:'🔺',   category:'arcade',  desc:'Rhythm-jump through spike obstacles.',                     tags:['arcade','runner'] },
+  { file:'gradius.html',        name:'Gradius', emoji:'🚀',         category:'shooter', desc:'Power up your ship and blast through horizontal levels.',  tags:['shooter','scrolling'] },
+  { file:'jetpackDash.html',    name:'Jetpack Dash', emoji:'🪂',    category:'arcade',  desc:'Boost upward to dodge hazards.',                           tags:['arcade','runner'] },
+  { file:'joust.html',          name:'Joust', emoji:'🦅',           category:'arcade',  desc:'Flap-jump knight combat — outheight your enemy.',          tags:['arcade'] },
+  { file:'kaboom.html',         name:'Kaboom', emoji:'💣',          category:'arcade',  desc:'Catch bombs dropped by a mad bomber.',                     tags:['arcade','paddle'] },
+  { file:'lunarLander.html',    name:'Lunar Lander', emoji:'🌙',    category:'arcade',  desc:'Burn fuel to touch down softly.',                          tags:['physics','arcade'] },
+  { file:'match3.html',         name:'Match 3', emoji:'💠',         category:'puzzle',  desc:'Swap adjacent gems to make matches of three.',             tags:['puzzle','grid'] },
+  { file:'microRacer.html',     name:'Micro Racer', emoji:'🏎️',     category:'arcade',  desc:'Top-down racing on a tight track.',                        tags:['racing'] },
+  { file:'minesweeper.html',    name:'Minesweeper', emoji:'🚩',     category:'puzzle',  desc:'Reveal cells without hitting a mine.',                     tags:['puzzle','grid'] },
+  { file:'miniGolf.html',       name:'Mini Golf', emoji:'⛳',       category:'sports',  desc:'Aim and putt across miniature courses.',                   tags:['sports','physics'] },
+  { file:'missileCommand.html', name:'Missile Command', emoji:'🎯', category:'shooter', desc:'Defend cities from incoming nukes.',                       tags:['arcade','shooter'], top:1 },
+  { file:'moonPatrol.html',     name:'Moon Patrol', emoji:'🌝',     category:'arcade',  desc:'Side-scrolling moon buggy — jump craters, shoot enemies.', tags:['arcade','scrolling'] },
+  { file:'mrDriller.html',      name:'Mr. Driller', emoji:'⛏️',     category:'puzzle',  desc:'Drill down through colored blocks while managing air.',    tags:['puzzle','action'] },
+  { file:'orbitswarm.html',     name:'OrbitSwarm', emoji:'🌀',      category:'shooter', desc:'Orbit a star and shoot the incoming swarm.',               tags:['arcade','shooter'] },
+  { file:'othello.html',        name:'Othello', emoji:'⚪',         category:'board',   desc:'Flank to flip — capture the most stones.',                 tags:['board','strategy'] },
+  { file:'pacman.html',         name:'Pac-Man', emoji:'👻',         category:'arcade',  desc:'Eat dots and dodge ghosts in a maze.',                     tags:['arcade','maze'], top:4 },
+  { file:'peggle.html',         name:'Peggle', emoji:'🟣',          category:'puzzle',  desc:'Aim balls at pegs to clear the board.',                    tags:['physics','puzzle'] },
+  { file:'pinball.html',        name:'Pinball', emoji:'🪩',         category:'arcade',  desc:'Launch a ball, hit the flippers, chase the score.',        tags:['physics','arcade']},
+  { file:'plinko.html',         name:'Plinko', emoji:'🪙',          category:'puzzle',  desc:'Drop chips down a peg field for prizes.',                  tags:['physics','arcade'] },
+  { file:'polePosition.html',   name:'Pole Position', emoji:'🏁',   category:'arcade',  desc:'Pseudo-3D racing — steer through the curves.',             tags:['racing'] },
+  { file:'pong.html',           name:'Pong', emoji:'🏓',            category:'arcade',  desc:'Two-paddle bounce, first to score wins.',                  tags:['arcade','paddle'] },
+  { file:'pool.html',           name:'Pool', emoji:'🎱',            category:'sports',  desc:'8-ball pool with cue physics.',                            tags:['sports','physics'], top:5 },
+  { file:'puzzleFighter.html',  name:'Puzzle Fighter', emoji:'💢',  category:'puzzle',  desc:'Stack falling gems to build chain combos.',                tags:['puzzle','falling'] },
+  { file:'riverRaid.html',      name:'River Raid', emoji:'✈️',      category:'shooter', desc:'Vertical-scrolling river shooter — watch your fuel.',      tags:['shooter','scrolling'] },
+  { file:'robotron.html',       name:'Robotron', emoji:'🤖',        category:'shooter', desc:'Twin-stick shooter — save the humans.',                    tags:['arcade','shooter','twin-stick'], top:3 },
+  { file:'skiing.html',         name:'Skiing', emoji:'⛷️',          category:'arcade',  desc:'Slalom through gates downhill.',                           tags:['arcade','racing'] },
+  { file:'snake.html',          name:'Snake', emoji:'🐍',           category:'arcade',  desc:'Eat to grow, don’t crash into yourself.',             tags:['arcade','grid'] },
+  { file:'snood.html',          name:'Snood', emoji:'🎈',           category:'puzzle',  desc:'Aim and shoot snoods to clear the board.',                 tags:['puzzle','physics'] },
+  { file:'sokoban.html',        name:'Sokoban', emoji:'📦',         category:'puzzle',  desc:'Push boxes onto target squares.',                          tags:['puzzle','grid'] },
+  { file:'spaceInvaders.html',  name:'Space Invaders', emoji:'👾',  category:'shooter', desc:'Shoot descending alien formations.',                       tags:['arcade','shooter'], top:10 },
+  { file:'spyhunter.html',      name:'Spy Hunter', emoji:'🕵️',      category:'arcade',  desc:'Top-down driving with car combat.',                        tags:['arcade','driving'] },
+  { file:'tetris.html',         name:'Tetris', emoji:'🟦',          category:'puzzle',  desc:'Stack falling tetrominoes to clear lines.',                tags:['puzzle','falling'], top:10 },
 ];
 
 GAMES.sort((a, b) => a.name.localeCompare(b.name));
 const gameByFile = Object.fromEntries(GAMES.map(g => [g.file, g]));
 
-// Display name + ordering for category rows in the welcome screen.
+// Display name, emoji, and accent color (referencing CSS vars) per category.
+// Used for row headers, filter chips, and tile color stripes.
 const CATEGORIES = [
-  { key:'arcade',  label:'Arcade'  },
-  { key:'shooter', label:'Shooter' },
-  { key:'puzzle',  label:'Puzzle'  },
-  { key:'board',   label:'Board'   },
-  { key:'sports',  label:'Sports'  },
+  { key:'arcade',  label:'Arcade',  emoji:'🕹️', color:'var(--cat-arcade)',  colorBg:'var(--cat-arcade-bg)'  },
+  { key:'shooter', label:'Shooter', emoji:'💥', color:'var(--cat-shooter)', colorBg:'var(--cat-shooter-bg)' },
+  { key:'puzzle',  label:'Puzzle',  emoji:'🧩', color:'var(--cat-puzzle)',  colorBg:'var(--cat-puzzle-bg)'  },
+  { key:'board',   label:'Board',   emoji:'🎲', color:'var(--cat-board)',   colorBg:'var(--cat-board-bg)'   },
+  { key:'sports',  label:'Sports',  emoji:'⚽', color:'var(--cat-sports)',  colorBg:'var(--cat-sports-bg)'  },
 ];
+const catByKey = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
 const LAST_GAME_KEY = 'littlejs-games-last';
 
 const sidebarLogoWrap = document.getElementById('sidebar-logo-wrap');
@@ -465,12 +526,13 @@ function makeCard(g) {
   card.className = 'card';
   card.dataset.file = g.file;
   card.innerHTML =
-    '<div class="title"></div>' +
+    '<div class="title"><span class="emoji"></span><span class="name"></span></div>' +
     '<div class="body">' +
       '<div class="desc"></div>' +
       '<div class="chips"></div>' +
     '</div>';
-  card.querySelector('.title').textContent = g.name;
+  card.querySelector('.emoji').textContent = g.emoji || '';
+  card.querySelector('.name').textContent = g.name;
   card.querySelector('.desc').textContent = g.desc;
   const chipsEl = card.querySelector('.chips');
   for (const t of g.tags) {
@@ -514,7 +576,12 @@ function buildFilterChips() {
     const btn = document.createElement('button');
     btn.className = 'chip-filter' + (c.key === 'all' ? ' active' : '');
     btn.dataset.cat = c.key;
-    btn.textContent = c.label;
+    btn.textContent = (c.emoji ? c.emoji + ' ' : '') + c.label;
+    // Tint the active state in the category's accent color.
+    if (c.color) {
+      btn.style.setProperty('--cat-color', c.color);
+      btn.style.setProperty('--cat-bg', c.colorBg);
+    }
     btn.addEventListener('click', () => {
       activeCategory = c.key;
       for (const el of filterChipsEl.children) {
@@ -532,9 +599,13 @@ function makeTile(g) {
   const tile = document.createElement('div');
   tile.className = 'tile';
   tile.innerHTML =
-    '<div class="name"></div>' +
-    '<div class="desc"></div>' +
-    '<div class="chips"></div>';
+    '<div class="emoji"></div>' +
+    '<div class="info">' +
+      '<div class="name"></div>' +
+      '<div class="desc"></div>' +
+      '<div class="chips"></div>' +
+    '</div>';
+  tile.querySelector('.emoji').textContent = g.emoji || '';
   tile.querySelector('.name').textContent = g.name;
   tile.querySelector('.desc').textContent = g.desc;
   const chipsEl = tile.querySelector('.chips');
@@ -544,6 +615,9 @@ function makeTile(g) {
     chip.textContent = t;
     chipsEl.appendChild(chip);
   }
+  // Color the left stripe + hover border by category.
+  const cat = catByKey[g.category];
+  if (cat) tile.style.setProperty('--cat-color', cat.color);
   tile.addEventListener('click', () => selectGame(g.file));
   return tile;
 }
@@ -585,24 +659,31 @@ function buildWelcome() {
 
   welcomeEl.appendChild(quick);
 
-  // Top Picks
+  // Top Picks (no category — uses neutral accent for the row bar)
   const topGames = GAMES.filter(g => g.top != null).sort((a, b) => a.top - b.top);
   if (topGames.length) {
-    welcomeEl.appendChild(buildRow('Top Picks', topGames, true));
+    welcomeEl.appendChild(buildRow('Top Picks', '⭐', topGames, true, null));
   }
 
-  // Category rows
+  // Category rows — each row tints its bar + emoji in the category color.
   for (const cat of CATEGORIES) {
     const games = GAMES.filter(g => g.category === cat.key);
-    if (games.length) welcomeEl.appendChild(buildRow(cat.label, games, false));
+    if (games.length) welcomeEl.appendChild(buildRow(cat.label, cat.emoji, games, false, cat));
   }
 }
 
-function buildRow(label, games, isTop) {
+function buildRow(label, rowEmoji, games, isTop, cat) {
   const row = document.createElement('section');
   row.className = 'row' + (isTop ? ' row-top' : '');
+  // Color the row's accent bar (and the row emoji's glow) by category.
+  if (cat) row.style.setProperty('--cat-color', cat.color);
+
   const h2 = document.createElement('h2');
-  h2.textContent = label;
+  h2.innerHTML =
+    '<span class="row-bar"></span>' +
+    (rowEmoji ? '<span class="row-emoji">' + rowEmoji + '</span>' : '') +
+    '<span class="row-label"></span>';
+  h2.querySelector('.row-label').textContent = label;
   row.appendChild(h2);
 
   const wrap = document.createElement('div');
@@ -616,7 +697,7 @@ function buildRow(label, games, isTop) {
   leftBtn.className = 'edge-scroll left';
   leftBtn.setAttribute('aria-label', 'Scroll left');
   leftBtn.innerHTML = '&#8249;';
-  leftBtn.hidden = true; // start hidden — observer reveals if there's overflow
+  leftBtn.hidden = true;
   leftBtn.addEventListener('click', () => {
     tiles.scrollBy({ left: -tiles.clientWidth * 0.85, behavior: 'smooth' });
   });
@@ -635,17 +716,47 @@ function buildRow(label, games, isTop) {
   row.appendChild(wrap);
 
   const update = () => {
-    // Bigger tolerance than 1px in case the browser parks scrollLeft at the
-    // padding offset (e.g. fractional pixels, snap residue, restoration).
     const atStart = tiles.scrollLeft <= 5;
     const atEnd = tiles.scrollLeft + tiles.clientWidth >= tiles.scrollWidth - 5;
     leftBtn.hidden = atStart;
     rightBtn.hidden = atEnd;
   };
   tiles.addEventListener('scroll', update, { passive: true });
-  // ResizeObserver fires once on observe + on every size change — gives us
-  // a reliable initial measurement without rAF/setTimeout guesswork.
   new ResizeObserver(update).observe(tiles);
+
+  // ---- Click-and-drag to scroll (mouse only — touch keeps native scroll) ----
+  let downX = 0, downScroll = 0, dragging = false, moved = false;
+  tiles.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    if (e.target.closest('.edge-scroll')) return; // let arrow clicks work
+    dragging = true;
+    moved = false;
+    downX = e.clientX;
+    downScroll = tiles.scrollLeft;
+    tiles.setPointerCapture(e.pointerId);
+  });
+  tiles.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - downX;
+    if (!moved && Math.abs(dx) > 4) {
+      moved = true;
+      tiles.classList.add('dragging');
+    }
+    if (moved) tiles.scrollLeft = downScroll - dx;
+  });
+  const endDrag = e => {
+    if (!dragging) return;
+    dragging = false;
+    tiles.classList.remove('dragging');
+    if (tiles.hasPointerCapture(e.pointerId)) tiles.releasePointerCapture(e.pointerId);
+  };
+  tiles.addEventListener('pointerup', endDrag);
+  tiles.addEventListener('pointercancel', endDrag);
+  // Suppress the click that follows a real drag so tiles don't launch.
+  tiles.addEventListener('click', e => {
+    if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; }
+  }, true);
+
   return row;
 }
 
