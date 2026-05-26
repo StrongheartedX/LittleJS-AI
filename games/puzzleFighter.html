@@ -43,6 +43,83 @@ function gemCounter(color, countdown) { return { type:'counter', color, countdow
 function gemDiamond()      { return { type:'diamond' }; }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Grid helpers
+
+function inBounds(x, y) { return x >= 0 && x < BOARD_W && y >= 0 && y < BOARD_H; }
+
+function emptyGrid()
+{
+    return [...Array(BOARD_W)].map(()=> Array(BOARD_H).fill(null));
+}
+
+function isRegular(g) { return g && g.type === 'regular'; }
+
+///////////////////////////////////////////////////////////////////////////////
+// Power gem rectangle merge (pure function over grid)
+
+function mergePowerGems(grid)
+{
+    let changed = false;
+    const visited = [...Array(BOARD_W)].map(()=> Array(BOARD_H).fill(false));
+
+    for (let sx = 0; sx < BOARD_W; sx++)
+    for (let sy = 0; sy < BOARD_H; sy++)
+    {
+        if (visited[sx][sy]) continue;
+        const seed = grid[sx][sy];
+        if (!isRegular(seed)) continue;
+
+        // Flood-fill connected same-color region
+        const color = seed.color;
+        const region = [];
+        const stack = [[sx, sy]];
+        let minX = sx, minY = sy, maxX = sx, maxY = sy;
+        while (stack.length)
+        {
+            const [x, y] = stack.pop();
+            if (!inBounds(x, y) || visited[x][y]) continue;
+            const g = grid[x][y];
+            if (!isRegular(g) || g.color !== color) continue;
+            visited[x][y] = true;
+            region.push([x, y]);
+            minX = min(minX, x); minY = min(minY, y);
+            maxX = max(maxX, x); maxY = max(maxY, y);
+            stack.push([x+1, y], [x-1, y], [x, y+1], [x, y-1]);
+        }
+        if (region.length < 4) continue;
+
+        // Check bbox is fully filled with same-color regulars
+        const bboxW = maxX - minX + 1;
+        const bboxH = maxY - minY + 1;
+        if (bboxW < 2 || bboxH < 2) continue;
+        if (region.length !== bboxW * bboxH) continue;
+
+        // Assign a single powerGemId across the bbox
+        let chosenId = Infinity;
+        for (let x = minX; x <= maxX; x++)
+        for (let y = minY; y <= maxY; y++)
+        {
+            const g = grid[x][y];
+            if (g.powerGemId >= 0) chosenId = min(chosenId, g.powerGemId);
+        }
+        if (chosenId === Infinity) chosenId = nextPowerGemId();
+
+        for (let x = minX; x <= maxX; x++)
+        for (let y = minY; y <= maxY; y++)
+        {
+            const g = grid[x][y];
+            if (g.powerGemId !== chosenId)
+            {
+                g.powerGemId = chosenId;
+                changed = true;
+            }
+        }
+    }
+
+    return changed;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Placeholder Board
 
 class Board
@@ -68,6 +145,52 @@ function runUnitTests()
     };
 
     // (tests added in later tasks)
+
+    // --- Power gem merge tests ---
+    {
+        const place = (g, x, y, color) => { g[x][y] = gemRegular(color); };
+
+        // 2x2 forms one power gem
+        let g = emptyGrid();
+        place(g, 0, 0, COLOR_R); place(g, 1, 0, COLOR_R);
+        place(g, 0, 1, COLOR_R); place(g, 1, 1, COLOR_R);
+        mergePowerGems(g);
+        const id1 = g[0][0].powerGemId;
+        assert(id1 >= 0, 'merge: 2x2 gets a powerGemId');
+        assert(g[1][1].powerGemId === id1, 'merge: 2x2 shares one id');
+
+        // L-shape (3 cells) does NOT merge
+        g = emptyGrid();
+        place(g, 0, 0, COLOR_G); place(g, 1, 0, COLOR_G); place(g, 0, 1, COLOR_G);
+        mergePowerGems(g);
+        assert(g[0][0].powerGemId === -1, 'merge: L-shape does not merge');
+
+        // 2x2 with one off-color hole does NOT merge
+        g = emptyGrid();
+        place(g, 0, 0, COLOR_B); place(g, 1, 0, COLOR_B);
+        place(g, 0, 1, COLOR_Y); place(g, 1, 1, COLOR_B);
+        mergePowerGems(g);
+        assert(g[0][0].powerGemId === -1, 'merge: mixed-color bbox does not merge');
+
+        // Adjacent 2x2 + 2x2 = 4x2 (or 2x4) when filled
+        g = emptyGrid();
+        for (let x = 0; x < 4; x++)
+        for (let y = 0; y < 2; y++) place(g, x, y, COLOR_R);
+        mergePowerGems(g);
+        const idAll = g[0][0].powerGemId;
+        let allSame = true;
+        for (let x = 0; x < 4; x++)
+        for (let y = 0; y < 2; y++)
+            if (g[x][y].powerGemId !== idAll) allSame = false;
+        assert(allSame, 'merge: 4x2 filled region shares one id');
+
+        // Counter gem in the middle blocks merge
+        g = emptyGrid();
+        place(g, 0, 0, COLOR_Y); place(g, 1, 0, COLOR_Y);
+        place(g, 0, 1, COLOR_Y); g[1][1] = gemCounter(COLOR_Y, 5);
+        mergePowerGems(g);
+        assert(g[0][0].powerGemId === -1, 'merge: counter gem blocks rectangle');
+    }
 
     if (fails.length === 0) console.log('All unit tests passed.');
     else console.error('UNIT TEST FAILURES:', fails.length);
