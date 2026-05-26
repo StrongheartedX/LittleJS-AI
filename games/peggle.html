@@ -22,6 +22,8 @@ const PEG_FADE = .4;       // seconds for hit peg to vanish
 const SUBSTEPS = 4;         // physics substeps per frame (prevents tunneling)
 const SHOOT_SPEED = 22;
 const GRAVITY_Y = 28;
+const SLOWMO_TIME = 3;      // seconds of slow-mo when power peg is hit
+const SLOWMO_SCALE = .35;   // gameplay time multiplier while slow-mo is active
 
 ///////////////////////////////////////////////////////////////////////////////
 // State
@@ -33,6 +35,7 @@ let score, ballsRemaining, orangeLeft, comboCount, maxCombo;
 let win, gameOver;
 let isPlaying;       // false while title is up
 let endDialogShown;  // prevents re-triggering the game-over dialog
+let slowMoT;         // real-time seconds remaining of slow-mo
 
 function setPlaying(p)
 {
@@ -41,7 +44,7 @@ function setPlaying(p)
     if (hud) p ? hud.show() : hud.hide();
 }
 
-let sfxShoot, sfxPeg, sfxOrange, sfxBucket, sfxLose, sfxWin;
+let sfxShoot, sfxPeg, sfxOrange, sfxPower, sfxBucket, sfxLose, sfxWin;
 let sfxMenuNav, sfxMenuOK;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -63,6 +66,7 @@ function initSounds()
     sfxShoot   = new SoundGenerator({frequency:420, release:.08, volume:.7, shapeCurve:1.4});
     sfxPeg     = new SoundGenerator({frequency:520, release:.08, volume:.55});
     sfxOrange  = new SoundGenerator({frequency:740, release:.14, volume:.9, slide:.5});
+    sfxPower   = new SoundGenerator({frequency:1000,release:.35, volume:1,  slide:1.6, shapeCurve:.8});
     sfxBucket  = new SoundGenerator({frequency:260, release:.2,  volume:1,  noise:.15});
     sfxLose    = new SoundGenerator({frequency:140, release:.2,  volume:.6, slide:-.6, shapeCurve:.7});
     sfxWin     = new SoundGenerator({frequency:660, release:.4,  volume:1,  slide:.9});
@@ -92,6 +96,7 @@ function resetGame()
     activeBall = null;
     win = gameOver = false;
     endDialogShown = false;
+    slowMoT = 0;
     comboCount = maxCombo = 0;
     trail = [];
     particles = [];
@@ -145,6 +150,10 @@ function createPegs()
         if (ok) oranges.add(pos);
     }
 
+    // One power peg per round, picked from the non-orange candidates
+    const nonOrange = candidates.filter(p => !oranges.has(p));
+    const powerPeg = nonOrange.length ? nonOrange[randInt(nonOrange.length)] : null;
+
     for (const pos of candidates)
         pegs.push({
             pos,
@@ -153,6 +162,7 @@ function createPegs()
             dead: false,
             fadeTime: 0,
             orange: oranges.has(pos),
+            power: pos === powerPeg,
             phase: rand(0, PI*2),
         });
 
@@ -284,13 +294,22 @@ function gameUpdate()
 
     updateInput();
 
+    // Slow-mo timer counts down in real time; gameplay updates use a scaled dt
+    let scale = 1;
+    if (slowMoT > 0)
+    {
+        slowMoT -= timeDelta;
+        scale = SLOWMO_SCALE;
+    }
+    const dt = timeDelta * scale;
+
     if (activeBall && !gameOver)
     {
-        const dt = timeDelta / SUBSTEPS;
+        const subDt = dt / SUBSTEPS;
         for (let i = 0; i < SUBSTEPS; i++)
         {
             if (!activeBall) break;
-            stepBall(dt);
+            stepBall(subDt);
         }
         if (activeBall)
         {
@@ -301,14 +320,14 @@ function gameUpdate()
 
     for (let i = trail.length - 1; i >= 0; i--)
     {
-        trail[i].life -= timeDelta * 5;
+        trail[i].life -= dt * 5;
         if (trail[i].life <= 0) trail.splice(i, 1);
     }
 
-    updateBucket();
-    updatePegs();
-    updateParticles();
-    updateScorePops();
+    updateBucket(dt);
+    updatePegs(dt);
+    updateParticles(dt);
+    updateScorePops(dt);
 
     if (activeBall && activeBall.pos.y < -BOARD_H/2 - 3)
         loseBall();
@@ -326,38 +345,38 @@ function gameUpdatePost()
     cameraPos = vec2(0, 0);
 }
 
-function updatePegs()
+function updatePegs(dt)
 {
     for (const p of pegs)
     {
         if (p.hit && !p.dead)
         {
-            p.fadeTime += timeDelta;
+            p.fadeTime += dt;
             if (p.fadeTime > PEG_FADE) p.dead = true;
         }
     }
 }
 
-function updateParticles()
+function updateParticles(dt)
 {
     for (let i = particles.length - 1; i >= 0; i--)
     {
         const p = particles[i];
-        p.pos = p.pos.add(p.vel.scale(timeDelta));
+        p.pos = p.pos.add(p.vel.scale(dt));
         p.vel = p.vel.scale(.9);
-        p.vel.y -= 18 * timeDelta;
-        p.life -= timeDelta * 1.8;
+        p.vel.y -= 18 * dt;
+        p.life -= dt * 1.8;
         if (p.life <= 0) particles.splice(i, 1);
     }
 }
 
-function updateScorePops()
+function updateScorePops(dt)
 {
     for (let i = scorePops.length - 1; i >= 0; i--)
     {
         const s = scorePops[i];
-        s.pos.y += timeDelta * 2.5;
-        s.life -= timeDelta * 1.2;
+        s.pos.y += dt * 2.5;
+        s.life -= dt * 1.2;
         if (s.life <= 0) scorePops.splice(i, 1);
     }
 }
@@ -378,13 +397,13 @@ function emitParticles(pos, hue, count)
     }
 }
 
-function addScorePop(pos, text, big)
+function addScorePop(pos, text, hue, big)
 {
     scorePops.push({
         pos: pos.copy(),
         text,
         life: 1,
-        hue: big ? .08 : .58,
+        hue,
         size: big ? 1.3 : .9,
     });
 }
@@ -433,10 +452,10 @@ function loseBall()
     }
 }
 
-function updateBucket()
+function updateBucket(dt)
 {
     if (gameOver) return;
-    bucket.t += timeDelta;
+    bucket.t += dt;
     const xRange = BOARD_W/2 - bucket.size.x/2 - .6;
     bucket.pos.x = Math.sin(bucket.t * 1.4) * xRange;
 
@@ -446,7 +465,7 @@ function updateBucket()
     {
         score += 2500;
         ballsRemaining++;
-        addScorePop(bucket.pos.add(vec2(0, 1)), 'FREE BALL +2500', true);
+        addScorePop(bucket.pos.add(vec2(0, 1)), 'FREE BALL +2500', .15, true);
         emitParticles(bucket.pos, .15, 18);
         activeBall = null;
         trail = [];
@@ -491,15 +510,23 @@ function stepBall(dt)
             comboCount++;
             if (comboCount > maxCombo) maxCombo = comboCount;
             const multiplier = 1 + Math.floor((comboCount - 1) / 4);
-            const baseVal = p.orange ? 1000 : 100;
-            const val = baseVal * multiplier;
-            score += val;
 
-            addScorePop(p.pos, '+' + val, p.orange);
-            emitParticles(p.pos, p.orange ? .08 : .58, p.orange ? 14 : 8);
-
-            if (p.orange)
+            let baseVal, hue, particleCount, popBig;
+            if (p.power)
             {
+                baseVal = 5000;
+                hue = .33;
+                particleCount = 26;
+                popBig = true;
+                slowMoT = Math.max(slowMoT, SLOWMO_TIME);
+                sfxPower.play();
+            }
+            else if (p.orange)
+            {
+                baseVal = 1000;
+                hue = .08;
+                particleCount = 14;
+                popBig = true;
                 orangeLeft--;
                 playPegSound(true, comboCount);
                 if (orangeLeft <= 0)
@@ -511,8 +538,17 @@ function stepBall(dt)
             }
             else
             {
+                baseVal = 100;
+                hue = .58;
+                particleCount = 8;
+                popBig = false;
                 playPegSound(false, comboCount);
             }
+
+            const val = baseVal * multiplier;
+            score += val;
+            addScorePop(p.pos, '+' + val, hue, popBig);
+            emitParticles(p.pos, hue, particleCount);
 
             const sp = activeBall.vel.length();
             if (sp < 3.5) activeBall.vel = activeBall.vel.normalize().scale(3.5);
@@ -565,7 +601,15 @@ function gameRender()
             alpha = 1 - t;
         }
         const r = p.r * scale;
-        if (p.orange)
+        if (p.power)
+        {
+            // Faster sparkle pulse so the player can spot it
+            const pulse = .8 + .2 * Math.sin(time * 7 + p.phase);
+            drawCircle(p.pos, r * 4,   hsl(.33, 1, .55, .15 * pulse * alpha));
+            drawCircle(p.pos, r * 2.8, hsl(.33, 1, .6,  .35 * pulse * alpha));
+            drawCircle(p.pos, r * 2,   hsl(.33, .95, .55 * pulse, alpha), .08, hsl(0,0,0,alpha));
+        }
+        else if (p.orange)
         {
             const pulse = .85 + .15 * Math.sin(time * 4 + p.phase);
             drawCircle(p.pos, r * 3.2, hsl(.08, 1, .55, .15 * pulse * alpha));
@@ -663,6 +707,15 @@ function gameRenderPost()
         drawTextScreen('x' + comboCount + '  COMBO!',
             vec2(cx, top + 50), 38 * wobble,
             hsl(.12, 1, .65), 5, hsl(0,0,0), 'center');
+    }
+
+    if (slowMoT > 0)
+    {
+        const fade = Math.min(1, slowMoT);
+        const wobble = 1 + Math.sin(time * 12) * .08;
+        drawTextScreen('POWER!',
+            vec2(cx, mainCanvasSize.y * .25), 72 * wobble,
+            hsl(.33, 1, .65, fade), 6, hsl(0, 0, 0, fade), 'center');
     }
 }
 
