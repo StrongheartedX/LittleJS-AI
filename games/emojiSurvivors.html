@@ -56,9 +56,9 @@ class Player extends EngineObject
     constructor()
     {
         super(vec2(0, 0), vec2(1.2), sprites.player);
-        this.maxHp = 100;
+        this.maxHp = playerMaxHp;
         this.hp = this.maxHp;
-        this.speed = 6;
+        this.speed = playerSpeed;
         // Disable engine-driven physics — we want exact velocity control.
         this.damping = 1;
         this.friction = 1;
@@ -73,6 +73,8 @@ class Player extends EngineObject
 
     update()
     {
+        this.speed = playerSpeed;
+        this.maxHp = playerMaxHp;
         const dir = keyDirection().add(gamepadStick(0));
         const move = dir.length() > 1 ? dir.normalize() : dir;
         this.velocity = move.scale(this.speed / 60);  // velocity is per-frame
@@ -228,7 +230,7 @@ class Projectile extends EngineObject
     }
 }
 
-function xpToNext(level) { return 5 + level * 3; }
+function xpToNext(level) { return xpToNextBase + level * 3; }
 
 class Pickup extends EngineObject
 {
@@ -394,7 +396,7 @@ class FireballWeapon
     get name() { return 'Fireball'; }
     get emoji() { return '🔥'; }
     levelUp() { this.level = min(this.level + 1, 5); }
-    damage()  { return 2 + this.level; }
+    damage()  { return fireballDamage + this.level; }
 
     update()
     {
@@ -441,7 +443,7 @@ function pickWeightedType(elapsed)
 function updateSpawner()
 {
     // ramp the spawn interval from 1.5s down to 0.4s over the first 3 minutes
-    spawner.interval = lerp(min(time / 180, 1), 1.5, 0.4);
+    spawner.interval = lerp(min(time / 180, 1), enemySpawnIntervalBase, 0.4);
 
     spawner.timer -= 1 / 60;
     if (spawner.timer > 0) return;
@@ -461,6 +463,11 @@ function updateSpawner()
 }
 
 let magnetRadius = 3;
+let playerSpeed = 6;
+let playerMaxHp = 100;
+let enemySpawnIntervalBase = 1.5;
+let xpToNextBase = 5;
+let fireballDamage = 2;
 
 let elapsedTime = 0;
 let killCount = 0;
@@ -507,6 +514,15 @@ async function gameInit()
 
     player = new Player();
     player.weapons = [new FireballWeapon()];
+
+    tweakEngineDefaults();
+    tweakDivider('Emoji Survivors');
+    tweak('playerSpeed',              {min: 2,   max: 12});
+    tweak('playerMaxHp',              {min: 50,  max: 300});
+    tweak('enemySpawnIntervalBase',   {min: .2,  max: 3});
+    tweak('xpToNextBase',             {min: 2,   max: 20});
+    tweak('fireballDamage',           {min: 1,   max: 10});
+    tweak('magnetRadius',             {min: 1,   max: 10});
 }
 
 // All available weapons by name. Names match the constructor classes below.
