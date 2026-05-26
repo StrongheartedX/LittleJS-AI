@@ -806,6 +806,47 @@ function gameRender()
     drawLine(vec2(FIELD_LEFT, LOSE_Y), vec2(FIELD_RIGHT, LOSE_Y), .08, hsl(.02, .9, .55, .55));
 }
 
+function drawAimLine()
+{
+    // Ray-march from the shooter along the aim direction, reflecting off side
+    // walls, stopping when we hit a bubble or reach the top. Plot a small dot
+    // every few steps so the path reads as a dashed guide.
+    const shooterPos = vec2(0, SHOOT_Y);
+    let dir = vec2(Math.cos(aimAngle), Math.sin(aimAngle));
+    let pos = shooterPos.add(dir.scale(BUBBLE_R * 2.4)); // start past the arrow tip
+
+    const stepSize = .25;
+    const maxSteps = 220;
+    const hitR2 = (BUBBLE_DIAM * .96) ** 2;
+    const topCapY = TOP_Y - max(.5, descendOffset);
+
+    for (let i = 0; i < maxSteps; ++i)
+    {
+        pos = pos.add(dir.scale(stepSize));
+
+        if (pos.x < FIELD_MIN_X) { pos.x = FIELD_MIN_X; dir.x = abs(dir.x); }
+        if (pos.x > FIELD_MAX_X) { pos.x = FIELD_MAX_X; dir.x = -abs(dir.x); }
+
+        if (pos.y > topCapY) break;
+
+        let hit = false;
+        for (let r=0; r<ROWS_MAX && !hit; ++r)
+        for (let c=0; c<COLS && !hit; ++c)
+        {
+            if (grid[r][c] === null) continue;
+            if (gridToWorld(r,c).distanceSquared(pos) < hitR2) hit = true;
+        }
+        if (hit) break;
+
+        // dashed look — draw every other step, fade with distance
+        if ((i & 1) === 0)
+        {
+            const fade = 1 - i/maxSteps;
+            drawCircle(pos, .09, hsl(0,0,1,.45*fade));
+        }
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
@@ -871,6 +912,11 @@ function gameRenderPost()
         drawCircle(projectile.pos, BUBBLE_DIAM, COLORS[projectile.colorIndex], .06, OUTLINE);
         drawCircle(projectile.pos.add(vec2(-.12,.12)), .22, hsl(0,0,1,.18));
     }
+
+    // dotted aim line — simulates the projectile path (including wall bounces)
+    // so the player can see where their shot will land
+    if (!projectile && !gameOver && isPlaying)
+        drawAimLine();
 
     // shooter + arrow-style aim
     const shooterPos = vec2(0, SHOOT_Y);
