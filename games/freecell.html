@@ -188,14 +188,16 @@ function paintSuitTile(glyph)
 
 function paintCardBg(ctx)
 {
-    // Painted at 250×250; stretched to CARD_SIZE (6×8.5) — corners go slightly
-    // oval but at radius 14px the asymmetry is hard to see.
+    // Painted inside a 4px margin within the 250×250 tile so the bg
+    // doesn't crowd neighbouring tiles in the atlas (e.g. the ♥ tile
+    // immediately above it). Corners go slightly oval when stretched
+    // to CARD_SIZE (6×8.5) but at radius 14px the asymmetry is hard to see.
     const r = 14;
     ctx.fillStyle = '#0a0a0a';
-    roundedRect(ctx, 0, 0, 250, 250, r);
+    roundedRect(ctx, 4, 4, 242, 242, r);
     ctx.fill();
     ctx.fillStyle = '#fff';
-    roundedRect(ctx, 4, 4, 242, 242, r - 2);
+    roundedRect(ctx, 8, 8, 234, 234, r - 2);
     ctx.fill();
 }
 
