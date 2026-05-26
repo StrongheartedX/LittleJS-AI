@@ -58,14 +58,14 @@ const LEVELS = [
         '......nnnnnn......',
         '.......nnnn.......',
     ],
-    // 3: Castle (gold battlements frame normal interior)
+    // 3: Castle (gold battlements frame normal interior; floor has two gates)
     [
         'g.g.g.g.g.g.g.g.g.',
         'gggggggggggggggggg',
         'g.nnnnnnnnnnnnnn.g',
         'g.nnnnnnnnnnnnnn.g',
         'g.nnnnnnnnnnnnnn.g',
-        'gggggggggggggggggg',
+        'gg..gggggggggg..gg',
         '..................',
     ],
     // 4: Checkerboard of normal + silver
@@ -951,6 +951,10 @@ function gameRender()
             const damaged = b.hp < b.maxHp;
             drawRect(b.pos, b.size.subtract(vec2(.02, .02)), hsl(0, 0, damaged ? .35 : .55));
             drawRect(b.pos, inset, hsl(0, 0, damaged ? .55 : .82));
+            // Fresh silver has a dot to mark "needs another hit".
+            // The dot vanishes after the first hit, signalling "now a normal brick".
+            if (!damaged)
+                drawCircle(b.pos, .32, hsl(0, 0, .15));
         }
         else if (b.special)
         {
