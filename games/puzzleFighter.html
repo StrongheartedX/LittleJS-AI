@@ -2329,7 +2329,7 @@ function gameUpdate()
 function gameUpdatePost() { cameraPos = vec2(0, 0); }
 function gameRender()
 {
-    drawRectGradient(cameraPos, getCameraSize(), rgb(.06,.06,.08), rgb(.01,.01,.02));
+    drawRectGradient(cameraPos, getCameraSize(), BLACK, rgb(.2,.2,.2));
     drawBoardFrame(0);
     drawBoardFrame(1);
     if (p1Board) drawBoardGems(p1Board, 0);
@@ -2371,9 +2371,8 @@ function gameRenderPost()
                 drawSimpleGem(ctx, nextPiece.a, px, Y_NEXT_GEM_BOT, ws);
             }
 
-            // Portrait + name (middle)
-            drawPortrait(b.character, vec2(px, Y_PORTRAIT), 55, ctx);
-            drawTextScreen(b.character.name, vec2(px, Y_NAME), 18, hsl(0,0,1), 4, hsl(0,0,0));
+            // Fighter name (middle)
+            drawTextScreen(b.character.name, vec2(px, Y_NAME), 32, b.character.color, 6, hsl(0,0,0));
 
             // Score + chain (bottom)
             drawTextScreen('SCORE ' + b.score, vec2(px, Y_SCORE), 16, hsl(.16,1,.8), 3, hsl(0,0,0));
