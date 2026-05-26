@@ -376,6 +376,7 @@ async function gameInit()
         title: 'FREECELL',
         onPlay: playFromTitle,
         canReveal: () => !isPlaying,
+        revealOnClick: false,
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
@@ -463,6 +464,9 @@ async function gameInit()
                 })},
         ],
     });
+
+    // Surface the title menu immediately — no click-to-reveal gate.
+    showMenu('title');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
