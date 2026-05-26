@@ -410,6 +410,23 @@ async function gameInit()
     setupLayout();
     initCardAtlas();
     newGame();
+
+    // Restore the player's in-progress game from the previous session if
+    // localStorage has a snapshot. Won games are skipped — give them a
+    // fresh deal instead.
+    try
+    {
+        const raw = localStorage['freecell.saveState'];
+        if (raw)
+        {
+            const snap = JSON.parse(raw);
+            loadState(snap);   // also sets `won` based on foundation count
+            if (won) newGame();
+            else { stateUndo = [snap]; stateRedo = []; }
+        }
+    }
+    catch (e) { /* localStorage blocked or corrupt JSON — non-fatal */ }
+
     // Match the engine's master volume to whatever the options slider starts at,
     // so the very first menu sound plays at the user-visible volume.
     setSoundVolume(.8);
@@ -707,6 +724,59 @@ function checkWin()
     });
 }
 
+// True if any *meaningful* legal move exists from the current position.
+// "Meaningful" excludes shuffling cards between free cells and moves out
+// of a foundation — neither makes progress. Probes by temporarily
+// populating handStack so isMoveLegal can be reused; restores on exit.
+function hasLegalMove()
+{
+    const savedCards = handStack.cards;
+    const savedType  = handStack.type;
+    let found = false;
+
+    outer:
+    for (const src of cardStacks)
+    {
+        if (src.isEmpty()) continue;
+        if (src.type === StackType.Foundation) continue;
+
+        const candidates = src.type === StackType.Cascade
+            ? src.cards.filter(c => tailIsValidRun(src, c))
+            : [src.topCard()];
+
+        for (const startCard of candidates)
+        {
+            const startIdx = src.cards.indexOf(startCard);
+            handStack.cards = src.cards.slice(startIdx);
+            handStack.type  = src.type;
+
+            for (const dst of cardStacks)
+            {
+                if (dst === src) continue;
+                // Skip trivial FC→FC shuffles.
+                if (src.type === StackType.FreeCell && dst.type === StackType.FreeCell) continue;
+                if (isMoveLegal(dst)) { found = true; break outer; }
+            }
+        }
+    }
+
+    handStack.cards = savedCards;
+    handStack.type  = savedType;
+    return found;
+}
+
+function checkLoss()
+{
+    if (won) return;
+    if (hasLegalMove()) return;
+    showMenuToast({
+        icon:     '😶',
+        title:    'No legal moves',
+        text:     'Press Z to undo or use NEW GAME.',
+        duration: 5,
+    });
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 function snapshot()
 {
@@ -736,6 +806,11 @@ function loadState(snap)
     }
     // Clear any in-flight tweens — restored positions are authoritative.
     for (const s of cardStacks) for (const c of s.cards) c.tweenFrom = null;
+    // Recompute win state from foundation counts (snapshot doesn't store it).
+    let total = 0;
+    for (const s of cardStacks)
+        if (s.type === StackType.Foundation) total += s.cards.length;
+    won = total >= 52;
 }
 
 function undoState()
@@ -788,7 +863,7 @@ function gameUpdate()
                     }
                     if (!placed) handStack.moveManyToStack(hit.stack);   // put it back
                     handStack.type = savedType;
-                    if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); }
+                    if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); checkLoss(); }
                     return;
                 }
             }
@@ -843,7 +918,7 @@ function gameUpdate()
         // card is already where the cursor left it.
         handStack.moveManyToStack(target || pickupOrigin, undefined, !placed);
         pickupOrigin = null;
-        if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); }
+        if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); checkLoss(); }
         else        { window.sndInvalid && window.sndInvalid.play(); }
     }
 
