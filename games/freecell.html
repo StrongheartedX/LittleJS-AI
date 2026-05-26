@@ -44,8 +44,17 @@ canvasClearColor = new Color().setHex('#264d40');   // felt green
 // Layout (world units, Y-up)
 const CARD_SIZE     = vec2(6, 8.5);
 const COL_PITCH_X   = 7;          // horizontal distance between column anchors
-const CARD_PITCH_Y  = 2;          // vertical stagger inside a cascade
+const CARD_PITCH_Y  = 2;          // how far DOWN each cascade card sits from the one above it
 const TOP_MARGIN    = 1;          // empty felt above the top row of stacks
+
+// Corner glyphs (top-left rank+suit; bottom-right is the same, rotated 180°).
+// Offsets are from the corresponding card corner — increase X to push the
+// glyph further in from the side, increase Y to push it further down from
+// the top.
+const CORNER_RANK_OFFSET = vec2(1.0, 1.0);
+const CORNER_RANK_SIZE   = vec2(1.8);
+const CORNER_SUIT_OFFSET = vec2(1.0, 2.5);
+const CORNER_SUIT_SIZE   = vec2(1.4);
 
 // Pip layout for number cards (2-10).
 const PIP_SIZE      = vec2(1.4);  // size of each pip glyph
@@ -229,12 +238,9 @@ function drawCard(card, pos)
     const rankTile = cardSprites.ranks[card.value];
     const suitTile = cardSprites.suits[card.suit];
 
-    const rankSize = vec2(1.8);
-    const suitSize = vec2(1.4);
-
-    // Top-left corner.
-    drawTile(pos.add(vec2(-CARD_SIZE.x/2 + 1.0,  CARD_SIZE.y/2 - 1.0)),  rankSize, rankTile, color);
-    drawTile(pos.add(vec2(-CARD_SIZE.x/2 + 1.0,  CARD_SIZE.y/2 - 2.5)),  suitSize, suitTile, color);
+    // Top-left corner: rank above, suit below.
+    drawTile(pos.add(vec2(-CARD_SIZE.x/2 + CORNER_RANK_OFFSET.x,  CARD_SIZE.y/2 - CORNER_RANK_OFFSET.y)), CORNER_RANK_SIZE, rankTile, color);
+    drawTile(pos.add(vec2(-CARD_SIZE.x/2 + CORNER_SUIT_OFFSET.x,  CARD_SIZE.y/2 - CORNER_SUIT_OFFSET.y)), CORNER_SUIT_SIZE, suitTile, color);
 
     // Main face. Number cards (2-10) paint pip patterns; A shows one big
     // suit; J/Q/K show a large rank glyph (no portrait art available).
@@ -246,8 +252,8 @@ function drawCard(card, pos)
         drawPips(pos, card.value + 1, suitTile, color);
 
     // Bottom-right corner, rotated 180° so glyphs read upside-down.
-    drawTile(pos.add(vec2( CARD_SIZE.x/2 - 1.0, -CARD_SIZE.y/2 + 1.0)),  rankSize, rankTile, color, PI);
-    drawTile(pos.add(vec2( CARD_SIZE.x/2 - 1.0, -CARD_SIZE.y/2 + 2.5)),  suitSize, suitTile, color, PI);
+    drawTile(pos.add(vec2( CARD_SIZE.x/2 - CORNER_RANK_OFFSET.x, -CARD_SIZE.y/2 + CORNER_RANK_OFFSET.y)), CORNER_RANK_SIZE, rankTile, color, PI);
+    drawTile(pos.add(vec2( CARD_SIZE.x/2 - CORNER_SUIT_OFFSET.x, -CARD_SIZE.y/2 + CORNER_SUIT_OFFSET.y)), CORNER_SUIT_SIZE, suitTile, color, PI);
 }
 
 // Pip positions for number cards (v = 2..10) — ported from
@@ -882,14 +888,28 @@ function gameRender()
             if (!c.isTweening())
                 drawCard(c, c.pos);
 
-    // Hover tint: a light-blue veil over every card that would lift
-    // together if the player clicked right now. Uses the bg tile so the
-    // tint respects the card's rounded silhouette.
+    // Hover outline: a single blue bounding box around the cards that
+    // would lift together. Outline (not a tint) so the cards underneath
+    // stay fully opaque and readable.
     if (handStack.isEmpty() && isPlaying && !won)
     {
-        const tint = new Color(0.55, 0.8, 1.0, 0.4);
-        for (const c of pickableTail(stackUnderPoint(mousePos)))
-            drawTile(c.drawnPos(), CARD_SIZE, cardSprites.bg, tint);
+        const tail = pickableTail(stackUnderPoint(mousePos));
+        if (tail.length)
+        {
+            const topPos = tail[0].drawnPos();
+            const botPos = tail[tail.length - 1].drawnPos();
+            const yTop = topPos.y + CARD_SIZE.y/2;
+            const yBot = botPos.y - CARD_SIZE.y/2;
+            const yMid = (yTop + yBot) / 2;
+            const h    = yTop - yBot;
+            const outline = new Color(0.4, 0.8, 1.0, 0.9);
+            const o = 0.25;
+            const t = 0.25;
+            drawRect(vec2(topPos.x, yTop + o), vec2(CARD_SIZE.x + 2*o, t), outline);
+            drawRect(vec2(topPos.x, yBot - o), vec2(CARD_SIZE.x + 2*o, t), outline);
+            drawRect(vec2(topPos.x - CARD_SIZE.x/2 - o, yMid), vec2(t, h + 2*o), outline);
+            drawRect(vec2(topPos.x + CARD_SIZE.x/2 + o, yMid), vec2(t, h + 2*o), outline);
+        }
     }
 
     // Legal-drop highlight (also on top of cards while dragging).
