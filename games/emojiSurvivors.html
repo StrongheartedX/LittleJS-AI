@@ -258,7 +258,7 @@ class Chest extends EngineObject
             const tip = this.pos.add(vec2().setAngle(a, 3));
             chainFlashes.push({a: this.pos.copy(), b: tip, t: time + .5});
         }
-        if (sounds.chest && sounds.chest.play) sounds.chest.play();
+        if (sounds.chest && sounds.chest.play) sounds.chest.play(this.pos);
     }
 
     render()
@@ -418,7 +418,9 @@ class Enemy extends EngineObject
             player.hp -= this.dmg;
             player.hurtTimer = .25;
             this.hitCooldown = .4;
-            if (sounds.hurt && sounds.hurt.play) sounds.hurt.play();
+            // hurt sound plays from the enemy's position so the player hears
+            // which direction they were hit from
+            if (sounds.hurt && sounds.hurt.play) sounds.hurt.play(this.pos);
             // small knockback so we don't re-hit instantly
             const away = this.pos.subtract(player.pos).normalize(.5);
             this.pos = this.pos.add(away);
@@ -638,7 +640,7 @@ class Pickup extends EngineObject
             if (this.kind === 'gem')
             {
                 player.xp += this.value * player.xpGainMult;
-                playPickupSound(sounds.pickup);
+                playPickupSound(sounds.pickup, this.pos);
                 while (player.xp >= xpToNext(player.level))
                 {
                     player.xp -= xpToNext(player.level);
@@ -650,13 +652,13 @@ class Pickup extends EngineObject
             else if (this.kind === 'heart')
             {
                 player.hp = min(player.maxHp, player.hp + this.value);
-                if (sounds.heart && sounds.heart.play) sounds.heart.play();
+                if (sounds.heart && sounds.heart.play) sounds.heart.play(this.pos);
             }
             else if (this.kind === 'coin')
             {
                 coinsRun += this.value;
                 coins += this.value;
-                playPickupSound(sounds.coin);
+                playPickupSound(sounds.coin, this.pos);
             }
             this.destroy();
         }
@@ -1416,7 +1418,7 @@ function spawnBoss(def)
     const pos = player.pos.add(vec2().setAngle(rand(2 * PI), 22));
     const boss = new Enemy(pos, synth, null, def);
     activeBoss = boss;
-    if (sounds.bossSpawn && sounds.bossSpawn.play) sounds.bossSpawn.play();
+    if (sounds.bossSpawn && sounds.bossSpawn.play) sounds.bossSpawn.play(boss.pos);
     if (typeof showMenuToast === 'function')
         showMenuToast({icon: '⚠️', title: 'BOSS', text: def.name,
                        duration: 3, position: 'top-right'});
@@ -1499,12 +1501,12 @@ let isPlaying = false;  // false on title / hero-select; true during a run
 // has fired by the time anything calls .play().
 const sounds = {};
 let _lastPickupSoundT = 0;
-function playPickupSound(s)
+function playPickupSound(s, pos)
 {
     // throttle so a magnet pulling 50 gems doesn't become 50 simultaneous tones
     if (time - _lastPickupSoundT < .04) return;
     _lastPickupSoundT = time;
-    if (s && s.play) s.play();
+    if (s && s.play) s.play(pos);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
