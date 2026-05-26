@@ -202,12 +202,35 @@ class Chest extends EngineObject
 
     open()
     {
-        // grant 3 random upgrades like a triple level-up
-        for (let i = 0; i < 3; ++i)
+        // evolution check first — if any owned weapon meets its recipe,
+        // evolve it (this is the only way to get evolved weapons)
+        const evolution = findAvailableEvolution();
+        if (evolution)
         {
-            const choices = buildUpgradeChoices();
-            if (!choices.length) break;
-            choices[randInt(choices.length)].apply();
+            const idx = player.weapons.indexOf(evolution.weapon);
+            const oldName = evolution.weapon.name;
+            player.weapons[idx] = evolution.evo.ctor();
+            if (typeof showMenuToast === 'function')
+            {
+                showMenuToast({icon: evolution.evo.emoji, title: 'EVOLVED!',
+                    text: oldName + ' → ' + evolution.evo.name,
+                    duration: 4});
+            }
+        }
+        else
+        {
+            // fallback — grant 3 random upgrades like a triple level-up
+            for (let i = 0; i < 3; ++i)
+            {
+                const choices = buildUpgradeChoices();
+                if (!choices.length) break;
+                choices[randInt(choices.length)].apply();
+            }
+            if (typeof showMenuToast === 'function')
+            {
+                showMenuToast({icon: '🎁', title: 'Chest!',
+                               text: '+3 upgrades', duration: 2.5});
+            }
         }
         // fireworks burst — radial chainFlashes for the reward moment
         for (let i = 0; i < 16; ++i)
@@ -215,11 +238,6 @@ class Chest extends EngineObject
             const a = i * 2 * PI / 16;
             const tip = this.pos.add(vec2().setAngle(a, 3));
             chainFlashes.push({a: this.pos.copy(), b: tip, t: time + .5});
-        }
-        if (typeof showMenuToast === 'function')
-        {
-            showMenuToast({icon: '🎁', title: 'Chest!',
-                           text: '+3 upgrades', duration: 2.5});
         }
     }
 
@@ -805,6 +823,196 @@ class FireZone extends EngineObject
                  0, false,
                  new Color(.35, .12, 0, .35 * fade));
     }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// EVOLVED WEAPONS — unlocked via chest when base weapon is max-level AND the
+// matching passive is owned. Each evolution replaces the base weapon entirely
+// with a stronger / behaviorally-different variant. Already max-level so
+// levelUp() is a no-op and they don't show up in the level-up pool.
+
+class SpicyPizzaWeapon
+{
+    constructor()
+    {
+        this.level = 5; this.evolved = true; this.name = 'Spicy Pizza';
+        this.cooldown = 0; this.facing = vec2(1, 0);
+    }
+    levelUp() {}   // already maxed
+    damage() { return 14; }
+
+    update()
+    {
+        if (player.velocity.length() > .005)
+            this.facing = player.velocity.normalize();
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = .9 / player.cooldownMult;
+
+        // wider, denser fan that burns on hit
+        const slices = 7, spread = .55;
+        const baseAng = this.facing.angle();
+        const dmg = this.damage() * player.dmgMult;
+        const speed = 13 * player.projSpeedMult;
+        for (let i = 0; i < slices; ++i)
+        {
+            const t = i / (slices - 1);
+            const ang = baseAng + lerp(t, -spread, spread);
+            const dir = vec2().setAngle(ang, 1);
+            const proj = new Projectile(player.pos.copy(), dir, speed, dmg,
+                1.8, sprites.pizza, true,
+                e => {
+                    e.burnTimer = 1.5;
+                    if (6 > e.burnDps) e.burnDps = 6;
+                });
+            proj.angularVelocity = 14;
+        }
+    }
+}
+
+class StarStormWeapon
+{
+    constructor()
+    {
+        this.level = 5; this.evolved = true; this.name = 'Star Storm';
+        this.angle = 0; this.hitMap = new Map();
+    }
+    levelUp() {}
+    damage() { return 8; }
+
+    update()
+    {
+        this.angle += 6 * player.cooldownMult / 60;
+        const radius = 4 * player.areaMult;
+        const starSize = 1.1 * player.areaMult;
+        const dmg = this.damage() * player.dmgMult;
+        const now = time;
+        for (const [e, t] of this.hitMap)
+            if (!e.parent && (e.destroyed || t < now - 5)) this.hitMap.delete(e);
+
+        const orbits = 7;
+        for (let i = 0; i < orbits; ++i)
+        {
+            const a = this.angle + i * 2 * PI / orbits;
+            const pos = player.pos.add(vec2().setAngle(a, radius));
+            drawTile(pos, vec2(starSize), sprites.star, WHITE, a + time);
+            for (const e of enemies)
+            {
+                if (!isOverlapping(pos, vec2(starSize), e.pos, e.size)) continue;
+                const next = this.hitMap.get(e) || 0;
+                if (now < next) continue;
+                e.takeDamage(dmg);
+                this.hitMap.set(e, now + .35);
+            }
+        }
+    }
+}
+
+class ThunderstormWeapon
+{
+    constructor()
+    {
+        this.level = 5; this.evolved = true; this.name = 'Thunderstorm';
+        this.cooldown = 0;
+    }
+    levelUp() {}
+    damage() { return 9; }
+
+    update()
+    {
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        this.cooldown = .5 / player.cooldownMult;
+
+        // strike up to 5 random enemies in a wide radius — no chain, all
+        // simultaneous, like the screen got hit by a sudden storm
+        const range = 14 * player.areaMult;
+        const candidates = enemies.filter(e => e.pos.distance(player.pos) < range);
+        const dmg = this.damage() * player.dmgMult;
+        const strikes = min(5, candidates.length);
+        for (let i = 0; i < strikes; ++i)
+        {
+            const idx = randInt(candidates.length);
+            const target = candidates[idx];
+            candidates.splice(idx, 1);
+            target.takeDamage(dmg);
+            chainFlashes.push({a: player.pos.copy(), b: target.pos.copy(),
+                               t: time + .2});
+        }
+    }
+}
+
+class BlizzardWeapon
+{
+    constructor()
+    {
+        this.level = 5; this.evolved = true; this.name = 'Blizzard';
+        this.cooldown = 0; this.auraTick = 0;
+    }
+    levelUp() {}
+    damage() { return 4; }
+
+    update()
+    {
+        const auraRadius = 6 * player.areaMult;
+        // continuous freeze aura — re-stamp frozenTimer on enemies in range
+        for (const e of enemies)
+        {
+            if (e.pos.distance(player.pos) < auraRadius)
+            {
+                e.frozenTimer = .3;
+            }
+        }
+        // periodic ice burst damages everything in the aura
+        this.cooldown -= 1 / 60;
+        if (this.cooldown <= 0)
+        {
+            this.cooldown = 1.0 / player.cooldownMult;
+            const dmg = this.damage() * player.dmgMult;
+            for (const e of enemies)
+            {
+                if (e.pos.distance(player.pos) < auraRadius)
+                    e.takeDamage(dmg);
+            }
+        }
+        // visual: ring of small ice cubes drifting around the player
+        const ringSize = .6 * player.areaMult;
+        const cubes = 8;
+        for (let i = 0; i < cubes; ++i)
+        {
+            const a = time * .8 + i * 2 * PI / cubes;
+            const pos = player.pos.add(vec2().setAngle(a, auraRadius * .9));
+            drawTile(pos, vec2(ringSize), sprites.ice,
+                     new Color(.7, .9, 1, .8), a);
+        }
+    }
+}
+
+const EVOLUTIONS = {
+    PizzaToss:      {passive: 'Flex',      name: 'Spicy Pizza',  emoji: '🌶️',
+                     ctor: () => new SpicyPizzaWeapon()},
+    OrbitingStar:   {passive: 'Magnifier', name: 'Star Storm',   emoji: '🌠',
+                     ctor: () => new StarStormWeapon()},
+    ChainLightning: {passive: 'Stopwatch', name: 'Thunderstorm', emoji: '🌩️',
+                     ctor: () => new ThunderstormWeapon()},
+    IceCube:        {passive: 'Stopwatch', name: 'Blizzard',     emoji: '❄️',
+                     ctor: () => new BlizzardWeapon()},
+};
+
+function findAvailableEvolution()
+{
+    for (const w of player.weapons)
+    {
+        if (w.evolved) continue;
+        if (w.level < 5) continue;
+        const baseKey = w.constructor.name.replace(/Weapon$/, '');
+        const evo = EVOLUTIONS[baseKey];
+        if (!evo) continue;
+        const hasPassive = player.passives.some(p => p.name === evo.passive);
+        if (!hasPassive) continue;
+        return {weapon: w, evo};
+    }
+    return null;
 }
 
 class Bomb extends EngineObject
