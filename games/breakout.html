@@ -231,11 +231,20 @@ function powerupColor(type)
     }
 }
 
+const POWERUP_EMOJI = {
+    W: '🏓', // Wide paddle
+    M: '🔱', // Multi-ball
+    T: '🧲', // Sticky
+    L: '🔫', // Laser
+    F: '🔥', // Fireball
+    S: '🐌', // Slow
+    '1': '❤️', // 1UP
+};
+
 function drawPowerLetter(pos, type, scale = 1)
 {
-    const text = type === '1' ? '1UP' : type;
-    const size = (type === '1' ? .5 : .8) * scale;
-    drawText(text, pos, size, hsl(0, 0, 1), .25, hsl(0, 0, 0), 'center');
+    const text = POWERUP_EMOJI[type] || type;
+    drawText(text, pos, .9 * scale, hsl(0, 0, 1), 0, undefined, 'center');
 }
 
 // Brightness multiplier on a Color. amount > 1 lightens, < 1 darkens.
@@ -686,7 +695,7 @@ async function gameInit()
         items: [
             {type:'text', text:'A LittleJS breakout.\n\nMove the paddle with the mouse or A/D. ' +
                 'Click or Space to launch, fire lasers, and release sticky balls.\n\n' +
-                'Powerups: W=Wide M=Multi T=Sticky L=Laser F=Fire S=Slow 1UP=Life.'},
+                'Powerups: 🏓 Wide · 🔱 Multi · 🧲 Sticky · 🔫 Laser · 🔥 Fire · 🐌 Slow · ❤️ 1UP.'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
         ],
