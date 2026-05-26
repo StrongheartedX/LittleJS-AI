@@ -174,6 +174,75 @@ class Enemy extends EngineObject
     }
 }
 
+class Projectile extends EngineObject
+{
+    constructor(pos, dir, speed, damage, lifetime, sprite, piercing = false)
+    {
+        super(pos, vec2(.6), sprite);
+        this.velocity = dir.normalize(speed / 60);
+        this.damage   = damage;
+        this.lifetime = lifetime;
+        this.piercing = piercing;
+        this.hitSet   = new Set();
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.setCollision(false, false, false, false);
+    }
+
+    update()
+    {
+        super.update();
+
+        this.lifetime -= 1 / 60;
+        if (this.lifetime <= 0) { this.destroy(); return; }
+
+        for (const e of enemies)
+        {
+            if (this.hitSet.has(e)) continue;
+            if (isOverlapping(this.pos, this.size, e.pos, e.size))
+            {
+                e.takeDamage(this.damage);
+                this.hitSet.add(e);
+                if (!this.piercing) { this.destroy(); return; }
+            }
+        }
+    }
+}
+
+function nearestEnemy(fromPos, maxDist)
+{
+    let best = null, bestD = maxDist;
+    for (const e of enemies)
+    {
+        const d = fromPos.distance(e.pos);
+        if (d < bestD) { best = e; bestD = d; }
+    }
+    return best;
+}
+
+class FireballWeapon
+{
+    constructor() { this.level = 1; this.cooldown = 0; }
+    get name() { return 'Fireball'; }
+    get emoji() { return '🔥'; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    damage()  { return 2 + this.level; }
+
+    update()
+    {
+        this.cooldown -= 1 / 60;
+        if (this.cooldown > 0) return;
+        const target = nearestEnemy(player.pos, 12);
+        if (!target) return;
+        const dir = target.pos.subtract(player.pos);
+        new Projectile(player.pos.copy(), dir, 12, this.damage(),
+                       1.2, sprites.fireball);
+        this.cooldown = 1.0 / this.level;
+    }
+}
+
 const SPAWN_RADIUS = 20;
 const ENEMY_CAP    = 150;
 
@@ -265,12 +334,14 @@ async function gameInit()
     });
 
     player = new Player();
+    player.weapons = [new FireballWeapon()];
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
     updateSpawner();
+    for (const w of player.weapons) w.update();
 }
 function gameUpdatePost()
 {
