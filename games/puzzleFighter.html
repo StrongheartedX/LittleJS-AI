@@ -448,6 +448,45 @@ function computeDamage(result, opts)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Counter gem drop algorithm
+
+const COL_FILL_ORDER = [0, 1, 2, 4, 5, 3];
+
+function columnHeight(grid, col)
+{
+    let h = 0;
+    for (let y = BOARD_H - 1; y >= 0; y--)
+        if (grid[col][y]) { h = y + 1; break; }
+    return h;
+}
+
+function dropCounterGems(grid, count, pattern, startCountdown)
+{
+    if (count <= 0) return 0;
+    const groups = Math.ceil(count / 6);
+    const patternRows = pattern.length;
+    let placed = 0;
+
+    for (let g = 0; g < groups; g++)
+    {
+        const row = (g) % patternRows;
+        let inGroup = 0;
+        for (const col of COL_FILL_ORDER)
+        {
+            if (inGroup >= 6) break;
+            if (placed >= count) return placed;
+            const h = columnHeight(grid, col);
+            if (h >= BOARD_H) continue;
+            const color = pattern[row][col];
+            grid[col][h] = gemCounter(color, startCountdown);
+            placed++;
+            inGroup++;
+        }
+    }
+    return placed;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Placeholder Board
 
 class Board
@@ -823,6 +862,48 @@ function runUnitTests()
             { chainWave: 1, allClear: true, characterMultiplier: 1 }
         );
         assert(d === 12, 'all clear: 5+1+6 = 12 (got ' + d + ')');
+    }
+
+    // --- Drop algorithm tests ---
+    {
+        // Ken X' pattern (row 0 = bottom = first dropped):
+        // row 0: RRRRRR
+        // row 1: GGGGGG
+        // row 2: BBBBBB
+        // row 3: YYYYYY
+        const kenPattern = [
+            [COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_R],
+            [COLOR_G, COLOR_G, COLOR_G, COLOR_G, COLOR_G, COLOR_G],
+            [COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_B],
+            [COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y],
+        ];
+
+        // Attack 5: cols 1,2,3,5,6 (indices 0,1,2,4,5) get 1 each; col 4 (index 3) skipped
+        let g = emptyGrid();
+        dropCounterGems(g, 5, kenPattern, 5);
+        assert(g[0][0] && g[0][0].color === COLOR_R, 'drop: col 1 gets red');
+        assert(g[1][0] && g[2][0] && g[4][0] && g[5][0], 'drop: cols 2,3,5,6 also filled');
+        assert(g[3][0] === null, 'drop: col 4 skipped at attack-5');
+
+        // Attack 6: col 4 also gets one
+        g = emptyGrid();
+        dropCounterGems(g, 6, kenPattern, 5);
+        assert(g[3][0] && g[3][0].color === COLOR_R, 'drop: attack-6 fills col 4 last');
+
+        // Attack 12: full row 1 + full row 2
+        g = emptyGrid();
+        dropCounterGems(g, 12, kenPattern, 5);
+        for (let x = 0; x < 6; x++) assert(g[x][0] && g[x][0].color === COLOR_R, 'drop: row 1 all R (col '+x+')');
+        for (let x = 0; x < 6; x++) assert(g[x][1] && g[x][1].color === COLOR_G, 'drop: row 2 all G (col '+x+')');
+
+        // Countdown value
+        assert(g[0][0].countdown === 5, 'drop: countdown starts at 5');
+
+        // Full column → discard
+        g = emptyGrid();
+        for (let y = 0; y < BOARD_H; y++) g[0][y] = gemRegular(COLOR_B);  // col 0 full
+        const placed = dropCounterGems(g, 6, kenPattern, 5);
+        assert(placed === 5, 'drop: 6 gems but col 0 full → 5 placed (1 discarded)');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
