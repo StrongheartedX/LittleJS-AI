@@ -32,7 +32,11 @@ tilesPixelated = false;
 const fallTime = .2;
 const swapTime = .15;
 const cameraOffset = vec2(0, -.5);
-const arenaSize = vec2(12.5, 8); // grid (12x6) + space for score line below
+
+// === Board dimensions === change gridSize to resize the playable board (cols × rows).
+const gridSize = vec2(8, 8);
+const arenaSize = vec2(gridSize.x + .5, gridSize.y + 2); // playable grid + score-line padding
+
 const backgroundColor = hsl(0, 0, .12);
 const minMatchCount = 3;
 const highScoreKey = 'match3BestScore';
@@ -193,7 +197,7 @@ async function gameInit()
     gemSprites[5] = drawToTexture(5, paintBolt,     'white lightning bolt with black outline');
     gemSprites[6] = drawToTexture(6, paintPlus,     'white plus / cross shape with black outline');
 
-    levelSize = vec2(12, 6);
+    levelSize = gridSize.copy();
     cameraPos = levelSize.scale(.5).add(cameraOffset);
     fitCamera();
     gravity = vec2(0, -.004);
@@ -509,8 +513,10 @@ function gameRender()
 function gameRenderPost()
 {
     if (!isPlaying) return;
-    drawText('Score: ' + score,    cameraPos.add(vec2(-3, -3.1)), .9, hsl(), .1);
-    drawText('Best: '  + bestScore, cameraPos.add(vec2( 3, -3.1)), .9, hsl(), .1);
+    // Centered below the board, in the score-line padding (arenaSize adds
+    // 2 world units below the grid). Anchored to the board so it stays in
+    // the right place if gridSize changes.
+    drawText('Score: ' + score, vec2(gridSize.x/2, -.9), 1.1, hsl(), .1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
