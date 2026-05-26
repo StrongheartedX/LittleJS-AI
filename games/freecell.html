@@ -317,6 +317,32 @@ function stackUnderPoint(worldPoint)
     return null;
 }
 
+function isMoveLegal(target)
+{
+    if (!target || handStack.isEmpty()) return false;
+    const bottom = handStack.bottomCard();
+
+    // Foundation→anywhere: only legal target is another empty foundation.
+    if (handStack.type === StackType.Foundation)
+        return target.type === StackType.Foundation && target.isEmpty();
+
+    if (target.type === StackType.FreeCell)
+        return handStack.cards.length === 1 && target.isEmpty();
+
+    if (target.type === StackType.Foundation)
+    {
+        if (handStack.cards.length !== 1) return false;
+        const top = target.topCard();
+        if (!top) return bottom.value === 0;                                // Ace on empty
+        return top.suit === bottom.suit && top.value + 1 === bottom.value;
+    }
+
+    // target is Cascade
+    if (target.isEmpty()) return true;
+    const top = target.topCard();
+    return (top.suit % 2) !== (bottom.suit % 2) && top.value === bottom.value + 1;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
@@ -347,10 +373,25 @@ function gameUpdate()
             handStack.cards[i].pos = head.add(vec2(0, -CARD_PITCH_Y * i));
     }
 
-    // Release — Task 6: always snap back.
     if (mouseWasReleased(0) && !handStack.isEmpty())
     {
-        handStack.moveManyToStack(pickupOrigin);
+        // Use the top-of-hand card center as the hit point for target search.
+        const head = mousePos.add(mouseHoldPos);
+        let target = null, bestArea = 0;
+        for (const s of cardStacks)
+        {
+            if (s === pickupOrigin || !isMoveLegal(s)) continue;
+            const targetPos = s.topCard() ? s.topCard().pos : s.pos;
+            // Overlap area: width and height of intersection rectangle.
+            const dx = CARD_SIZE.x - abs(head.x - targetPos.x);
+            const dy = CARD_SIZE.y - abs(head.y - targetPos.y);
+            if (dx > 0 && dy > 0 && dx * dy > bestArea)
+            {
+                bestArea = dx * dy;
+                target = s;
+            }
+        }
+        handStack.moveManyToStack(target || pickupOrigin);
         pickupOrigin = null;
     }
 }
