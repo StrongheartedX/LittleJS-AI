@@ -396,23 +396,23 @@ function damageBrick(brick)
     new ParticleEmitter(
         brick.pos, 0,                    // pos, angle
         brick.size.scale(.8),            // emitSize (rect)
-        .1,                              // emitTime (one short burst)
-        140,                             // emitRate
+        .05,                              // emitTime (one short burst)
+        500,                             // emitRate
         PI,                              // emitConeAngle (full)
         undefined,                       // tileInfo
         c, c,                            // colorStartA/B
         new Color(c.r, c.g, c.b, 0),     // colorEndA (fade alpha)
         new Color(c.r, c.g, c.b, 0),     // colorEndB
         .6,                              // particleTime
-        .15, .05,                        // sizeStart, sizeEnd
-        2,                               // speed
+        .3, .05,                        // sizeStart, sizeEnd
+        .2,                               // speed
         0,                               // angleSpeed
         .92,                             // damping
         1,                               // angleDamping
         .1,                              // gravityScale (slight downward)
         PI,                              // particleConeAngle
         .1,                              // fadeRate
-        .3,                              // randomness
+        .5,                              // randomness
         false,                           // collideTiles
         true,                            // additive
     );
