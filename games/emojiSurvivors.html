@@ -23,6 +23,14 @@ cameraPos = vec2(0, 0);
 cameraScale = 40;
 canvasMaxSize = vec2(2048, 2048);
 
+// On-screen analog gamepad for touch devices. The engine merges this into
+// the same gamepadStick(0) API the rest of the code already reads, so
+// movement just works on phones with no gameplay-side branching.
+touchGamepadEnable = true;
+touchGamepadAnalog = true;
+touchGamepadButtonCount = 0;
+touchGamepadAlpha = .25;
+
 ///////////////////////////////////////////////////////////////////////////////
 // EMOJI SURVIVORS
 //
@@ -529,10 +537,18 @@ class Projectile extends EngineObject
         this.gravityScale = 0;
         this.angle = 0;
         this.setCollision(false, false, false, false);
+        // ring buffer of recent (pos, angle) for the motion trail
+        this.trail = [];
+        this.maxTrail = 5;
     }
 
     update()
     {
+        // Snapshot previous frame's pose BEFORE super.update moves it,
+        // so the oldest ghost sits where we used to be.
+        this.trail.push({pos: this.pos.copy(), angle: this.angle});
+        if (this.trail.length > this.maxTrail) this.trail.shift();
+
         super.update();
 
         this.renderOrder = -this.pos.y;
@@ -551,6 +567,22 @@ class Projectile extends EngineObject
                 if (!this.piercing) { this.destroy(); return; }
             }
         }
+    }
+
+    render()
+    {
+        // Draw ghost copies of recent positions, oldest (lowest alpha) first,
+        // then the current position at full alpha last. Gives a motion trail
+        // without needing a particle system.
+        const n = this.trail.length;
+        for (let i = 0; i < n; ++i)
+        {
+            const g = this.trail[i];
+            const alpha = (i + 1) / (n + 2) * .55;
+            drawTile(g.pos, this.size, this.tileInfo,
+                     new Color(1, 1, 1, alpha), g.angle);
+        }
+        drawTile(this.pos, this.size, this.tileInfo, WHITE, this.angle);
     }
 }
 
@@ -1573,6 +1605,8 @@ function startRun(hero)
 
     isPlaying = true;
     hideAllMenus();
+    const hud = getToolbar('hud');
+    if (hud) hud.show();
 }
 
 // AI auto-player — toggle with the T key. Useful for balance testing.
@@ -1840,9 +1874,43 @@ async function gameInit()
                 'with the right combo of weapon-at-max-level + matching passive to ' +
                 'evolve a weapon.\n\n' +
                 'Survive until 15:00 and kill the ☠️ Reaper to win.\n\n' +
-                'Press T any time to toggle the AI auto-player.'},
+                'Press Esc to pause. T any time to toggle the AI auto-player.'},
             {type: 'separator'},
             {type: 'button', label: 'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    // Pause menu — surfaced by Esc / gamepad Start via bindPauseKey().
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        dismissable: true,
+        initialItemId: 'resume',
+        items: [
+            {type: 'button', id: 'resume', label: 'RESUME',
+                onClick: () => hideMenu('pause')},
+            {type: 'separator'},
+            {type: 'button', label: 'TITLE',
+                onClick: () => { hideMenu('pause'); goToTitle(); }},
+        ],
+    });
+
+    // HUD toolbar — top-right corner. Pause button + fullscreen, hidden
+    // outside of an active run via setPlaying / show/hide on startRun.
+    createToolbar({
+        id: 'hud',
+        anchor: 'top-right',
+        direction: 'horizontal',
+        items: [
+            {id: 'pause',
+                label: '⏸',
+                title: 'Pause (Esc)',
+                onClick: () => { if (isPlaying) showMenu('pause'); }},
+            {id: 'fullscreen',
+                label: '⛶',
+                title: 'Fullscreen',
+                onClick: toggleFullscreen,
+                hideOnTouch: true},
         ],
     });
 
@@ -2030,6 +2098,8 @@ function goToTitle()
     gameOverFrameCount = 0;
     elapsedTime = 0;
     isPlaying = false;
+    const hud = getToolbar('hud');
+    if (hud) hud.hide();
 
     // Reset the title backdrop to the default wizard hero.
     currentHero = HEROES[0];
@@ -2092,6 +2162,13 @@ function showVictoryMenu()
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
+    // Esc / gamepad Start surfaces the pause menu when actively playing.
+    // Per the menus.js helper docs, call this every frame (per-frame poll)
+    // and early-return when it fires — menus.js auto-pauses via the
+    // setMenuVisibilityCallback wiring already in place.
+    if (bindPauseKey({when: () => isPlaying && !gameOver && !runVictory}))
+        return;
+
     elapsedTime += 1 / 60;
     if (player.pendingLevelUps > 0)
     {
@@ -2234,8 +2311,8 @@ function drawHUD()
     const pad = 20;
     drawBossHpBar();
 
-    // HP bar — top-left
-    const hpW = 240, hpH = 28;
+    // TOP-LEFT stack: HP bar, then timer / kills / coins underneath.
+    const hpW = 260, hpH = 28;
     const hpX = pad + hpW / 2, hpY = pad + hpH / 2;
     drawRect(vec2(hpX, hpY), vec2(hpW, hpH), new Color(0,0,0,.6), 0, false, true);
     const hpFrac = max(0, player.hp / player.maxHp);
@@ -2244,39 +2321,42 @@ function drawHUD()
     drawTextScreen('❤ ' + max(0, Math.ceil(player.hp)) + ' / ' + player.maxHp,
                    vec2(hpX, hpY + 2), 18, WHITE, 3, BLACK);
 
-    // XP bar — top-center
-    const xpW = cs.x * .4, xpH = 16;
-    const xpX = cs.x / 2, xpY = pad + xpH / 2;
-    drawRect(vec2(xpX, xpY), vec2(xpW, xpH), new Color(0,0,0,.6), 0, false, true);
-    const xpFrac = player.xp / xpToNext(player.level);
-    drawRect(vec2(xpX - xpW/2 + xpW*xpFrac/2, xpY), vec2(xpW * xpFrac, xpH),
-             new Color(.2, .7, 1), 0, false, true);
-    drawTextScreen('Lv ' + player.level, vec2(xpX, xpY + xpH + 14),
-                   18, WHITE, 3, BLACK);
-
-    // Timer & kills — top-right. Timer goes red in the final 60s, and a
-    // pulsing "REAPER INCOMING" warning replaces the timer in the final 10s.
+    // Stats stack under HP bar — timer (turns red near end, REAPER countdown
+    // in last 10s), then kills, then coins.
     const remaining = max(0, runDuration - elapsedTime);
     const timerColor = remaining < 60 ? new Color(1, .3, .3) : WHITE;
+    const rowY = pad + hpH + 22;
     if (remaining > 0 && remaining < 10 && !reaperSpawned)
     {
-        const flash = Math.sin(time * 12) > 0;
+        const flash = sin(time * 12) > 0;
         drawTextScreen('☠️ REAPER ' + Math.ceil(remaining),
-                       vec2(cs.x - pad, pad + 14), 24,
+                       vec2(pad, rowY), 22,
                        flash ? new Color(1, .2, .2) : new Color(1, .7, .7),
-                       3, BLACK, 'right');
+                       3, BLACK, 'left');
     }
     else
     {
         drawTextScreen('⏱ ' + formatTime(elapsedTime) + ' / ' +
                        formatTime(runDuration),
-                       vec2(cs.x - pad, pad + 14), 22, timerColor, 3, BLACK, 'right');
+                       vec2(pad, rowY), 20, timerColor, 3, BLACK, 'left');
     }
     drawTextScreen('💀 ' + killCount,
-                   vec2(cs.x - pad, pad + 44), 22, WHITE, 3, BLACK, 'right');
+                   vec2(pad, rowY + 26), 20, WHITE, 3, BLACK, 'left');
     drawTextScreen('💰 ' + coinsRun,
-                   vec2(cs.x - pad, pad + 74), 22,
-                   new Color(1, .9, .35), 3, BLACK, 'right');
+                   vec2(pad, rowY + 52), 20,
+                   new Color(1, .9, .35), 3, BLACK, 'left');
+
+    // BOTTOM-CENTER: XP bar with level label above it. Symmetrically balances
+    // the top-left stack and keeps the right side free for the toolbar.
+    const xpW = cs.x * .5, xpH = 18;
+    const xpX = cs.x / 2, xpY = cs.y - pad - xpH / 2;
+    drawRect(vec2(xpX, xpY), vec2(xpW, xpH), new Color(0,0,0,.6), 0, false, true);
+    const xpFrac = player.xp / xpToNext(player.level);
+    drawRect(vec2(xpX - xpW/2 + xpW*xpFrac/2, xpY), vec2(xpW * xpFrac, xpH),
+             new Color(.2, .7, 1), 0, false, true);
+    drawTextScreen('Lv ' + player.level,
+                   vec2(xpX, xpY - xpH - 4),
+                   20, WHITE, 3, BLACK);
 }
 
 function gameRenderPost()
