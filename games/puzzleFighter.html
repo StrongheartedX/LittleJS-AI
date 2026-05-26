@@ -4,889 +4,99 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.15"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
 
-// engine settings, do not remove
+// engine settings
 debugWatermark = false;
 showEngineVersion = false;
 paused = false;
-
 gravity = vec2(0, 0);
 cameraPos = vec2(0, 0);
-cameraScale = 48;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Puzzle Fighter-ish prototype
-// Rules:
-// - Normal gems can only merge into blocks if the result is a SOLID RECTANGLE.
-// - Blocks NEVER split/repartition. They either stay the same or merge into a larger rectangle.
-// - Crash gems never merge and detonate connected same-color regions.
+// Constants
 
-const W = 6;
-const H = 12;
-const boardBL = vec2(-8, -H/2);
-const boardSize = vec2(W, H);
-const boardCenter = boardBL.add(boardSize.scale(.5));
+const BOARD_W = 6;
+const BOARD_H_VISIBLE = 13;
+const BOARD_H = 15;            // 2 extra spawn rows above visible
+const SPAWN_COL = 3;           // 0-indexed; "4th column" in arcade terms
 
-// ONLY 4 colors: red, yellow, blue, green
+const COLOR_R = 0, COLOR_G = 1, COLOR_B = 2, COLOR_Y = 3;
 const GEM_COLORS = [
-    rgb(1, .2, .25),   // red
-    rgb(1, .9, .2),    // yellow
-    rgb(.2, .55, 1),   // blue
-    rgb(.15, .95, .4), // green
+    rgb(1, .2, .25),   // 0 R
+    rgb(.15, .95, .4), // 1 G
+    rgb(.2, .55, 1),   // 2 B
+    rgb(1, .9, .2),    // 3 Y
 ];
 
-let grid;                 // [x][y], y=0 bottom
-let active;               // {x,y,rot,a,b}
-let nextPair;
-let fallTimer;
-let fallInterval;
-let lockTimer;
-let score;
-let chain;
-let gameOver;
-let nextBlockId;
+///////////////////////////////////////////////////////////////////////////////
+// Gem factories
 
-let sMove, sRotate, sDrop, sLock, sClear, sCrash, sGameOver;
+let _nextPowerGemId = 1;
+function nextPowerGemId() { return _nextPowerGemId++; }
 
-function gem(colorIndex, crash=false)
-{ return {c: colorIndex, crash, block: -1}; }
-
-function resetGame()
-{
-    grid = [...Array(W)].map(()=> Array(H).fill(null));
-    active = null;
-    nextPair = makePair();
-    fallTimer = 0;
-    fallInterval = .5;
-    lockTimer = 0;
-    score = 0;
-    chain = 0;
-    gameOver = false;
-    nextBlockId = 1;
-    spawnPair();
-}
-
-function makePair()
-{
-    const c1 = randInt(GEM_COLORS.length);
-    const c2 = randInt(GEM_COLORS.length);
-    const crash1 = randBool(.12);
-    const crash2 = randBool(.12);
-    return { a: gem(c1, crash1), b: gem(c2, crash2) };
-}
-
-function spawnPair()
-{
-    if (gameOver) return;
-
-    active = {
-        x: Math.floor(W/2),
-        y: H,
-        rot: 0,
-        a: nextPair.a,
-        b: nextPair.b,
-    };
-    nextPair = makePair();
-
-    if (!canPlaceActive(active.x, active.y, active.rot))
-    {
-        gameOver = true;
-        sGameOver && sGameOver.play();
-    }
-}
-
-function activeCells(x=active.x, y=active.y, rot=active.rot)
-{
-    // gem A at (x,y), gem B offset based on rot
-    const o = rot==0 ? vec2(0,1) : rot==1 ? vec2(1,0) : rot==2 ? vec2(0,-1) : vec2(-1,0);
-    return [
-        {x, y, g:active.a},
-        {x:x+o.x, y:y+o.y, g:active.b},
-    ];
-}
-
-function inBounds(x,y)
-{ return x>=0 && x<W && y>=0 && y<H; }
-
-function canPlaceActive(x,y,rot)
-{
-    const cells = activeCells(x,y,rot);
-    for (const p of cells)
-    {
-        if (p.x < 0 || p.x >= W) return false;
-        if (p.y < 0) return false;
-        if (p.y < H && grid[p.x][p.y]) return false;
-    }
-    return true;
-}
-
-function tryMove(dx,dy)
-{
-    if (!active || gameOver) return false;
-    const nx = active.x + dx;
-    const ny = active.y + dy;
-    if (canPlaceActive(nx, ny, active.rot))
-    {
-        active.x = nx;
-        active.y = ny;
-        return true;
-    }
-    return false;
-}
-
-function tryRotate(dir)
-{
-    if (!active || gameOver) return false;
-    const nr = (active.rot + dir + 4) % 4;
-
-    const kicks = [vec2(0,0), vec2(-1,0), vec2(1,0), vec2(0,1)];
-    for (const k of kicks)
-    {
-        if (canPlaceActive(active.x + k.x, active.y + k.y, nr))
-        {
-            active.x += k.x;
-            active.y += k.y;
-            active.rot = nr;
-            return true;
-        }
-    }
-    return false;
-}
-
-function hardDrop()
-{
-    if (!active || gameOver) return;
-    let dropped = 0;
-    while (tryMove(0,-1)) dropped++;
-    if (dropped)
-    {
-        score += dropped;
-        sDrop && sDrop.play();
-    }
-    lockActive();
-}
-
-function lockActive()
-{
-    if (!active) return;
-    const cells = activeCells();
-
-    const placed = [];
-    for (const p of cells)
-    {
-        if (p.y >= H)
-        {
-            gameOver = true;
-            sGameOver && sGameOver.play();
-            active = null;
-            return;
-        }
-        const g = gem(p.g.c, p.g.crash);
-        grid[p.x][p.y] = g;
-        placed.push([p.x,p.y]);
-    }
-
-    attachNewGems(placed);
-
-    active = null;
-    sLock && sLock.play();
-
-    resolveBoard();
-    spawnPair();
-}
+function gemRegular(color) { return { type:'regular', color, powerGemId:-1 }; }
+function gemCrash(color)   { return { type:'crash',   color }; }
+function gemCounter(color, countdown) { return { type:'counter', color, countdown }; }
+function gemDiamond()      { return { type:'diamond' }; }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Rectangle-only attachment (multi-block merge, no splitting)
+// Placeholder Board
 
-function attachNewGems(placed)
+class Board
 {
-    // Give any new normal gem a unique block id
-    for (const [x,y] of placed)
+    constructor()
     {
-        const g = grid[x][y];
-        if (!g || g.crash) continue;
-        if (g.block < 0) g.block = nextBlockId++;
-    }
-
-    // For each placed gem, consider the ENTIRE connected same-color normal region.
-    // If its bounding box is a SOLID rectangle, merge everything in that box.
-    let changed = true;
-    let guard = 64;
-    while (changed && guard--)
-    {
-        changed = false;
-        const visited = [...Array(W)].map(()=> Array(H).fill(false));
-
-        for (const [sx,sy] of placed)
-        {
-            const seed = inBounds(sx,sy) ? grid[sx][sy] : null;
-            if (!seed || seed.crash) continue;
-            if (visited[sx][sy]) continue;
-
-            const color = seed.c;
-            const stack = [[sx,sy]];
-            let minX =  1e9, minY =  1e9;
-            let maxX = -1e9, maxY = -1e9;
-            let count = 0;
-
-            while (stack.length)
-            {
-                const item = stack.pop();
-                const x = item[0];
-                const y = item[1];
-                if (!inBounds(x,y) || visited[x][y]) continue;
-                const g = grid[x][y];
-                if (!g || g.crash || g.c !== color) continue;
-
-                visited[x][y] = true;
-                count++;
-                minX = min(minX, x); minY = min(minY, y);
-                maxX = max(maxX, x); maxY = max(maxY, y);
-
-                stack.push([x+1,y]);
-                stack.push([x-1,y]);
-                stack.push([x,y+1]);
-                stack.push([x,y-1]);
-            }
-
-            if (count < 2) continue;
-
-            // Validate bbox filled and choose a stable id
-            let ok = true;
-            let chosenId = 1e9;
-            for (let x=minX; x<=maxX && ok; x++)
-            for (let y=minY; y<=maxY; y++)
-            {
-                const g = grid[x][y];
-                if (!g || g.crash || g.c !== color) { ok = false; break; }
-                if (g.block < 0) g.block = nextBlockId++;
-                chosenId = min(chosenId, g.block);
-            }
-            if (!ok) continue;
-
-            // Merge bbox into chosenId
-            let didChange = false;
-            for (let x=minX; x<=maxX; x++)
-            for (let y=minY; y<=maxY; y++)
-            {
-                const g = grid[x][y];
-                if (g.block !== chosenId)
-                {
-                    g.block = chosenId;
-                    didChange = true;
-                }
-            }
-            if (didChange) changed = true;
-        }
+        this.grid = [...Array(BOARD_W)].map(()=> Array(BOARD_H).fill(null));
     }
 }
 
-function mergeRectanglesGlobal()
-{
-    // After gravity/clears, new contacts can form rectangles.
-    // Merge any connected same-color normal region whose bbox is fully filled.
-    let changed = false;
-    const visited = [...Array(W)].map(()=> Array(H).fill(false));
-
-    for (let sx=0; sx<W; sx++)
-    for (let sy=0; sy<H; sy++)
-    {
-        const seed = grid[sx][sy];
-        if (!seed || seed.crash || visited[sx][sy]) continue;
-
-        const color = seed.c;
-        const stack = [[sx,sy]];
-        let minX =  1e9, minY =  1e9;
-        let maxX = -1e9, maxY = -1e9;
-        let count = 0;
-
-        while (stack.length)
-        {
-            const item = stack.pop();
-            const x = item[0];
-            const y = item[1];
-            if (!inBounds(x,y) || visited[x][y]) continue;
-            const g = grid[x][y];
-            if (!g || g.crash || g.c !== color) continue;
-
-            visited[x][y] = true;
-            count++;
-            minX = min(minX, x); minY = min(minY, y);
-            maxX = max(maxX, x); maxY = max(maxY, y);
-
-            stack.push([x+1,y]);
-            stack.push([x-1,y]);
-            stack.push([x,y+1]);
-            stack.push([x,y-1]);
-        }
-
-        if (count < 2) continue;
-
-        let ok = true;
-        let chosenId = 1e9;
-        for (let x=minX; x<=maxX && ok; x++)
-        for (let y=minY; y<=maxY; y++)
-        {
-            const g = grid[x][y];
-            if (!g || g.crash || g.c !== color) { ok = false; break; }
-            if (g.block < 0) g.block = nextBlockId++;
-            chosenId = min(chosenId, g.block);
-        }
-        if (!ok) continue;
-
-        for (let x=minX; x<=maxX; x++)
-        for (let y=minY; y<=maxY; y++)
-        {
-            const g = grid[x][y];
-            if (g.block !== chosenId)
-            {
-                g.block = chosenId;
-                changed = true;
-            }
-        }
-    }
-
-    return changed;
-}
+let p1Board, p2Board;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Crash clears + gravity
-
-function resolveBoard()
-{
-    chain = 0;
-    let didSomething = true;
-    while (didSomething)
-    {
-        didSomething = false;
-
-        if (mergeRectanglesGlobal())
-            didSomething = true;
-
-        const crashClears = collectCrashDetonations();
-        if (crashClears.length)
-        {
-            chain++;
-            clearCells(crashClears, true);
-            didSomething = true;
-        }
-
-        if (applyGravity())
-            didSomething = true;
-
-        if (mergeRectanglesGlobal())
-            didSomething = true;
-    }
-}
-
-function collectCrashDetonations()
-{
-    const marks = new Set();
-    const n = [[1,0],[-1,0],[0,1],[0,-1]];
-
-    for (let x=0; x<W; x++)
-    for (let y=0; y<H; y++)
-    {
-        const g = grid[x][y];
-        if (!g || !g.crash) continue;
-
-        const c = g.c;
-        let touching = false;
-        for (const dir of n)
-        {
-            const x2 = x + dir[0];
-            const y2 = y + dir[1];
-            if (inBounds(x2,y2) && grid[x2][y2] && grid[x2][y2].c === c)
-            { touching = true; break; }
-        }
-        if (!touching) continue;
-
-        // flood fill all connected of this color (ignores block boundaries)
-        const stack = [[x,y]];
-        const visited = new Set();
-        while (stack.length)
-        {
-            const item = stack.pop();
-            const cx = item[0];
-            const cy = item[1];
-            const key = cx + ',' + cy;
-            if (visited.has(key)) continue;
-            visited.add(key);
-
-            const gg = grid[cx][cy];
-            if (!gg || gg.c !== c) continue;
-            marks.add(key);
-
-            for (const dir of n)
-            {
-                const nx = cx + dir[0];
-                const ny = cy + dir[1];
-                if (inBounds(nx,ny)) stack.push([nx,ny]);
-            }
-        }
-    }
-
-    return [...marks].map(k=>k.split(',').map(v=>v|0));
-}
-
-function clearCells(list, crash)
-{
-    if (!list.length) return;
-
-    const base = crash ? 40 : 25;
-    score += base * list.length * max(1, chain);
-
-    for (const cell of list)
-    {
-        const x = cell[0];
-        const y = cell[1];
-        if (inBounds(x,y)) grid[x][y] = null;
-    }
-
-    (crash ? sCrash : sClear)?.play();
-}
-
-function buildComponents()
-{
-    // components:
-    // - each unique normal block id
-    // - each crash gem singleton
-
-    const compIndex = [...Array(W)].map(()=> Array(H).fill(-1));
-    const comps = [];
-    const blockToComp = new Map();
-
-    for (let x=0; x<W; x++)
-    for (let y=0; y<H; y++)
-    {
-        const g = grid[x][y];
-        if (!g) continue;
-
-        if (g.crash)
-        {
-            const id = comps.length;
-            comps.push({id, cells:[[x,y]]});
-            compIndex[x][y] = id;
-        }
-        else
-        {
-            if (g.block < 0) g.block = nextBlockId++;
-            let id = blockToComp.get(g.block);
-            if (id === undefined)
-            {
-                id = comps.length;
-                blockToComp.set(g.block, id);
-                comps.push({id, cells:[]});
-            }
-            comps[id].cells.push([x,y]);
-            compIndex[x][y] = id;
-        }
-    }
-
-    return {comps, compIndex};
-}
-
-function applyGravity()
-{
-    // Rigid gravity: components fall as a unit (blocks or single crash gems)
-    let moved = false;
-
-    while (true)
-    {
-        const built = buildComponents();
-        const comps = built.comps;
-        const compIndex = built.compIndex;
-        const fallSet = Array(comps.length).fill(false);
-
-        // Relaxation: a component can fall if everything below is empty or also falling
-        let changed = true;
-        while (changed)
-        {
-            changed = false;
-            for (const comp of comps)
-            {
-                if (!comp || fallSet[comp.id]) continue;
-
-                let ok = true;
-                for (const cell of comp.cells)
-                {
-                    const x = cell[0];
-                    const y = cell[1];
-                    if (y === 0) { ok = false; break; }
-
-                    const below = grid[x][y-1];
-                    if (!below) continue;
-
-                    const belowId = compIndex[x][y-1];
-                    if (belowId === comp.id) continue;
-                    if (belowId >= 0 && fallSet[belowId]) continue;
-
-                    ok = false; break;
-                }
-
-                if (ok)
-                {
-                    fallSet[comp.id] = true;
-                    changed = true;
-                }
-            }
-        }
-
-        let any = false;
-        for (let i=0; i<fallSet.length; i++) if (fallSet[i]) { any = true; break; }
-        if (!any) break;
-
-        const moves = [];
-        for (const comp of comps)
-        {
-            if (!comp || !fallSet[comp.id]) continue;
-            for (const cell of comp.cells)
-            {
-                const x = cell[0];
-                const y = cell[1];
-                moves.push({x,y,g:grid[x][y]});
-            }
-        }
-
-        // clear
-        for (const m of moves) grid[m.x][m.y] = null;
-
-        // place down
-        for (const m of moves) grid[m.x][m.y-1] = m.g;
-
-        moved = true;
-    }
-
-    return moved;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Rendering
-
-function getCellWorldPos(x,y)
-{
-    return boardBL.add(vec2(x + .5, y + .5));
-}
-
-function drawGemAt(pos, g, isActive=false)
-{
-    const c = GEM_COLORS[g.c];
-
-    if (!g.crash)
-    {
-        // normal gem: square + highlight
-        drawRect(pos, vec2(.92, .92), c);
-        drawRect(pos.add(vec2(-.18, .18)), vec2(.22, .22), rgb(1,1,1,.25));
-        if (isActive)
-            drawRect(pos, vec2(1.02, 1.02), rgb(1,1,1,.18));
-        return;
-    }
-
-    // crash gem: shiny circle with sparkle accent
-    drawCircle(pos, 1.20, rgb(1,1,1,.06));
-    drawCircle(pos, 1.06, rgb(1,1,1,.06));
-
-    drawCircle(pos, .92, c);
-    drawCircle(pos.add(vec2(.08,-.10)), .78, rgb(0,0,0,.14));
-
-    drawCircle(pos.add(vec2(-.18,.18)), .30, rgb(1,1,1,.38));
-    drawCircle(pos.add(vec2(-.12,.12)), .18, rgb(1,1,1,.22));
-
-    const tw = .5 + .5*sin(time*6 + pos.x*2 + pos.y*3);
-    const sp = pos.add(vec2(.18, .20));
-    drawCircle(sp, .30 + .05*tw, rgb(1,1,1,.28 + .12*tw));
-    drawCircle(sp, .18 + .03*tw, rgb(0,0,0,.18));
-    drawCircle(sp.add(vec2(.10,.08)), .10 + .02*tw, rgb(1,1,1,.50));
-
-    if (isActive)
-        drawCircle(pos, 1.00, rgb(1,1,1,.14));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Unit tests
+// Unit tests (stub - tasks add cases here)
 
 function runUnitTests()
 {
+    const fails = [];
     const assert = (cond, msg) =>
     {
-        if (!cond) console.error('TEST FAIL:', msg);
-        else console.log('TEST PASS:', msg);
+        if (cond) console.log('TEST PASS:', msg);
+        else { console.error('TEST FAIL:', msg); fails.push(msg); }
     };
 
-    const saveGrid = grid;
-    const saveNext = nextBlockId;
+    // (tests added in later tasks)
 
-    const makeEmpty = () => [...Array(W)].map(()=> Array(H).fill(null));
-
-    const place = (x,y,c,crash=false) =>
-    {
-        grid[x][y] = gem(c, crash);
-        attachNewGems([[x,y]]);
-    };
-
-    // Test 1: 2x2 forms one rectangle block
-    grid = makeEmpty(); nextBlockId = 1;
-    place(0,0,0,false); place(1,0,0,false);
-    place(0,1,0,false); place(1,1,0,false);
-    const id00 = grid[0][0].block;
-    assert(grid[1][1].block === id00 && grid[0][1].block === id00, '2x2 forms one rectangle block');
-
-    // Test 2: L-shape does not attach
-    grid = makeEmpty(); nextBlockId = 1;
-    place(0,0,1,false); place(1,0,1,false);
-    place(0,1,1,false); place(1,1,1,false);
-    const blockId = grid[0][0].block;
-    place(2,1,1,false);
-    assert(grid[0][0].block === blockId && grid[1][1].block === blockId, 'Existing rectangle block did not change');
-    assert(grid[2][1].block !== blockId, 'New gem did not attach (would break rectangle)');
-
-    // Test 3: Grow into 3x2 rectangle
-    grid = makeEmpty(); nextBlockId = 1;
-    place(0,0,2,false); place(1,0,2,false);
-    place(0,1,2,false); place(1,1,2,false);
-    const id2 = grid[0][0].block;
-    place(2,0,2,false); place(2,1,2,false);
-    assert(grid[2][1].block === id2 && grid[1][0].block === id2, 'Block grew into 3x2 rectangle');
-
-    // Test 4: crash gem never attaches
-    grid = makeEmpty(); nextBlockId = 1;
-    place(0,0,3,false);
-    const nId = grid[0][0].block;
-    place(1,0,3,true);
-    assert(grid[1][0].crash && grid[1][0].block === -1, 'Crash gem has no block id');
-    assert(grid[0][0].block === nId, 'Normal block unchanged by adjacent crash');
-
-    // Test 5: multi-block merge becomes rectangle when center is placed
-    grid = makeEmpty(); nextBlockId = 1;
-    const c = 0;
-    for (let x=0; x<3; x++)
-    for (let y=0; y<3; y++)
-    {
-        if (x===1 && y===1) continue;
-        grid[x][y] = gem(c,false);
-        grid[x][y].block = nextBlockId++;
-    }
-    grid[1][1] = gem(c,false);
-    attachNewGems([[1,1]]);
-    const mergedId = grid[0][0].block;
-    let allMerged = true;
-    for (let x=0; x<3; x++)
-    for (let y=0; y<3; y++)
-        if (!grid[x][y] || grid[x][y].block !== mergedId) allMerged = false;
-    assert(allMerged, 'Placing center merges entire 3x3 into one rectangle block');
-
-    // Test 6: gravity-created 1x2 merge
-    grid = makeEmpty(); nextBlockId = 1;
-    grid[0][0] = gem(2,false); attachNewGems([[0,0]]);
-    grid[0][2] = gem(2,false); attachNewGems([[0,2]]);
-    applyGravity();
-    mergeRectanglesGlobal();
-    assert(grid[0][0] && grid[0][1] && grid[0][0].block === grid[0][1].block, 'Falling gem merges into 1x2 rectangle on contact');
-
-    // Restore
-    grid = saveGrid;
-    nextBlockId = saveNext;
+    if (fails.length === 0) console.log('All unit tests passed.');
+    else console.error('UNIT TEST FAILURES:', fails.length);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
     setCanvasFixedSize(vec2(1280, 720));
-    cameraPos = vec2(0,0);
-    cameraScale = 48;
+    cameraPos = vec2(0, 0);
+    cameraScale = 32;
 
-    sMove = new SoundGenerator({frequency:520,release:.05,volume:.5,shapeCurve:1.5});
-    sRotate = new SoundGenerator({frequency:720,release:.06,volume:.6,slide:-.2});
-    sDrop = new SoundGenerator({frequency:260,release:.08,volume:.6,shapeCurve:.8});
-    sLock = new SoundGenerator({frequency:180,release:.09,volume:.7,noise:.05});
-    sClear = new SoundGenerator({frequency:820,release:.12,volume:.7,slide:.4,delay:.02});
-    sCrash = new SoundGenerator({frequency:140,release:.2,volume:.9,noise:.2,bitCrush:.2,delay:.05});
-    sGameOver = new SoundGenerator({frequency:120,release:.6,volume:.9,slide:-.5,noise:.1});
+    p1Board = new Board();
+    p2Board = new Board();
 
-    resetGame();
     runUnitTests();
 }
 
-///////////////////////////////////////////////////////////////////////////////
-function gameUpdate()
-{
-    if (keyWasPressed('KeyR'))
-        resetGame();
-
-    if (gameOver)
-        return;
-
-    if (active)
-    {
-        if (keyWasPressed('ArrowLeft') || keyWasPressed('KeyA'))
-            tryMove(-1,0) && sMove.play();
-        if (keyWasPressed('ArrowRight') || keyWasPressed('KeyD'))
-            tryMove(1,0) && sMove.play();
-
-        if (keyWasPressed('KeyZ'))
-            tryRotate(-1) && sRotate.play();
-        if (keyWasPressed('KeyX') || keyWasPressed('ArrowUp') || keyWasPressed('KeyW'))
-            tryRotate(1) && sRotate.play();
-
-        // NEW: Down is a one-shot hard drop on PRESS (not on hold)
-        if (keyWasPressed('ArrowDown') || keyWasPressed('KeyS'))
-        {
-            hardDrop();
-            return;
-        }
-
-        if (keyWasPressed('Space'))
-        {
-            hardDrop();
-            return;
-        }
-    }
-
-    if (!active) return;
-
-    // normal gravity drop
-    fallTimer -= timeDelta;
-    if (fallTimer <= 0)
-    {
-        fallTimer = fallInterval;
-
-        if (!tryMove(0,-1))
-        {
-            lockTimer += timeDelta;
-            if (lockTimer > .001)
-                lockActive();
-        }
-        else
-        {
-            lockTimer = 0;
-        }
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-function gameUpdatePost()
-{
-    cameraPos = vec2(0,0);
-}
-
-///////////////////////////////////////////////////////////////////////////////
+function gameUpdate() {}
+function gameUpdatePost() { cameraPos = vec2(0, 0); }
 function gameRender()
 {
     drawRectGradient(cameraPos, getCameraSize(), rgb(.06,.06,.08), rgb(.01,.01,.02));
-
-    const pad = .08;
-    drawRect(boardCenter, boardSize.add(vec2(pad*2)), rgb(0,0,0,.6));
-    drawRect(boardCenter, boardSize, rgb(.08,.08,.1));
-
-    for (let x=0; x<=W; x++)
-        drawLine(boardBL.add(vec2(x,0)), boardBL.add(vec2(x,H)), .03, rgb(1,1,1,.06));
-    for (let y=0; y<=H; y++)
-        drawLine(boardBL.add(vec2(0,y)), boardBL.add(vec2(W,y)), .03, rgb(1,1,1,.06));
-
-    // connectors inside same block id (visual "joined" look)
-    for (let x=0; x<W; x++)
-    for (let y=0; y<H; y++)
-    {
-        const g = grid[x][y];
-        if (!g || g.crash) continue;
-
-        if (x+1 < W)
-        {
-            const r = grid[x+1][y];
-            if (r && !r.crash && r.block === g.block)
-            {
-                const p1 = getCellWorldPos(x,y);
-                const p2 = getCellWorldPos(x+1,y);
-                drawRect(p1.lerp(p2, .5), vec2(.22,.86), GEM_COLORS[g.c]);
-            }
-        }
-
-        if (y+1 < H)
-        {
-            const u = grid[x][y+1];
-            if (u && !u.crash && u.block === g.block)
-            {
-                const p1 = getCellWorldPos(x,y);
-                const p2 = getCellWorldPos(x,y+1);
-                drawRect(p1.lerp(p2, .5), vec2(.86,.22), GEM_COLORS[g.c]);
-            }
-        }
-    }
-
-    // settled gems
-    for (let x=0; x<W; x++)
-    for (let y=0; y<H; y++)
-    {
-        const g = grid[x][y];
-        if (!g) continue;
-        drawGemAt(getCellWorldPos(x,y), g, false);
-    }
-
-    // active piece + ghost
-    if (active && !gameOver)
-    {
-        for (const p of activeCells())
-        {
-            if (p.y < 0) continue;
-            const pos = getCellWorldPos(p.x, min(p.y, H-1));
-            const yOffset = p.y >= H ? (p.y - (H-1)) : 0;
-            drawGemAt(pos.add(vec2(0, yOffset)), p.g, true);
-        }
-
-        let ghostY = active.y;
-        while (canPlaceActive(active.x, ghostY-1, active.rot)) ghostY--;
-        if (ghostY !== active.y)
-        {
-            for (const p of activeCells(active.x, ghostY, active.rot))
-            {
-                if (p.y < 0 || p.y >= H) continue;
-                const pos = getCellWorldPos(p.x, p.y);
-                drawRect(pos, vec2(.92,.92), rgb(1,1,1,.08));
-            }
-        }
-    }
-
-    // next preview
-    const previewPos = vec2(6.2, 2.4);
-    const boxSize = vec2(3.2, 3.2);
-    drawRect(previewPos, boxSize, rgb(0,0,0,.45));
-    drawRect(previewPos, boxSize.subtract(vec2(.12)), rgb(.08,.08,.1));
-
-    if (nextPair)
-    {
-        drawGemAt(previewPos.add(vec2(-.6, .2)), nextPair.a);
-        drawGemAt(previewPos.add(vec2(-.6, 1.2)), nextPair.b);
-    }
-
-    drawText('NEXT', previewPos.add(vec2(0, -1.25)), .5, rgb(1,1,1,.9));
 }
-
-///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
-    const cx = mainCanvasSize.x/2;
-    drawTextScreen('Puzzle Fighter-ish', vec2(cx, 36), 52, hsl(.6,1,.9), 6, hsl(0,0,0));
-
-    const lines = [
-        `Score: ${score|0}`,
-        `Chain: ${chain|0}`,
-        `Controls: ←/→ move, Z/X rotate, Down=S hard drop (press), Space hard drop, R restart`,
-        `Rule: blocks only grow when the result is a filled rectangle. They never split.`,
-        `Crash gems (sparkle) detonate any connected region of their color.`,
-    ];
-    for (let i=0; i<lines.length; i++)
-        drawTextScreen(lines[i], vec2(16, 90 + i*28), 22, hsl(0,0,1), 4, hsl(0,0,0), 'left');
-
-    if (gameOver)
-    {
-        drawTextScreen('GAME OVER', vec2(cx, mainCanvasSize.y/2-20), 90, rgb(1,.2,.2), 10, hsl(0,0,0));
-        drawTextScreen('Press R to restart', vec2(cx, mainCanvasSize.y/2+60), 40, hsl(0,0,1), 6, hsl(0,0,0));
-    }
+    drawTextScreen('Puzzle Fighter (scaffold)', vec2(mainCanvasSize.x/2, 40), 36, hsl(.6,1,.9), 4, hsl(0,0,0));
 }
 
-///////////////////////////////////////////////////////////////////////////////
 engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
 
 </script>
