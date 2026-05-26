@@ -939,21 +939,21 @@ function gameRender()
 function gameRenderPost()
 {
     // score
-    drawTextScreen('' + score, vec2(mainCanvasSize.x/2, 60), 72, hsl(0,0,1), 6, hsl(0,0,0,.55));
+    drawTextScreen('' + score, vec2(mainCanvasSize.x/2, 60), 72, hsl(0,0,1), 6, hsl(0,0,0));
 
     // best
-    drawTextScreen('BEST ' + bestScore, vec2(mainCanvasSize.x - 140, 26), 28, hsl(0,0,1,.9), 4, hsl(0,0,0,.4));
+    drawTextScreen('BEST ' + bestScore, vec2(mainCanvasSize.x - 140, 26), 28, hsl(0,0,1), 4, hsl(0,0,0));
 
     // prompts
     if (state === STATE_READY)
     {
-        drawTextScreen('FLAPPY', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 20), 46, hsl(0,0,1), 6, hsl(0,0,0,.5));
-        drawTextScreen('SPACE / CLICK / TAP to start', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 40), 30, hsl(0,0,1,.9), 5, hsl(0,0,0,.5));
+        drawTextScreen('FLAPPY', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 20), 46, hsl(0,0,1), 6, hsl(0,0,0));
+        drawTextScreen('SPACE / CLICK / TAP to start', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 40), 30, hsl(0,0,1), 5, hsl(0,0,0));
     }
     else if (state === STATE_DEAD)
     {
-        drawTextScreen('CRASH!', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 30), 56, hsl(.02,.9,.55), 7, hsl(0,0,0,.55));
-        drawTextScreen('SPACE / CLICK / TAP to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 30), 30, hsl(0,0,1,.9), 5, hsl(0,0,0,.55));
+        drawTextScreen('CRASH!', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 - 30), 56, hsl(.02,.9,.55), 7, hsl(0,0,0));
+        drawTextScreen('SPACE / CLICK / TAP to restart', vec2(mainCanvasSize.x/2, mainCanvasSize.y/2 + 30), 30, hsl(0,0,1), 5, hsl(0,0,0));
     }
 }
 

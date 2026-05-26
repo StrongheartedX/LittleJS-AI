@@ -411,9 +411,7 @@ function gameRenderPost()
         `LUNAR LANDER\n`+
         `Fuel: ${fuel.toFixed(0)}\n`+
         `Speed: ${vel.toFixed(3)}\n`+
-        `Tilt: ${(ang*180/PI).toFixed(1)}°\n\n`+
-        `Controls: ←/→ rotate, ↑/W/Space thrust\n`+
-        `R = restart`;
+        `Tilt: ${(ang*180/PI).toFixed(1)}°`;
 
     drawTextScreen(text, left.add(vec2(0, 100)), 22, rgb(1,1,1,.9), 4, rgb(0,0,0,.6), 'left');
 
