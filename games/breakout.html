@@ -35,7 +35,7 @@ const BRICK_SCORE = [100, 200, 0]; // indexed by type
 //   s = silver (2 hits)
 //   g = gold (unbreakable)
 // Grid is 18 wide (2-unit bricks across a 38-unit field with 1-unit walls).
-// Up to 9 rows (top is y=20, bottom is y=12 — 8 brick rows fit comfortably).
+// Up to 8 rows fit comfortably (top brick row at y=19, bottom at y=12).
 const LEVELS = [
     // 1: Wall (8 rows of normal bricks)
     [
@@ -296,7 +296,7 @@ function buildLevel()
     // Fisher-Yates with engine RNG
     for (let i = idx.length - 1; i > 0; --i)
     {
-        const j = randInt(0, i + 1);
+        const j = randInt(i + 1);
         const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
     }
 
@@ -398,11 +398,7 @@ function advanceLevel()
     // Speed scales by wave only; resets to base when wave=1.
     ballSpeed = BALL_BASE_SPEED * Math.pow(1.10, wave - 1);
 
-    powerups.length = 0;
-    bullets.length = 0;
-    stickyTimer = 0;
-    laserTimer = 0;
-    laserCooldown = 0;
+    resetRunState();
     // Keep paddleExtra and lives; new level should feel like progress, not reset.
     buildLevel();
     resetBall();
