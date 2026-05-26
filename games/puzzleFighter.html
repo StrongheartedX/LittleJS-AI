@@ -563,6 +563,132 @@ function resolveDiamond(grid, dx, dy)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Character patterns (X' / HDR-rebalanced)
+// Index by row, row 0 = first dropped (bottom of opponent stack)
+
+const PATTERN_RYU = [
+    [COLOR_R, COLOR_G, COLOR_B, COLOR_Y, COLOR_R, COLOR_G],  // row 0 (bottom)
+    [COLOR_R, COLOR_G, COLOR_B, COLOR_Y, COLOR_R, COLOR_G],
+    [COLOR_B, COLOR_Y, COLOR_R, COLOR_G, COLOR_B, COLOR_Y],
+    [COLOR_R, COLOR_G, COLOR_B, COLOR_Y, COLOR_R, COLOR_G],  // row 3 (top)
+];
+const PATTERN_CHUNLI = [
+    [COLOR_R, COLOR_R, COLOR_G, COLOR_G, COLOR_B, COLOR_B],
+    [COLOR_R, COLOR_R, COLOR_G, COLOR_G, COLOR_B, COLOR_B],
+    [COLOR_Y, COLOR_Y, COLOR_R, COLOR_R, COLOR_G, COLOR_G],
+    [COLOR_Y, COLOR_Y, COLOR_R, COLOR_R, COLOR_G, COLOR_G],
+];
+const PATTERN_SAKURA = [
+    [COLOR_G, COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_Y],
+    [COLOR_G, COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_Y],
+    [COLOR_Y, COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_G],
+    [COLOR_Y, COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_G],
+];
+const PATTERN_KEN = [
+    [COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_R, COLOR_R],
+    [COLOR_G, COLOR_G, COLOR_G, COLOR_G, COLOR_G, COLOR_G],
+    [COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_B, COLOR_B],
+    [COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y, COLOR_Y],
+];
+
+const CHARACTERS = [
+    { id:'ryu',    name:'RYU',     pattern: PATTERN_RYU,    multiplier: 1.0, portrait:'circle',   color: rgb(.9,.9,.95) },
+    { id:'ken',    name:'KEN',     pattern: PATTERN_KEN,    multiplier: 1.0, portrait:'triangle', color: rgb(1,.55,.15) },
+    { id:'chunli', name:'CHUN-LI', pattern: PATTERN_CHUNLI, multiplier: 1.2, portrait:'diamond',  color: rgb(.35,.65,1) },
+    { id:'sakura', name:'SAKURA',  pattern: PATTERN_SAKURA, multiplier: 1.0, portrait:'star',     color: rgb(1,.5,.75) },
+];
+
+function characterById(id) { return CHARACTERS.find(c => c.id === id); }
+
+///////////////////////////////////////////////////////////////////////////////
+// Board resolution (chain loop, accumulates damage)
+
+function clearCells(grid, cellList)
+{
+    for (const [x, y] of cellList) grid[x][y] = null;
+}
+
+// opts = { isDiamondInitiated, characterMultiplier }
+// Returns { totalDamage, waves, allClear, anyChange }
+function resolveBoard(grid, opts)
+{
+    const characterMultiplier = (opts && opts.characterMultiplier) || 1.0;
+    const isDiamondInitiated = !!(opts && opts.isDiamondInitiated);
+
+    let totalDamage = 0;
+    let waves = 0;
+    let anyChange = false;
+    let diamondOnFirstWave = isDiamondInitiated;
+
+    while (true)
+    {
+        // 1. Merge new rectangles
+        let merged = mergePowerGems(grid);
+        if (merged) anyChange = true;
+
+        // 2. Crash detonations
+        const clears = detectCrashClears(grid);
+        if (clears.length === 0)
+        {
+            // 3. If nothing to clear, just settle gravity once and exit if no movement
+            const moved = applyGravity(grid);
+            if (!moved) break;
+            anyChange = true;
+            continue;
+        }
+
+        // Accounting
+        let regularsDestroyed = 0;
+        let crashesDestroyed = 0;
+        const powerGemSizes = [];
+        const seenPowerGems = new Map();
+        for (const [x, y] of clears)
+        {
+            const g = grid[x][y];
+            if (!g) continue;
+            if (g.type === 'counter') continue;
+            if (g.type === 'crash') crashesDestroyed++;
+            else if (g.type === 'regular')
+            {
+                if (g.powerGemId >= 0)
+                {
+                    const cur = seenPowerGems.get(g.powerGemId) || 0;
+                    seenPowerGems.set(g.powerGemId, cur + 1);
+                }
+                else regularsDestroyed++;
+            }
+        }
+        for (const size of seenPowerGems.values()) powerGemSizes.push(size);
+
+        waves++;
+        const result = { regularsDestroyed, crashesDestroyed, powerGemSizes };
+        const dmg = computeDamage(result, {
+            chainWave: waves,
+            isDiamondInitiated: diamondOnFirstWave,
+            characterMultiplier,
+            allClear: false
+        });
+        diamondOnFirstWave = false;
+        totalDamage += dmg;
+
+        clearCells(grid, clears);
+        anyChange = true;
+
+        applyGravity(grid);
+    }
+
+    // All-clear check
+    let empty = true;
+    for (let x = 0; x < BOARD_W && empty; x++)
+    for (let y = 0; y < BOARD_H && empty; y++)
+        if (grid[x][y]) empty = false;
+
+    if (empty && waves > 0) totalDamage += 6;
+
+    return { totalDamage, waves, allClear: empty && waves > 0, anyChange };
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Placeholder Board
 
 class Board
@@ -1035,6 +1161,24 @@ function runUnitTests()
         assert(r.tech === true, 'diamond: floor landing = tech bonus');
         assert(r.cleared.length === 0, 'diamond: tech bonus clears nothing');
         assert(g[2][0] === null, 'diamond: tech bonus still removes diamond');
+    }
+
+    // --- resolveBoard integration tests ---
+    {
+        // 2x2 red power gem + red crash adjacent → wave 1, expected damage 9
+        let g = emptyGrid();
+        g[0][0] = gemRegular(COLOR_R); g[1][0] = gemRegular(COLOR_R);
+        g[0][1] = gemRegular(COLOR_R); g[1][1] = gemRegular(COLOR_R);
+        g[2][0] = gemCrash(COLOR_R);
+        let res = resolveBoard(g, { characterMultiplier: 1.0 });
+        assert(res.totalDamage === 9, 'resolve: 2x2 PG + crash = 9 (got ' + res.totalDamage + ')');
+        assert(res.waves === 1, 'resolve: single wave');
+
+        // Pattern check
+        assert(PATTERN_KEN[0].every(c => c === COLOR_R), 'patterns: Ken row 0 all R');
+        assert(PATTERN_CHUNLI[0][0] === COLOR_R && PATTERN_CHUNLI[0][2] === COLOR_G, 'patterns: Chun-Li row 0 RRGGBB');
+        assert(PATTERN_SAKURA[0][0] === COLOR_G && PATTERN_SAKURA[0][5] === COLOR_Y, 'patterns: Sakura row 0 GRRRRY');
+        assert(PATTERN_RYU[2][0] === COLOR_B, 'patterns: Ryu row 2 starts with B (BYRGBY)');
     }
 
     if (fails.length === 0) console.log('All unit tests passed.');
