@@ -432,12 +432,24 @@ class Enemy extends EngineObject
                     // regular bosses drop a 🎁 chest instead of a gem/heart
                     new Chest(this.pos.copy());
                 }
+                // bosses always drop a chunky coin pile
+                for (let i = 0; i < 5; ++i)
+                {
+                    const off = vec2().setAngle(rand(2 * PI), rand(.5, 1.5));
+                    new Pickup(this.pos.add(off), sprites.coin, 'coin', 10);
+                }
                 if (activeBoss === this) activeBoss = null;
             }
-            else if (rand() < .1)
-                new Pickup(this.pos.copy(), sprites.heart, 'heart', 20);
             else
-                new Pickup(this.pos.copy(), sprites.gem, 'gem', this.xpDrop);
+            {
+                const roll = rand();
+                if (roll < .03)
+                    new Pickup(this.pos.copy(), sprites.coin, 'coin', 1);
+                else if (roll < .13)
+                    new Pickup(this.pos.copy(), sprites.heart, 'heart', 20);
+                else
+                    new Pickup(this.pos.copy(), sprites.gem, 'gem', this.xpDrop);
+            }
         }
         else if (this.isBoss && activeBoss === this)
         {
@@ -546,6 +558,11 @@ class Pickup extends EngineObject
             else if (this.kind === 'heart')
             {
                 player.hp = min(player.maxHp, player.hp + this.value);
+            }
+            else if (this.kind === 'coin')
+            {
+                coinsRun += this.value;
+                coins += this.value;
             }
             this.destroy();
         }
@@ -1139,6 +1156,12 @@ function recomputeMultipliers()
     player.projSpeedMult = player.magnetMult = 1;
     player.maxHpMult = player.moveSpeedMult = player.xpGainMult = 1;
     for (const p of player.passives) p.apply();
+    // hero bonuses applied on top of passives
+    if (currentHero && currentHero.stats)
+    {
+        for (const key in currentHero.stats)
+            player[key] = (player[key] || 1) * currentHero.stats[key];
+    }
     // grant the player any new max HP from a fresh Heart pickup
     const newMaxHp = playerMaxHp * player.maxHpMult;
     if (newMaxHp > prevMaxHp) player.hp += (newMaxHp - prevMaxHp);
@@ -1260,8 +1283,106 @@ let fireballDamage = 2;
 
 let elapsedTime = 0;
 let killCount = 0;
+let coinsRun = 0;       // coins earned in the current run
 let gameOver = false;
 let gameOverFrameCount = 0;
+let isPlaying = false;  // false on title / hero-select; true during a run
+
+///////////////////////////////////////////////////////////////////////////////
+// HEROES + META PROGRESSION
+//
+// Each hero has an emoji, name, starting weapon (constructor name from
+// ALL_WEAPONS), and a sparse stat-mult overrides applied on top of passives
+// inside recomputeMultipliers. The chosen hero's emoji is painted into the
+// player sprite slot at run start.
+
+const HEROES = [
+    {key:'wizard', emoji:'🧙', name:'Wizard',  weapon:'Fireball',
+        stats:{areaMult: 1.15},
+        blurb:'Balanced caster, +15% area'},
+    {key:'smiley', emoji:'🙂', name:'Smiley',  weapon:'PizzaToss',
+        stats:{},
+        blurb:'Pizza ace, all-rounder'},
+    {key:'cat',    emoji:'🐱', name:'Cat',     weapon:'OrbitingStar',
+        stats:{moveSpeedMult: 1.2, maxHpMult: .85},
+        blurb:'Quick on its paws, fragile'},
+    {key:'bot',    emoji:'🤖', name:'Bot',     weapon:'ChainLightning',
+        stats:{cooldownMult: 1.15, projSpeedMult: 1.15},
+        blurb:'Fires fast, projectiles fly fast'},
+];
+
+let currentHero = HEROES[0];
+let coins = 0;          // lifetime persistent
+let bestTime = 0;       // lifetime longest survival
+const STORAGE_KEY = 'emojiSurvivors.v1';
+
+function loadMetaState()
+{
+    try
+    {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        coins = data.coins || 0;
+        bestTime = data.bestTime || 0;
+    }
+    catch (e) { /* ignore */ }
+}
+
+function saveMetaState()
+{
+    try
+    {
+        localStorage.setItem(STORAGE_KEY,
+            JSON.stringify({coins, bestTime}));
+    }
+    catch (e) { /* localStorage may be disabled */ }
+}
+
+function applyHero(hero)
+{
+    currentHero = hero;
+    // Repaint the player sprite slot so the player emoji matches the choice.
+    // sprites.player TileInfo is unchanged — drawToTexture writes into the
+    // same atlas cell and the next render shows the new glyph.
+    drawToTexture(0, paintEmoji(hero.emoji), hero.emoji + ' player');
+}
+
+function startRun(hero)
+{
+    applyHero(hero);
+    // Fresh run state — same teardown that restartGame uses, but starts
+    // with the hero's chosen weapon instead of the default fireball.
+    for (const e of enemies.slice()) e.destroy();
+    enemies.length = 0;
+    for (const obj of engineObjects.slice())
+    {
+        if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
+            obj instanceof Pickup || obj instanceof Bomb || obj instanceof FireZone ||
+            obj instanceof Chest)
+            obj.destroy();
+    }
+    chainFlashes.length = 0;
+    spawner.timer = 0;
+    spawner.interval = 1.5;
+    elapsedTime = 0;
+    killCount = 0;
+    coinsRun = 0;
+    gameOver = false;
+    gameOverFrameCount = 0;
+    bossesSpawned.clear();
+    activeBoss = null;
+    reaperSpawned = false;
+    runVictory = false;
+
+    player = new Player();
+    player.weapons = [makeWeaponByName(hero.weapon)];
+    player.passives = [];
+    recomputeMultipliers();
+
+    isPlaying = true;
+    hideAllMenus();
+}
 
 // AI auto-player — toggle with the T key. Useful for balance testing.
 // Movement only (weapons auto-fire anyway), random level-up picks, and
@@ -1357,6 +1478,7 @@ async function gameInit()
     sprites.gem       = drawToTexture(24, paintEmoji('💎'), 'a cyan diamond gem');
     sprites.heart     = drawToTexture(25, paintEmoji('❤️'), 'a red heart');
     sprites.chest     = drawToTexture(26, paintEmoji('🎁'), 'a wrapped gift box with bow');
+    sprites.coin      = drawToTexture(27, paintEmoji('💰'), 'a gold coin or money bag');
 
     // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
     sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
@@ -1377,10 +1499,75 @@ async function gameInit()
         activate: () => sound_activate.play(),
     });
 
+    loadMetaState();
+
+    // Idle player exists during title / hero-select so the world renders as
+    // a backdrop. startRun() recreates the player when the user picks a hero.
     player = new Player();
-    player.weapons = [new FireballWeapon()];
+    player.weapons = [];
     player.passives = [];
     recomputeMultipliers();
+
+    // Title screen — stats refresh each time it's shown.
+    createMenu({
+        id: 'title',
+        title: '🎉 EMOJI SURVIVORS 🎉',
+        subtitle: 'Survive the ☠️ Reaper at 15:00',
+        dismissable: false,
+        onShow: () =>
+        {
+            const m = getMenu('title');
+            if (!m) return;
+            const best = m.getItem('bestLabel');
+            const coinsLabel = m.getItem('coinsLabel');
+            if (best) best.setLabel('🏆 Best: ' + formatTime(bestTime));
+            if (coinsLabel) coinsLabel.setLabel('💰 Total Coins: ' + coins);
+        },
+        items: [
+            {type: 'label',     id: 'bestLabel',  text: '🏆 Best: 0:00'},
+            {type: 'label',     id: 'coinsLabel', text: '💰 Total Coins: 0'},
+            {type: 'separator'},
+            {type: 'button',    label: 'PLAY',    onClick: () => pushMenu('heroSelect')},
+            {type: 'button',    label: 'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+    });
+
+    // Hero select — picks one and starts a run.
+    createMenu({
+        id: 'heroSelect',
+        title: 'PICK YOUR HERO',
+        dismissable: true,
+        onHide: popMenu,
+        items: HEROES.map(h => ({
+            type: 'button',
+            label: h.emoji + '  ' + h.name + ' — ' + h.blurb,
+            title: 'Starts with ' + h.weapon,
+            onClick: () => startRun(h),
+        })).concat([
+            {type: 'separator'},
+            {type: 'button', label: 'BACK', onClick: () => hideMenu('heroSelect')},
+        ]),
+    });
+
+    // About — explains the loop briefly.
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            {type: 'text', text:
+                'Move with WASD or arrows. Weapons fire automatically.\n\n' +
+                'Defeat enemies to collect 💎 XP and level up. Pick weapons and ' +
+                'passive items to grow. Bosses 🦇 🧟 🤡 drop 🎁 chests — open them ' +
+                'with the right combo of weapon-at-max-level + matching passive to ' +
+                'evolve a weapon.\n\n' +
+                'Survive until 15:00 and kill the ☠️ Reaper to win.\n\n' +
+                'Press T any time to toggle the AI auto-player.'},
+            {type: 'separator'},
+            {type: 'button', label: 'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
 
     tweakEngineDefaults();
     tweakDivider('Emoji Survivors');
@@ -1391,6 +1578,8 @@ async function gameInit()
     tweak('fireballDamage',           {min: 1,   max: 10});
     tweak('magnetRadius',             {min: 1,   max: 10});
     tweak('runDuration',              {min: 60,  max: 1800});
+
+    showMenu('title');
 }
 
 // All available weapons by name. Names match the constructor classes below.
@@ -1521,13 +1710,30 @@ function showLevelUpMenu()
     showMenu('levelup');
 }
 
+function endRun()
+{
+    // commit run results to persistent meta state
+    if (elapsedTime > bestTime) bestTime = elapsedTime;
+    saveMetaState();
+}
+
 function restartGame()
 {
-    // tear down everything
+    // restart with the same hero — startRun handles the teardown
+    for (const id of ['gameover', 'victory'])
+    {
+        const m = getMenu(id);
+        if (m) { hideMenu(id); m.destroy(); }
+    }
+    startRun(currentHero);
+}
+
+function goToTitle()
+{
+    // Tear down the run and surface the title menu so the player can
+    // pick a different hero or just inspect their stats.
     for (const e of enemies.slice()) e.destroy();
     enemies.length = 0;
-
-    // destroy all loose engine objects (projectiles, pickups, player)
     for (const obj of engineObjects.slice())
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
@@ -1535,21 +1741,21 @@ function restartGame()
             obj instanceof Chest)
             obj.destroy();
     }
-
     chainFlashes.length = 0;
-    spawner.timer = 0;
-    spawner.interval = 1.5;
-    elapsedTime = 0;
-    killCount = 0;
-    gameOver = false;
-    gameOverFrameCount = 0;
     bossesSpawned.clear();
     activeBoss = null;
     reaperSpawned = false;
     runVictory = false;
+    gameOver = false;
+    gameOverFrameCount = 0;
+    elapsedTime = 0;
+    isPlaying = false;
 
+    // Reset the player sprite to the default wizard so the title backdrop
+    // doesn't keep showing the previous hero.
+    drawToTexture(0, paintEmoji('🧙'));
     player = new Player();
-    player.weapons = [new FireballWeapon()];
+    player.weapons = [];
     player.passives = [];
     recomputeMultipliers();
 
@@ -1558,20 +1764,24 @@ function restartGame()
         const m = getMenu(id);
         if (m) { hideMenu(id); m.destroy(); }
     }
+    showMenu('title');
 }
 
 function showGameOverMenu()
 {
+    endRun();
     const existing = getMenu('gameover');
     if (existing) existing.destroy();
     createMenu({
         id: 'gameover',
         title: 'YOU DIED',
         subtitle: '⏱ ' + formatTime(elapsedTime) + '   💀 ' + killCount +
-                  '   Lv ' + player.level,
+                  '   Lv ' + player.level + '   💰 +' + coinsRun,
         dismissable: false,
         items: [
             {type: 'button', label: 'RESTART', onClick: restartGame},
+            {type: 'separator'},
+            {type: 'button', label: 'TITLE',   onClick: goToTitle},
         ],
     });
     showMenu('gameover');
@@ -1579,16 +1789,20 @@ function showGameOverMenu()
 
 function showVictoryMenu()
 {
+    endRun();
     const existing = getMenu('victory');
     if (existing) existing.destroy();
     createMenu({
         id: 'victory',
         title: '🏆 VICTORY',
         subtitle: 'You felled the Reaper!\n⏱ ' + formatTime(elapsedTime) +
-                  '   💀 ' + killCount + '   Lv ' + player.level,
+                  '   💀 ' + killCount + '   Lv ' + player.level +
+                  '   💰 +' + coinsRun,
         dismissable: false,
         items: [
             {type: 'button', label: 'PLAY AGAIN', onClick: restartGame},
+            {type: 'separator'},
+            {type: 'button', label: 'TITLE',      onClick: goToTitle},
         ],
     });
     showMenu('victory');
@@ -1767,6 +1981,9 @@ function drawHUD()
     }
     drawTextScreen('💀 ' + killCount,
                    vec2(cs.x - pad, pad + 44), 22, WHITE, 3, BLACK, 'right');
+    drawTextScreen('💰 ' + coinsRun,
+                   vec2(cs.x - pad, pad + 74), 22,
+                   new Color(1, .9, .35), 3, BLACK, 'right');
 }
 
 function gameRenderPost()
