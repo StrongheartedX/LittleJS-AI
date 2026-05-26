@@ -276,7 +276,14 @@ function drawPips(center, v, suitTile, color)
         {
             px = i < 3 ? -1 : 1;
             py = (i % 3) - 1;
-            if (i > 5) { px = 0; py += 0.5; }
+            if (i > 5)
+            {
+                px = 0;
+                // v=8 places two center pips (i=6 below, i=7 above center).
+                // v=7 has a single extra pip (i=6) — sit it ABOVE center
+                // to match the traditional 7 layout.
+                py = (v === 7) ? 0.5 : py + 0.5;
+            }
         }
         if (v >= 9)
         {
