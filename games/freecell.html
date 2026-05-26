@@ -734,7 +734,7 @@ function trySendHome()
                 if (fits)
                 {
                     s.moveTopCard(f, true);
-                    window.sndFoundation && window.sndFoundation.play(undefined, 0.5, 1 + chain * 0.07);
+                    window.sndFoundation && window.sndFoundation.play(f.topCard().pos, 0.5, 1 + chain * 0.07);
                     ++chain;
                     progressed = true;
                     break;
@@ -890,19 +890,23 @@ function gameUpdate()
                     const savedType = handStack.type;
                     handStack.type = hit.stack.type;
                     hit.stack.moveTopCard(handStack);
-                    let placed = false;
+                    let placedTarget = null;
                     for (const f of cardStacks)
                     {
                         if (f.type === StackType.Foundation && isMoveLegal(f))
                         {
                             handStack.moveManyToStack(f, undefined, true);
-                            placed = true;
+                            placedTarget = f;
                             break;
                         }
                     }
-                    if (!placed) handStack.moveManyToStack(hit.stack);   // put it back
+                    if (!placedTarget) handStack.moveManyToStack(hit.stack);   // put it back
                     handStack.type = savedType;
-                    if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); checkLoss(); }
+                    if (placedTarget)
+                    {
+                        window.sndPlace && window.sndPlace.play(placedTarget.topCard().pos);
+                        trySendHome(); saveState(); checkWin(); checkLoss();
+                    }
                     return;
                 }
             }
@@ -916,12 +920,14 @@ function gameUpdate()
                 pickupOrigin = hit.stack;
                 mouseHoldPos = hit.card.pos.subtract(mousePos);
                 handStack.type = hit.stack.type;
+                // Play BEFORE moveManyToStack so hit.card.pos is still the
+                // original cascade slot, not the new handStack position.
+                window.sndPickup && window.sndPickup.play(hit.card.pos);
                 hit.stack.moveManyToStack(handStack, hit.card);
-                window.sndPickup && window.sndPickup.play();
             }
             else if (hit.stack.type === StackType.Cascade)
             {
-                window.sndInvalid && window.sndInvalid.play();
+                window.sndInvalid && window.sndInvalid.play(hit.card.pos);
             }
         }
     }
@@ -957,8 +963,15 @@ function gameUpdate()
         // card is already where the cursor left it.
         handStack.moveManyToStack(target || pickupOrigin, undefined, !placed);
         pickupOrigin = null;
-        if (placed) { window.sndPlace && window.sndPlace.play(); trySendHome(); saveState(); checkWin(); checkLoss(); }
-        else        { window.sndInvalid && window.sndInvalid.play(); }
+        if (placed)
+        {
+            window.sndPlace && window.sndPlace.play(target.topCard().pos);
+            trySendHome(); saveState(); checkWin(); checkLoss();
+        }
+        else
+        {
+            window.sndInvalid && window.sndInvalid.play(mousePos);
+        }
     }
 
     const shift = keyIsDown('ShiftLeft') || keyIsDown('ShiftRight');
