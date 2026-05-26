@@ -252,6 +252,7 @@ let handStack   = null;
 let pickupOrigin = null;
 let mouseHoldPos = vec2();
 let won = false;
+let lastClick = { card: null, time: -1 };
 let stateUndo = [];
 let stateRedo = [];
 
@@ -480,6 +481,34 @@ function gameUpdate()
         const hit = stackUnderPoint(mousePos);
         if (hit && hit.card)
         {
+            // Double-click shortcut: top card → first foundation that accepts it.
+            if (hit.card === hit.stack.topCard())
+            {
+                const now = time;
+                const isDouble = lastClick.card === hit.card && (now - lastClick.time) < 0.3;
+                lastClick = { card: hit.card, time: now };
+                if (isDouble)
+                {
+                    // Move the single top card into the hand temporarily so isMoveLegal works.
+                    const savedType = handStack.type;
+                    handStack.type = hit.stack.type;
+                    hit.stack.moveTopCard(handStack);
+                    let placed = false;
+                    for (const f of cardStacks)
+                    {
+                        if (f.type === StackType.Foundation && isMoveLegal(f))
+                        {
+                            handStack.moveManyToStack(f, undefined, true);
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (!placed) handStack.moveManyToStack(hit.stack);   // put it back
+                    handStack.type = savedType;
+                    if (placed) { trySendHome(); saveState(); }
+                    return;
+                }
+            }
             // For cascades, allow picking up a tail-run starting at `hit.card`.
             // For other stack types, only the top card is pickable.
             const canPick = hit.stack.type === StackType.Cascade
