@@ -305,6 +305,9 @@ class Enemy extends EngineObject
         this.additive = null;
         // per-instance phase so a wave of enemies doesn't sync up
         this.bobPhase = rand(2 * PI);
+        // integrated rotation for entities that roll (skull) — advances with
+        // velocity.x so a ball moving right rolls clockwise, left rolls CCW.
+        this.rollAngle = 0;
     }
 
     render()
@@ -334,7 +337,7 @@ class Enemy extends EngineObject
             else if (k === 'bat')    renderPos = this.pos.add(vec2(0, sin(time * 7 + ph) * .18));
             else if (k === 'ant')    renderAngle = sin(time * 12 + ph) * .12;
             else if (k === 'snail')  renderAngle = sin(time * 2  + ph) * .05;
-            else if (k === 'skull')  renderAngle = time * .8;
+            else if (k === 'skull')  renderAngle = this.rollAngle;
             else if (k === 'clown')  renderAngle = sin(time * 8  + ph) * .18;
             else if (k === 'reaper') renderAngle = sin(time * 3  + ph) * .1;
         }
@@ -392,6 +395,12 @@ class Enemy extends EngineObject
         super.update();
 
         this.renderOrder = -this.pos.y;
+
+        // rolling integrator — advances with velocity.x so rolling enemies
+        // (skulls) rotate clockwise when moving right, CCW when moving left.
+        // Factor 2 ≈ "1 radian per .5 unit of horizontal travel" which reads
+        // as a ball rolling at its physical circumference.
+        this.rollAngle += this.velocity.x * 2;
 
         // tick contact cooldown
         if (this.hitCooldown > 0) this.hitCooldown -= 1 / 60;
@@ -828,7 +837,9 @@ class FireballWeapon
                        12 * player.projSpeedMult,
                        this.damage() * player.dmgMult,
                        1.2, sprites.fireball);
-        this.cooldown = (1.0 / this.level) / player.cooldownMult;
+        // Lv1 = .7s between shots, Lv5 = .14s. Faster than VS's whip but
+        // we don't auto-aim a swing — single projectile per shot.
+        this.cooldown = (.7 / this.level) / player.cooldownMult;
     }
 }
 
@@ -1401,9 +1412,13 @@ function updateSpawner()
         if (activeBoss) activeBoss.eliteAdditive = new Color(.65, 0, 0, 0);
     }
 
-    // ramp the spawn interval from base down to 0.08s over the first 90 seconds
-    // ramp from base (~1.5s) down to .08s over the first 90 seconds
-    spawner.interval = lerp(enemySpawnIntervalBase, 0.08, min(time / 90, 1));
+    // Spawn pacing — VS-style: ~1 enemy/sec early, ramps to ~11/sec by 3 min.
+    // CRITICAL: must use elapsedTime (resets per run) NOT engine `time`
+    // (lifetime of the page). Using `time` here was the restart bug —
+    // after a death-restart, time was huge → interval at minimum →
+    // 15-enemy burst on frame 1 = instant mob.
+    spawner.interval = lerp(enemySpawnIntervalBase, 0.35,
+                            min(elapsedTime / 180, 1));
 
     spawner.timer -= 1 / 60;
     if (spawner.timer > 0) return;
@@ -1411,13 +1426,13 @@ function updateSpawner()
 
     if (enemies.length >= ENEMY_CAP) return;
 
-    // burst spawning — more enemies per tick as the run goes on, up to a
-    // vampire-survivors-scale swarm. ENEMY_CAP gates total density.
-    const burst = min(2 + Math.floor(time / 15), 15);
+    // Burst spawning — 1 enemy/tick early, +1 every 60s of elapsed run
+    // time, caps at 4. With the .35s late-game interval, peak is ~11/sec.
+    const burst = min(1 + Math.floor(elapsedTime / 60), 4);
     for (let n = 0; n < burst; ++n)
     {
         if (enemies.length >= ENEMY_CAP) break;
-        const type = pickWeightedType(time);
+        const type = pickWeightedType(elapsedTime);
         let pos;
         for (let tries = 0; tries < 4; ++tries)
         {
@@ -1425,8 +1440,9 @@ function updateSpawner()
             if (pos.x >= ARENA_MIN_X && pos.x <= ARENA_MAX_X &&
                 pos.y >= ARENA_MIN_Y && pos.y <= ARENA_MAX_Y) break;
         }
-        // elite chance ramps 0 → 5% over 30s..210s
-        const eliteChance = time < 30 ? 0 : min(.05, (time - 30) / 3600);
+        // elite chance ramps 0 → 5% over 30s..240s of elapsedTime
+        const eliteChance = elapsedTime < 30 ? 0
+            : min(.05, (elapsedTime - 30) / 4200);
         const eliteKey = rand() < eliteChance
             ? ELITE_KEYS[randInt(ELITE_KEYS.length)]
             : null;
@@ -1437,7 +1453,7 @@ function updateSpawner()
 let magnetRadius = 3;
 let playerSpeed = 6;
 let playerMaxHp = 100;
-let enemySpawnIntervalBase = 1.5;
+let enemySpawnIntervalBase = 1.0;
 let xpToNextBase = 5;
 let fireballDamage = 2;
 let pizzaSpinRate = .4;        // rad/sec tumble for PizzaToss + SpicyPizza slices
