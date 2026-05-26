@@ -44,6 +44,10 @@ Mix in helper scripts to add features: `menus.js` (DOM menus), `soundGenerator.j
 
 ## 🕹️ Games Made With AI
 
+### 🎮 [▶ Play in the Game Library](https://killedbyapixel.github.io/LittleJS-AI/games/)
+
+Browse, search, and launch every game from a single console-style page — categories, top picks, random play, fullscreen, and a "continue last game" button.
+
 Playable demos you can fork as starting points for your own games. Did you make a game you think should be included? Send a pull request!
 
 **Genre:** 🧩 Puzzle · 👾 Arcade · 🚀 Shooter · 🎯 Aim · ♟️ Board · 🏎️ Racing · 🏃 Platformer · ⚽ Sports · 🗺️ Adventure
