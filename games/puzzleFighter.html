@@ -1807,13 +1807,183 @@ function runUnitTests()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Match state + menus
+
+let matchState = 'title';        // 'title' | 'playing' | 'roundover'
+let chosenMode = 'cpu';          // 'cpu' | 'pvp'
+let chosenDifficulty = 'normal';
+let chosenP1Char = CHARACTERS[0];
+let chosenP2Char = CHARACTERS[1];
+
+function quitToTitle()
+{
+    matchState = 'title';
+    currentMatch = null;
+    p1Board = null; p2Board = null;
+    clearSubmenuStack();
+    hideAllMenus();
+    showMenu('title');
+}
+
+function buildCharacterItems(onPick)
+{
+    return CHARACTERS.map(char => ({
+        type: 'button',
+        label: char.name,
+        id: 'char-' + char.id,
+        title: 'Damage: ' + Math.floor(char.multiplier * 100) + '%',
+        onClick: () => onPick(char),
+    }));
+}
+
+function setupMenus()
+{
+    createTitleMenu({
+        title: 'PUZZLE FIGHTER',
+        subtitle: 'Two-player gem combat',
+        playLabel: 'PLAY',
+        onPlay: () => {
+            hideMenu('title');
+            showMenu('mode');
+        },
+        items: [
+            { type:'button', label:'ABOUT', onClick: () => pushMenu('about') },
+        ],
+        canReveal: () => matchState === 'title',
+    });
+
+    createMenu({
+        id: 'mode',
+        title: 'CHOOSE MODE',
+        dismissable: true,
+        onHide: (reason) => { if (reason === 'dismiss') showMenu('title'); },
+        items: [
+            { type:'button', label:'VS CPU',    onClick: () => { chosenMode = 'cpu'; pushMenu('difficulty'); } },
+            { type:'button', label:'VS PLAYER', onClick: () => { chosenMode = 'pvp'; pushMenu('p1select'); } },
+        ],
+    });
+
+    createMenu({
+        id: 'difficulty',
+        title: 'DIFFICULTY',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            { type:'button', label:'EASY',   onClick: () => { chosenDifficulty = 'easy';   hideMenu('difficulty'); pushMenu('p1select'); } },
+            { type:'button', label:'NORMAL', onClick: () => { chosenDifficulty = 'normal'; hideMenu('difficulty'); pushMenu('p1select'); } },
+            { type:'button', label:'HARD',   onClick: () => { chosenDifficulty = 'hard';   hideMenu('difficulty'); pushMenu('p1select'); } },
+        ],
+    });
+
+    createMenu({
+        id: 'p1select',
+        title: 'PLAYER 1',
+        subtitle: 'Pick your fighter',
+        dismissable: true,
+        onHide: popMenu,
+        items: buildCharacterItems(char => {
+            chosenP1Char = char;
+            hideMenu('p1select');
+            if (chosenMode === 'pvp') pushMenu('p2select');
+            else
+            {
+                chosenP2Char = CHARACTERS[randInt(CHARACTERS.length)];
+                startMatchFromSelection();
+            }
+        }),
+    });
+
+    createMenu({
+        id: 'p2select',
+        title: 'PLAYER 2',
+        subtitle: 'Pick your fighter',
+        dismissable: true,
+        onHide: popMenu,
+        items: buildCharacterItems(char => {
+            chosenP2Char = char;
+            hideMenu('p2select');
+            startMatchFromSelection();
+        }),
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            { type:'text', text:"Faithful clone of Super Puzzle Fighter II Turbo. X' rebalanced drop patterns. Single self-contained LittleJS prototype." },
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        dismissable: true,
+        items: [
+            { type:'button', label:'RESUME',          onClick: () => hideMenu('pause') },
+            { type:'button', label:'RESTART',         onClick: () => { hideMenu('pause'); startMatchFromSelection(); } },
+            { type:'button', label:'QUIT TO TITLE',   onClick: () => { showConfirmDialog({
+                message:'Quit to title?',
+                onYes: () => quitToTitle(),
+            }); } },
+        ],
+    });
+
+    createMenu({
+        id: 'roundover',
+        title: 'ROUND OVER',
+        dismissable: false,
+        items: [
+            { type:'label', id:'roundresult', text:'' },
+            { type:'button', label:'REMATCH',          onClick: () => { hideMenu('roundover'); startMatchFromSelection(); } },
+            { type:'button', label:'CHARACTER SELECT', onClick: () => { hideMenu('roundover'); matchState = 'title'; showMenu('p1select'); } },
+            { type:'button', label:'QUIT TO TITLE',    onClick: () => quitToTitle() },
+        ],
+    });
+
+    setMenuVisibilityCallback(v => paused = v);
+}
+
+function startMatchFromSelection()
+{
+    const seed = (Date.now() & 0x7FFFFFFF) || 1;
+    const aiDiff = chosenMode === 'cpu' ? chosenDifficulty : null;
+    startMatch(chosenP1Char, chosenP2Char, seed, aiDiff);
+    matchState = 'playing';
+    clearSubmenuStack();
+    hideAllMenus();
+}
+
+function checkRoundOver()
+{
+    if (matchState !== 'playing') return;
+    if (!currentMatch || currentMatch.winner < 0) return;
+    matchState = 'roundover';
+    const menu = getMenu('roundover');
+    if (menu)
+    {
+        const item = menu.getItem('roundresult');
+        const w = currentMatch.winner;
+        let txt;
+        if (chosenMode === 'pvp') txt = w === 0 ? 'PLAYER 1 WINS' : 'PLAYER 2 WINS';
+        else txt = w === 0 ? 'YOU WIN' : 'CPU WINS';
+        if (item) item.setLabel(txt);
+    }
+    showMenu('roundover');
+}
+
+///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
     setCanvasFixedSize(vec2(1280, 720));
     cameraPos = vec2(0, 0);
     cameraScale = 38;
 
-    startMatch(CHARACTERS[0], CHARACTERS[3], Date.now() & 0x7FFFFFFF, 'hard');
+    setupMenus();
+    matchState = 'title';
+    showMenu('title');
+
     runUnitTests();
 }
 
@@ -1833,9 +2003,12 @@ function startMatch(p1Char, p2Char, seed, aiDifficulty)
 
 function gameUpdate()
 {
-    if (keyWasPressed('KeyR'))
-        startMatch(CHARACTERS[0], CHARACTERS[3], Date.now() & 0x7FFFFFFF, 'hard');
-    if (currentMatch) currentMatch.update(controllers);
+    if (matchState === 'playing' && currentMatch)
+    {
+        if (bindPauseKey({ when: () => matchState === 'playing' })) return;
+        currentMatch.update(controllers);
+        checkRoundOver();
+    }
 }
 function gameUpdatePost() { cameraPos = vec2(0, 0); }
 function gameRender()
