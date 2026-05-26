@@ -875,9 +875,8 @@ function drawGem(pos, gem, isActive)
         const c = GEM_COLORS[gem.color];
         drawCircle(pos, 1.10, rgb(1,1,1,.05));
         drawCircle(pos, .92, c);
-        drawCircle(pos.add(vec2(-.18, .18)), .26, rgb(1,1,1,.40));
         const tw = .5 + .5 * Math.sin(time*6 + pos.x*2 + pos.y*3);
-        drawCircle(pos.add(vec2(.18, .20)), .22 + .04*tw, rgb(1,1,1,.30 + .15*tw));
+        drawCircle(pos.add(vec2(-.18, .18)), .22 + .04*tw, rgb(1,1,1,.40 + .15*tw));
         if (isActive) drawCircle(pos, 1.00, rgb(1,1,1,.18));
     }
     else if (gem.type === 'counter')
@@ -1106,7 +1105,7 @@ class HumanController
     fallSpeed(board)
     {
         if (this.hardDropping) return 0;
-        if (anyDown(this.keymap.softDrop)) return 0.05;
+        if (anyDown(this.keymap.softDrop)) return 0.025;
         return board.fallInterval;
     }
 }
@@ -1116,6 +1115,9 @@ function boardTick(board, controller, onLock)
     if (board.gameOver || !board.active) return;
 
     const step = controller.fallSpeed(board);
+    // Clamp fallTimer so a sudden speed change (soft-drop press) takes effect immediately
+    // instead of waiting for the previous (slower) interval to drain.
+    if (board.fallTimer > step) board.fallTimer = step;
     board.fallTimer -= timeDelta;
 
     while (board.fallTimer <= 0 && board.active)
