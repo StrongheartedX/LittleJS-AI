@@ -73,7 +73,7 @@ let gameOverPending = false;
 let currentCombo = 0;          // resets on shoot, increments per pop event
 let floatingTexts = [];        // [{pos, vel, text, color, age, life, size}]
 
-const DANGER_START = .65;      // path-arc ratio at which danger warning kicks in
+const DANGER_START = .82;      // path-arc ratio at which danger warning kicks in
 const DANGER_FULL  = 1.0;      // path-arc ratio at full panic
 
 let sound_shoot, sound_pop, sound_click, sound_lose, sound_combo;
@@ -751,11 +751,13 @@ function gameRenderPost()
     if (d > 0)
     {
         const pulse = .5 + .5 * Math.sin(time * 5);
+        // Larger ellipse pushes the colored ring further off-screen so only
+        // a soft rim bleeds in at the edges — the center stays clear.
         drawEllipseGradient(
             vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2),
-            vec2(mainCanvasSize.x * 1.4, mainCanvasSize.y * 1.4),
+            vec2(mainCanvasSize.x * 2.2, mainCanvasSize.y * 2.2),
             new Color(1, 0, 0, 0),
-            new Color(.65, 0, 0, d * (.4 + .25 * pulse)),
+            new Color(.6, 0, 0, d * (.18 + .14 * pulse)),
             0, true, true,
         );
     }
