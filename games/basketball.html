@@ -49,7 +49,8 @@ const BALL_RADIUS  = 0.55;
 
 const TIME_LIMIT       = 60;
 const CHARGE_TIME      = 0.85;    // seconds to fill power meter
-const RACK_DELAY       = 0.18;    // delay before next ball is racked
+const RACK_TRANSIT     = 0.35;    // seconds for next ball to fly in onto the pedestal
+const RACK_START_POS   = vec2(-14, -4.5);  // off-screen-left feed position
 const SCORE_BASE       = 2;
 const SCORE_SWISH      = 3;
 const STREAK_FOR_FIRE  = 3;
@@ -88,7 +89,7 @@ let onFire       = false;
 let balls        = [];
 let aiming       = false;
 let chargeT      = 0;
-let rackTimer    = 0;
+let rackAnim     = null;   // {t} while a ball is animating onto the pedestal; null = ball is resting on pedestal
 let hoopOffsetX  = 0;
 
 //------------------------------------------------------------------------------
@@ -105,13 +106,19 @@ function getBoardPos()   { const h = getHoopCenter(); return vec2(h.x + BOARD_OF
 
 function computeLaunchVelocity(aimPos, power)
 {
-    const dx = aimPos.x - SPAWN_POS.x;
-    const baseH = max(SPAWN_POS.y, aimPos.y);
-    const arcH = 1.5 + power * 4.5;
+    // Power scales how far the ball travels toward the aim point. At max power
+    // it lands at the cursor; at zero power it only reaches MIN_REACH of the way.
+    const MIN_REACH = 0.2;
+    const reach = MIN_REACH + power * (1 - MIN_REACH);
+    const target = SPAWN_POS.lerp(aimPos, reach);
+
+    const dx = target.x - SPAWN_POS.x;
+    const baseH = max(SPAWN_POS.y, target.y);
+    const arcH = 1.0 + power * 4.5;
     const yPeak = baseH + arcH;
     const g = abs(gravity.y);
     const t1 = Math.sqrt(2 * max(0.01, yPeak - SPAWN_POS.y) / g);
-    const t2 = Math.sqrt(2 * max(0.01, yPeak - aimPos.y) / g);
+    const t2 = Math.sqrt(2 * max(0.01, yPeak - target.y) / g);
     const T = t1 + t2;
     const vx = dx / T;
     const vy = g * t1;
@@ -123,6 +130,19 @@ function shootBall(aimPos, power)
     const v = computeLaunchVelocity(aimPos, power);
     balls.push(new Ball(SPAWN_POS, v));
     sThrow.play();
+}
+
+// Compute where the rack ball should be drawn (animating in from off-screen,
+// or resting on the pedestal once the animation finishes).
+function getRackBallPose()
+{
+    if (!rackAnim) return { pos: SPAWN_POS, rot: 0 };
+    const u = clamp(rackAnim.t / RACK_TRANSIT, 0, 1);
+    const e = 1 - (1 - u) * (1 - u);                // ease-out
+    const flat = RACK_START_POS.lerp(SPAWN_POS, e);
+    const arc  = Math.sin(e * Math.PI) * 1.4;       // up-and-over bump
+    const dist = SPAWN_POS.x - RACK_START_POS.x;
+    return { pos: vec2(flat.x, flat.y + arc), rot: -e * dist * 1.1 };
 }
 
 //------------------------------------------------------------------------------
@@ -293,7 +313,7 @@ function startGame()
     balls.length = 0;
     aiming = false;
     chargeT = 0;
-    rackTimer = 0;
+    rackAnim = null;
     hoopOffsetX = 0;
 }
 
@@ -353,6 +373,7 @@ async function gameInit()
         title: 'POP-A-SHOT',
         subtitle: '60 seconds. Make it count.',
         playLabel: 'PLAY',
+        revealOnClick: false,
         canReveal: () => gamePhase !== 'playing',
         itemsBefore: [
             {type:'label', id:'bestLabel', text:`Best: ${bestScore}`},
@@ -474,6 +495,8 @@ async function gameInit()
             }},
         ],
     });
+
+    showMenu('title');
 }
 
 //------------------------------------------------------------------------------
@@ -501,13 +524,17 @@ function gameUpdate()
         timeLeft = max(0, timeLeft - timeDelta);
         if (timeLeft <= 0) { endGame(); return; }
 
-        // rack delay between shots
-        rackTimer = max(0, rackTimer - timeDelta);
-        const canShoot = rackTimer <= 0;
-
-        // aim / charge / release
-        if (canShoot && !aiming && mouseWasPressed(0))
+        // tick the rack-in animation
+        if (rackAnim)
         {
+            rackAnim.t += timeDelta;
+            if (rackAnim.t >= RACK_TRANSIT) rackAnim = null;
+        }
+
+        // aim / charge / release — pressing to aim snaps any in-flight rack ball onto the pedestal
+        if (!aiming && mouseWasPressed(0))
+        {
+            rackAnim = null;
             aiming = true;
             chargeT = 0;
         }
@@ -521,13 +548,14 @@ function gameUpdate()
             shootBall(mousePos, power);
             aiming = false;
             chargeT = 0;
-            rackTimer = RACK_DELAY;
+            rackAnim = { t: 0 };
         }
     }
     else
     {
         aiming = false;
         chargeT = 0;
+        rackAnim = null;
     }
 }
 
@@ -674,10 +702,17 @@ function gameRender()
     drawCourt();
     drawHoopAssembly();
 
-    // pedestal is always there; the ball only when one is racked.
+    // pedestal is always there; the rack ball animates in after each shot.
     drawPedestal();
-    if (gamePhase !== 'playing' || rackTimer <= 0)
+    if (gamePhase === 'playing')
+    {
+        const pose = getRackBallPose();
+        drawBasketball(pose.pos, pose.rot);
+    }
+    else
+    {
         drawBasketball(SPAWN_POS, 0);
+    }
 
     drawAimReticleAndArc();
 
