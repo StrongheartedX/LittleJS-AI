@@ -112,6 +112,21 @@ class CardStack
     }
 }
 
+function drawSlotOutline(stack)
+{
+    // Draw a faint outlined rect at the stack anchor (cards will overlay it).
+    const isFoundation = stack.type === StackType.Foundation;
+    const fill   = new Color(0, 0, 0, isFoundation ? 0.18 : 0.30);
+    const stroke = new Color(1, 1, 1, isFoundation ? 0.55 : 0.30);
+    drawRect(stack.pos, CARD_SIZE, fill);
+    // Outline drawn as 4 thin rects (drawRect has no outline param).
+    const t = 0.12;
+    drawRect(vec2(stack.pos.x, stack.pos.y + CARD_SIZE.y/2), vec2(CARD_SIZE.x, t), stroke);
+    drawRect(vec2(stack.pos.x, stack.pos.y - CARD_SIZE.y/2), vec2(CARD_SIZE.x, t), stroke);
+    drawRect(vec2(stack.pos.x - CARD_SIZE.x/2, stack.pos.y), vec2(t, CARD_SIZE.y), stroke);
+    drawRect(vec2(stack.pos.x + CARD_SIZE.x/2, stack.pos.y), vec2(t, CARD_SIZE.y), stroke);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Board layout — recomputed in gameInit (and again on canvas size change).
 let layoutTopRowY     = 8;       // anchor y for the top row (free cells / foundations)
@@ -241,7 +256,13 @@ function gameUpdatePost()
     // resizes. setupLayout is cheap — just trig-less arithmetic.
     setupLayout();
 }
-function gameRender() {}
+function gameRender()
+{
+    if (!cardStacks.length) return;
+    for (const s of cardStacks)
+        if (s.isEmpty() || s.type !== StackType.Cascade)   // always show top-row outlines
+            drawSlotOutline(s);
+}
 function gameRenderPost() {}
 
 ///////////////////////////////////////////////////////////////////////////////
