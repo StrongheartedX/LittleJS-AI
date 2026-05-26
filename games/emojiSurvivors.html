@@ -1987,6 +1987,15 @@ async function gameInit()
     // Power-Up shop — spend lifetime coins for permanent stat boosts.
     // Labels are refreshed in onShow + after each purchase so the level,
     // cost, and 💰 counter stay in sync without re-creating the menu.
+    // Total coins spent on a single power-up at its current level — the
+    // sum of costs for levels 0..(lvl-1). Closed form: 25*lvl*(lvl+1).
+    function totalSpentOn(lvl) { return 25 * lvl * (lvl + 1); }
+    function totalRefundable()
+    {
+        let t = 0;
+        for (const k in powerUps) t += totalSpentOn(powerUps[k]);
+        return t;
+    }
     function refreshShopLabels()
     {
         const m = getMenu('shop');
@@ -2008,6 +2017,15 @@ async function gameInit()
             item.setLabel(label);
             item.setDisabled(maxed || coins < cost);
         }
+        const refundItem = m.getItem('refund');
+        if (refundItem)
+        {
+            const refund = totalRefundable();
+            refundItem.setLabel(refund > 0
+                ? '↩ Refund All (+' + refund + '💰)'
+                : '↩ Refund All');
+            refundItem.setDisabled(refund <= 0);
+        }
     }
     function buyPowerUp(p)
     {
@@ -2017,6 +2035,15 @@ async function gameInit()
         if (coins < cost) return;
         coins -= cost;
         powerUps[p.key] = lvl + 1;
+        saveMetaState();
+        refreshShopLabels();
+    }
+    function refundAllPowerUps()
+    {
+        const refund = totalRefundable();
+        if (refund <= 0) return;
+        for (const k in powerUps) powerUps[k] = 0;
+        coins += refund;
         saveMetaState();
         refreshShopLabels();
     }
@@ -2037,6 +2064,23 @@ async function gameInit()
                 onClick: () => buyPowerUp(p),
             })),
             {type: 'separator'},
+            {type: 'button',
+                id: 'refund',
+                label: '↩ Refund All',
+                onClick: () =>
+                {
+                    const refund = totalRefundable();
+                    if (refund <= 0) return;
+                    showConfirmDialog({
+                        icon: '↩️',
+                        title: 'Refund All Power-Ups?',
+                        message: 'Reset every power-up to Lv 0 and return ' +
+                                 '💰 ' + refund + ' coins.',
+                        yesLabel: 'REFUND',
+                        noLabel:  'CANCEL',
+                        onYes: refundAllPowerUps,
+                    });
+                }},
             {type: 'button', label: 'BACK', onClick: () => hideMenu('shop')},
         ],
     });
