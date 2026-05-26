@@ -284,6 +284,18 @@ function nearestEnemy(fromPos, maxDist)
     return best;
 }
 
+class OrbitingStarWeapon
+{
+    constructor() { this.level = 1; this.name = 'Orbiting Star'; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    update() { /* TODO Task 12 */ }
+}
+class ChainLightningWeapon
+{
+    constructor() { this.level = 1; this.name = 'Chain Lightning'; }
+    levelUp() { this.level = min(this.level + 1, 5); }
+    update() { /* TODO Task 13 */ }
+}
 class FireballWeapon
 {
     constructor() { this.level = 1; this.cooldown = 0; }
@@ -404,10 +416,108 @@ async function gameInit()
     player.weapons = [new FireballWeapon()];
 }
 
+// All available weapons by name. Names match the constructor classes below.
+const ALL_WEAPONS = ['Fireball', 'OrbitingStar', 'ChainLightning'];
+
+function makeWeaponByName(name)
+{
+    if (name === 'Fireball')       return new FireballWeapon();
+    if (name === 'OrbitingStar')   return new OrbitingStarWeapon();
+    if (name === 'ChainLightning') return new ChainLightningWeapon();
+    return null;
+}
+
+function emojiForWeapon(name)
+{
+    if (name === 'Fireball')       return '🔥';
+    if (name === 'OrbitingStar')   return '🌟';
+    if (name === 'ChainLightning') return '⚡';
+    return '?';
+}
+
+function buildUpgradeChoices()
+{
+    const choices = [];
+    // Level-up existing weapons that aren't capped
+    for (const w of player.weapons)
+    {
+        if (w.level < 5)
+        {
+            choices.push({
+                label: emojiForWeapon(w.constructor.name.replace(/Weapon$/, '')) +
+                       ' ' + w.name + ' → Lv ' + (w.level + 1),
+                apply: () => w.levelUp(),
+            });
+        }
+    }
+    // Unlock new weapons (cap at 3 total in MVP)
+    if (player.weapons.length < 3)
+    {
+        const have = new Set(player.weapons.map(w =>
+            w.constructor.name.replace(/Weapon$/, '')));
+        for (const name of ALL_WEAPONS)
+        {
+            if (have.has(name)) continue;
+            choices.push({
+                label: emojiForWeapon(name) + ' Unlock ' + name + ' (Lv 1)',
+                apply: () => player.weapons.push(makeWeaponByName(name)),
+            });
+        }
+    }
+    // Generic max-hp pad
+    choices.push({
+        label: '❤️ +10 Max HP (and heal)',
+        apply: () => { player.maxHp += 10; player.hp = min(player.maxHp, player.hp + 10); },
+    });
+
+    // Random shuffle and pick up to 3
+    for (let i = choices.length - 1; i > 0; --i)
+    {
+        const j = randInt(i + 1);
+        [choices[i], choices[j]] = [choices[j], choices[i]];
+    }
+    return choices.slice(0, 3);
+}
+
+function showLevelUpMenu()
+{
+    const choices = buildUpgradeChoices();
+    const existing = getMenu('levelup');
+    if (existing) existing.destroy();
+
+    createMenu({
+        id: 'levelup',
+        title: 'LEVEL UP',
+        subtitle: 'Lv ' + player.level,
+        dismissable: false,
+        items: choices.map(c => ({
+            type: 'button',
+            label: c.label,
+            onClick: () =>
+            {
+                c.apply();
+                hideMenu('levelup');
+                getMenu('levelup').destroy();
+                player.pendingLevelUps--;
+                if (player.pendingLevelUps > 0)
+                {
+                    requestAnimationFrame(showLevelUpMenu);
+                }
+            },
+        })),
+    });
+    showMenu('levelup');
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
     elapsedTime += 1 / 60;
+    if (player.pendingLevelUps > 0 && !isMenuVisible())
+    {
+        showLevelUpMenu();
+        return;
+    }
     updateSpawner();
     for (const w of player.weapons) w.update();
 }
