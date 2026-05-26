@@ -251,6 +251,7 @@ class Chest extends EngineObject
             const tip = this.pos.add(vec2().setAngle(a, 3));
             chainFlashes.push({a: this.pos.copy(), b: tip, t: time + .5});
         }
+        if (sounds.chest && sounds.chest.play) sounds.chest.play();
     }
 
     render()
@@ -375,6 +376,7 @@ class Enemy extends EngineObject
             player.hp -= this.dmg;
             player.hurtTimer = .25;
             this.hitCooldown = .4;
+            if (sounds.hurt && sounds.hurt.play) sounds.hurt.play();
             // small knockback so we don't re-hit instantly
             const away = this.pos.subtract(player.pos).normalize(.5);
             this.pos = this.pos.add(away);
@@ -463,6 +465,13 @@ class Enemy extends EngineObject
     {
         this.hp -= amount;
         this.hitFlashTimer = .08;
+        // throttle damage numbers — multiple weapons hitting the same enemy
+        // every frame would otherwise flood the screen
+        if (!this._lastDmgT || time - this._lastDmgT > .12)
+        {
+            spawnDamageNumber(this.pos, amount);
+            this._lastDmgT = time;
+        }
         if (this.hp <= 0) this.destroy();
     }
 }
@@ -548,21 +557,25 @@ class Pickup extends EngineObject
             if (this.kind === 'gem')
             {
                 player.xp += this.value * player.xpGainMult;
+                playPickupSound(sounds.pickup);
                 while (player.xp >= xpToNext(player.level))
                 {
                     player.xp -= xpToNext(player.level);
                     player.level++;
                     player.pendingLevelUps = (player.pendingLevelUps || 0) + 1;
+                    if (sounds.levelUp && sounds.levelUp.play) sounds.levelUp.play();
                 }
             }
             else if (this.kind === 'heart')
             {
                 player.hp = min(player.maxHp, player.hp + this.value);
+                if (sounds.heart && sounds.heart.play) sounds.heart.play();
             }
             else if (this.kind === 'coin')
             {
                 coinsRun += this.value;
                 coins += this.value;
+                playPickupSound(sounds.coin);
             }
             this.destroy();
         }
@@ -625,6 +638,57 @@ class OrbitingStarWeapon
 }
 // Transient lightning segments — drawn fading by drawChainFlashes() each frame.
 const chainFlashes = [];
+
+// Floating damage numbers — small text that rises and fades for hit feedback.
+// Per-enemy throttled in Enemy.takeDamage so 60Hz DOTs / multi-orbit hits
+// don't flood the screen.
+const damageNumbers = [];
+const DAMAGE_NUMBER_LIFETIME = .7;
+
+function spawnDamageNumber(pos, value, color)
+{
+    damageNumbers.push({
+        pos: pos.copy(),
+        value: max(1, Math.ceil(value)),
+        t: time + DAMAGE_NUMBER_LIFETIME,
+        color: color || new Color(1, .95, .85),
+    });
+}
+
+function drawDamageNumbers()
+{
+    for (let i = damageNumbers.length - 1; i >= 0; --i)
+    {
+        const d = damageNumbers[i];
+        const remaining = d.t - time;
+        if (remaining <= 0) { damageNumbers.splice(i, 1); continue; }
+        const age = DAMAGE_NUMBER_LIFETIME - remaining;
+        const yOffset = age * 1.8;
+        const alpha = remaining / DAMAGE_NUMBER_LIFETIME;
+        const c = d.color;
+        drawText(String(d.value),
+                 vec2(d.pos.x, d.pos.y + yOffset),
+                 .75,
+                 new Color(c.r, c.g, c.b, alpha),
+                 .12, new Color(0, 0, 0, alpha * .9));
+    }
+}
+
+// Drop shadows — only for the player and bosses so we don't drown the screen
+// in shadows when the swarm hits hundreds of enemies. Drawn in gameRender
+// after the floor so they sit under everything else.
+function drawShadows()
+{
+    for (const obj of engineObjects)
+    {
+        if (obj.destroyed) continue;
+        const wants = obj === player || (obj instanceof Enemy && obj.isBoss);
+        if (!wants) continue;
+        const pos = obj.pos.subtract(vec2(0, obj.size.y * .35));
+        const size = vec2(obj.size.x * .8, obj.size.y * .22);
+        drawTile(pos, size, sprites.shadow, new Color(0, 0, 0, .35));
+    }
+}
 
 class ChainLightningWeapon
 {
@@ -1217,6 +1281,7 @@ function spawnBoss(def)
     const pos = player.pos.add(vec2().setAngle(rand(2 * PI), 22));
     const boss = new Enemy(pos, synth, null, def);
     activeBoss = boss;
+    if (sounds.bossSpawn && sounds.bossSpawn.play) sounds.bossSpawn.play();
     if (typeof showMenuToast === 'function')
         showMenuToast({icon: '⚠️', title: 'BOSS', text: def.name,
                        duration: 3, position: 'top-right'});
@@ -1287,6 +1352,18 @@ let coinsRun = 0;       // coins earned in the current run
 let gameOver = false;
 let gameOverFrameCount = 0;
 let isPlaying = false;  // false on title / hero-select; true during a run
+
+// Sound effects bag — populated in gameInit so the user-gesture audio gate
+// has fired by the time anything calls .play().
+const sounds = {};
+let _lastPickupSoundT = 0;
+function playPickupSound(s)
+{
+    // throttle so a magnet pulling 50 gems doesn't become 50 simultaneous tones
+    if (time - _lastPickupSoundT < .04) return;
+    _lastPickupSoundT = time;
+    if (s && s.play) s.play();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // HEROES + META PROGRESSION
@@ -1363,6 +1440,7 @@ function startRun(hero)
             obj.destroy();
     }
     chainFlashes.length = 0;
+    damageNumbers.length = 0;
     spawner.timer = 0;
     spawner.interval = 1.5;
     elapsedTime = 0;
@@ -1480,6 +1558,15 @@ async function gameInit()
     sprites.chest     = drawToTexture(26, paintEmoji('🎁'), 'a wrapped gift box with bow');
     sprites.coin      = drawToTexture(27, paintEmoji('💰'), 'a gold coin or money bag');
 
+    // black ellipse shadow used as a ground decal under the player + bosses
+    sprites.shadow    = drawToTexture(28, ctx =>
+    {
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(125, 125, 115, 48, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }, 'a black flat ellipse shadow');
+
     // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
     sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
     sprites.tree2     = drawToTexture(33, paintEmoji('🌲'), 'an evergreen pine tree');
@@ -1498,6 +1585,18 @@ async function gameInit()
         select:   () => sound_select.play(),
         activate: () => sound_activate.play(),
     });
+
+    // Gameplay sound effects — via SoundGenerator (zzfx wrapper). Volumes are
+    // intentionally low because they layer with weapon fire / hit flashes a lot.
+    sounds.pickup    = new SoundGenerator({frequency: 880,  release: .08, pitchJump: 240, pitchJumpTime: .03, volume: .25});
+    sounds.coin      = new SoundGenerator({frequency: 1320, release: .15, pitchJump: 660, pitchJumpTime: .05, volume: .35});
+    sounds.heart     = new SoundGenerator({frequency: 660,  release: .25, pitchJump: 330, pitchJumpTime: .08, volume: .4});
+    sounds.levelUp   = new SoundGenerator({frequency: 523,  release: .4,  pitchJump: 392, pitchJumpTime: .12, volume: .5});
+    sounds.hurt      = new SoundGenerator({frequency: 120,  release: .18, noise: .35, volume: .55});
+    sounds.bossSpawn = new SoundGenerator({frequency: 60,   release: 1.2, noise: .25, slide: -8, volume: .6});
+    sounds.chest     = new SoundGenerator({frequency: 660,  release: .5,  pitchJump: 880, pitchJumpTime: .15, volume: .55});
+    sounds.gameOver  = new SoundGenerator({frequency: 220,  release: .9,  slide: -80, volume: .6});
+    sounds.victory   = new SoundGenerator({frequency: 523,  release: .9,  pitchJump: 784, pitchJumpTime: .25, volume: .6});
 
     loadMetaState();
 
@@ -1742,6 +1841,7 @@ function goToTitle()
             obj.destroy();
     }
     chainFlashes.length = 0;
+    damageNumbers.length = 0;
     bossesSpawned.clear();
     activeBoss = null;
     reaperSpawned = false;
@@ -1770,6 +1870,7 @@ function goToTitle()
 function showGameOverMenu()
 {
     endRun();
+    if (sounds.gameOver && sounds.gameOver.play) sounds.gameOver.play();
     const existing = getMenu('gameover');
     if (existing) existing.destroy();
     createMenu({
@@ -1790,6 +1891,7 @@ function showGameOverMenu()
 function showVictoryMenu()
 {
     endRun();
+    if (sounds.victory && sounds.victory.play) sounds.victory.play();
     const existing = getMenu('victory');
     if (existing) existing.destroy();
     createMenu({
@@ -1912,7 +2014,9 @@ function gameRender()
 {
     drawGround();
     drawWalls();
+    drawShadows();
     drawChainFlashes();
+    drawDamageNumbers();
 }
 function formatTime(s)
 {
