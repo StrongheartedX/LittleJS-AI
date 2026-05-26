@@ -42,8 +42,9 @@ const RAPID_STOP_THRESHOLD = 1.0;       // below this world-units/sec we squash 
 const RAPID_STOP_FACTOR    = 0.95;      // velocity multiplier applied each frame while in the rapid-stop band
 
 // Visual tuning
-const SHADOW_ALPHA  = .5;              // shared shadow opacity for balls + cue stick (0 = invisible, 1 = solid black)
+const SHADOW_ALPHA  = .5;               // shared shadow opacity for balls + cue stick (0 = invisible, 1 = solid black)
 const OUTLINE_WIDTH = .03;              // extra radius past the ball edge for the black outline ring (0 = no outline)
+const SINK_END_SCALE = .7;             // ball scale at the END of the sink animation (1 = no shrink, 0 = vanish to a point)
 
 // Cue stick dimensions (world units)
 const CUE_LENGTH  = 14;                 // length from leather tip to butt
@@ -90,6 +91,8 @@ let won = false;
 let scratchedThisShot = false;
 let inHand = false;      // true after a scratch — cue ball follows the mouse until placed
 let wheelPower = 0;      // wheel-driven power offset added on top of mouse drag (cleared on each shot)
+let sinking = [];        // visual-only sink animations — physics already destroyed; see updateSinking
+const SINK_TIME = .5;    // seconds to lerp from contact point to pocket center
 
 // Best (lowest) shot count to clear the table, persisted across sessions.
 const BEST_KEY = 'pool.bestShots';
@@ -154,9 +157,9 @@ function drawTable()
 
     // head string / foot spot dots
     const headX = -TABLE_SIZE.x/4;
-    drawLine(vec2(headX, -TABLE_SIZE.y/2), vec2(headX, TABLE_SIZE.y/2), .04, rgb(1,1,1,.10));
-    drawCircle(vec2(TABLE_SIZE.x/4, 0), .12, rgb(1,1,1,.25));
-    drawCircle(vec2(headX, 0),         .12, rgb(1,1,1,.25));
+    drawLine(vec2(headX, -TABLE_SIZE.y/2), vec2(headX, TABLE_SIZE.y/2), .1, rgb(1,1,1,.10));
+    drawCircle(vec2(TABLE_SIZE.x/4, 0), .2, rgb(1,1,1,.25));
+    drawCircle(vec2(headX, 0),         .2, rgb(1,1,1,.25));
 }
 
 // Rhombus marker for rail sights. `tall` = true → long axis vertical (used on
@@ -174,14 +177,26 @@ function drawDiamond(pos, tall)
     ], rgb(.95,.92,.85));
 }
 
-function drawPocket(pos)
+// Split into two passes so sinking balls can be drawn BETWEEN the soft pocket
+// shadow and the solid black hole — the hole then covers the shrinking ball
+// as it descends, selling the "falling in" illusion.
+function drawPocketShadow(pos)
 {
-    // soft outer shadow as a single radial gradient (black at center → transparent)
     drawCircleGradient(pos, POCKET_DIAM*2, rgb(0,0,0,.65), rgb(0,0,0,0));
-    // black hole
+}
+function drawPocketHole(pos)
+{
     drawCircle(pos, POCKET_DIAM*1.10, rgb(0,0,0,1));
-    // tiny rim highlight
     drawCircle(pos, POCKET_DIAM*0.90, rgb(.08,.04,.02,1));
+}
+
+// Render a sinking ball at its lerped position, shrinking as it descends.
+// `SINK_END_SCALE` controls how small it gets at t=1; `SINK_TIME` controls how long.
+function drawSinkingBall(s)
+{
+    const pos = s.fromPos.add(s.toPos.subtract(s.fromPos).scale(s.t));
+    const scale = lerp(1, SINK_END_SCALE, s.t);
+    drawTile(pos, vec2(BALL_DIAM * scale), ballTiles[s.number], WHITE, 0);
 }
 
 // Cue tip distance from ball center at each animation keyframe.
@@ -376,12 +391,21 @@ class Ball extends Box2dObject
         super.update();
         if (this.pocketed)
         {
-            if (this === cueBall)
+            // Start the sink animation. Physics body is destroyed immediately
+            // so the ball stops interacting with anything; updateSinking()
+            // lerps it visually into the pocket center and fires the actual
+            // "sunk" effects (scratch/win/best score) once the lerp completes.
+            const isCue = (this === cueBall);
+            sinking.push({
+                number:  this.number,
+                fromPos: this.pos.copy(),
+                toPos:   this.pocketPos || this.pos.copy(),
+                t:       0,
+                isCue,
+            });
+
+            if (isCue)
             {
-                // SCRATCH — enter ball-in-hand placement. cue ball respawns
-                // once all balls stop and the player drags it into position.
-                scratchedThisShot = true;
-                inHand = true;
                 sfxScratch.play();
                 this.destroy();
                 cueBall = null;
@@ -392,18 +416,6 @@ class Ball extends Box2dObject
                 this.destroy();
                 const i = balls.indexOf(this);
                 if (i >= 0) balls.splice(i, 1);
-                if (!balls.length)
-                {
-                    won = true;
-                    // record best (lowest) shots if this beats the saved value
-                    if (!bestShots || shots < bestShots)
-                    {
-                        bestShots = shots;
-                        localStorage.setItem(BEST_KEY, bestShots);
-                        newBestThisRound = true;
-                    }
-                    sfxWin.play();
-                }
             }
         }
     }
@@ -437,7 +449,14 @@ class Pocket extends Box2dStaticObject
         this.pos = pos.copy();
         this.addCircle(POCKET_DIAM, vec2(), 0, 0, 0, true); // sensor
     }
-    beginContact(other) { other.pocketed = 1; }
+    beginContact(other)
+    {
+        // Record which pocket caught the ball so Ball.update can animate the
+        // sink toward this pocket's center.
+        if (other.pocketed) return; // already on its way
+        other.pocketed = 1;
+        other.pocketPos = this.pos.copy();
+    }
     render() {} // drawn in gameRender so it sits under the balls
 }
 
@@ -524,6 +543,7 @@ function newGame()
     newBestThisRound = false;
     strike = null;
     wheelPower = 0;
+    sinking.length = 0;
 }
 
 // Clamp a world-space position so the cue ball stays inside the felt.
@@ -576,6 +596,7 @@ function drawCueBallPreview(pos, valid)
 
 function allStopped()
 {
+    if (sinking.length) return false;   // wait for sink animations before declaring the turn over
     if (cueBall && cueBall.getSpeed() > STOP_SPEED) return false;
     for (const b of balls)
         if (b.getSpeed() > STOP_SPEED) return false;
@@ -671,6 +692,16 @@ async function gameInit()
         subtitle: 'Sink them all',
         onPlay: startPlay,
         revealOnClick: false,
+        // Best score sits above PLAY. onShow re-syncs the label every time
+        // the title is surfaced so a fresh win updates it before the next round.
+        itemsBefore: [
+            {type:'label', id:'bestLabel', text: bestShots ? `BEST  ${bestShots}` : ''},
+        ],
+        onShow: () =>
+        {
+            const item = getMenu('title')?.getItem('bestLabel');
+            item?.setLabel(bestShots ? `BEST  ${bestShots}` : '');
+        },
         items: [
             {type:'button', label:'ABOUT', onClick: () => pushMenu('about')},
         ],
@@ -887,6 +918,49 @@ function gameUpdatePost()
     // while everything coasts. Above the threshold, normal damping handles it.
     rapidStop(cueBall);
     for (const b of balls) rapidStop(b);
+
+    updateSinking();
+}
+
+// Advance sink animations. When an entry reaches t = 1 the ball is "really"
+// sunk — set scratch / win flags here, not at the moment of pocket contact,
+// so the player sees the suck-in finish before any state change kicks in.
+function updateSinking()
+{
+    let numberedSunk = false;
+    for (let i = sinking.length - 1; i >= 0; i--)
+    {
+        const s = sinking[i];
+        s.t = min(1, s.t + timeDelta / SINK_TIME);
+        if (s.t >= 1)
+        {
+            if (s.isCue)
+            {
+                scratchedThisShot = true;
+                inHand = true;
+            }
+            else
+            {
+                numberedSunk = true;
+            }
+            sinking.splice(i, 1);
+        }
+    }
+
+    // Win fires only after the last numbered ball finishes sinking. Gate on
+    // sinking.length too in case the cue scratched at the same time — wait
+    // until everything has finished animating.
+    if (numberedSunk && !won && !balls.length && !sinking.length)
+    {
+        won = true;
+        if (!bestShots || shots < bestShots)
+        {
+            bestShots = shots;
+            localStorage.setItem(BEST_KEY, bestShots);
+            newBestThisRound = true;
+        }
+        sfxWin.play();
+    }
 }
 
 function rapidStop(b)
@@ -904,7 +978,12 @@ function gameRender()
     // as a backdrop. Numbered balls / cue ball render themselves as
     // engine objects (also always-on), so the rack is visible too.
     drawTable();
-    for (const p of pockets) drawPocket(p.pos);
+    // Pocket render — sinking balls draw ON TOP of the pocket hole so they
+    // stay visible all the way through the animation (instead of being
+    // covered by the black hole as they approach the center).
+    for (const p of pockets) drawPocketShadow(p.pos);
+    for (const p of pockets) drawPocketHole(p.pos);
+    for (const s of sinking) drawSinkingBall(s);
 
     // Shadow pre-pass — ball + cue-stick shadows are drawn here so the
     // engine's object render pass paints balls and the gameRenderPost stick
