@@ -2119,9 +2119,11 @@ async function gameInit()
     sCounterLand = new SoundGenerator({frequency:120,release:.12,volume:.6,noise:.1});
     sGameOver  = new SoundGenerator({frequency:120,release:.6,volume:.9,slide:-.5,noise:.1});
 
+    const menuSelectSound = new Sound([1,.1,400,,.05,.1,1]);
+    const menuActivateSound = new Sound([1,.1,600,,.05,.1,2]);
     setMenuSounds({
-        select: new Sound([1,.1,400,,.05,.1,1]),
-        activate: new Sound([1,.1,600,,.05,.1,2]),
+        select: () => menuSelectSound.play(),
+        activate: () => menuActivateSound.play(),
     });
 
     matchState = 'title';
