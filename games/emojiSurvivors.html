@@ -68,7 +68,8 @@ class Player extends EngineObject
 {
     constructor()
     {
-        super(vec2(0, 0), vec2(1.2), sprites.player);
+        super(vec2(0, 0), vec2(1.2),
+              sprites[(currentHero && currentHero.spriteKey) || 'heroWizard']);
         this.maxHp = playerMaxHp;
         this.hp = this.maxHp;
         this.speed = playerSpeed;
@@ -130,7 +131,7 @@ class Player extends EngineObject
             if (this.hurtTimer % .1 < .05)
                 additive = new Color(.5, 0, 0);
         }
-        drawEmoji(this.pos, this.size, sprites.player, tint, additive);
+        drawEmoji(this.pos, this.size, this.tileInfo, tint, additive);
     }
 }
 
@@ -1375,16 +1376,16 @@ function playPickupSound(s)
 
 const HEROES = [
     {key:'wizard', emoji:'🧙', name:'Wizard',  weapon:'Fireball',
-        stats:{areaMult: 1.15},
+        spriteKey:'heroWizard', stats:{areaMult: 1.15},
         blurb:'Balanced caster, +15% area'},
     {key:'smiley', emoji:'🙂', name:'Smiley',  weapon:'PizzaToss',
-        stats:{},
+        spriteKey:'heroSmiley', stats:{},
         blurb:'Pizza ace, all-rounder'},
     {key:'cat',    emoji:'🐱', name:'Cat',     weapon:'OrbitingStar',
-        stats:{moveSpeedMult: 1.2, maxHpMult: .85},
+        spriteKey:'heroCat',    stats:{moveSpeedMult: 1.2, maxHpMult: .85},
         blurb:'Quick on its paws, fragile'},
     {key:'bot',    emoji:'🤖', name:'Bot',     weapon:'ChainLightning',
-        stats:{cooldownMult: 1.15, projSpeedMult: 1.15},
+        spriteKey:'heroBot',    stats:{cooldownMult: 1.15, projSpeedMult: 1.15},
         blurb:'Fires fast, projectiles fly fast'},
 ];
 
@@ -1418,11 +1419,10 @@ function saveMetaState()
 
 function applyHero(hero)
 {
+    // Just records the choice — the player sprite is whichever hero tile
+    // (slot 0-3) was already painted in gameInit. New Player() reads
+    // currentHero.spriteKey to pick the right tile.
     currentHero = hero;
-    // Repaint the player sprite slot so the player emoji matches the choice.
-    // sprites.player TileInfo is unchanged — drawToTexture writes into the
-    // same atlas cell and the next render shows the new glyph.
-    drawToTexture(0, paintEmoji(hero.emoji), hero.emoji + ' player');
 }
 
 function startRun(hero)
@@ -1545,7 +1545,12 @@ async function gameInit()
 {
     initDrawToTexture(8);
 
-    sprites.player    = drawToTexture(0,  paintEmoji('🧙'), 'a wizard in robes, facing forward');
+    // hero sprites — painted once at startup; HEROES[*].spriteKey selects
+    // which one the player uses. Avoids any mid-game atlas re-upload.
+    sprites.heroWizard = drawToTexture(0, paintEmoji('🧙'), 'wizard hero');
+    sprites.heroSmiley = drawToTexture(1, paintEmoji('🙂'), 'smiley hero');
+    sprites.heroCat    = drawToTexture(2, paintEmoji('🐱'), 'cat hero');
+    sprites.heroBot    = drawToTexture(3, paintEmoji('🤖'), 'bot hero');
 
     // enemies 8-13
     sprites.zombie    = drawToTexture(8,  paintEmoji('🧟'), 'a green zombie shambling forward');
@@ -1868,9 +1873,8 @@ function goToTitle()
     elapsedTime = 0;
     isPlaying = false;
 
-    // Reset the player sprite to the default wizard so the title backdrop
-    // doesn't keep showing the previous hero.
-    drawToTexture(0, paintEmoji('🧙'));
+    // Reset the title backdrop to the default wizard hero.
+    currentHero = HEROES[0];
     player = new Player();
     player.weapons = [];
     player.passives = [];
