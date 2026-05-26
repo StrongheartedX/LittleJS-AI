@@ -49,6 +49,38 @@ function paintEmoji(emoji, sizeMul = .85)
     };
 }
 
+let player;
+
+class Player extends EngineObject
+{
+    constructor()
+    {
+        super(vec2(0, 0), vec2(1.2), sprites.player);
+        this.maxHp = 100;
+        this.hp = this.maxHp;
+        this.speed = 6;
+        // Disable engine-driven physics — we want exact velocity control.
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;  // emoji is upright; don't let it spin
+        this.setCollision(false, false, false, false);  // no built-in collisions
+    }
+
+    update()
+    {
+        const dir = keyDirection().add(gamepadStick(0));
+        const move = dir.length() > 1 ? dir.normalize() : dir;
+        this.velocity = move.scale(this.speed / 60);  // velocity is per-frame
+
+        super.update();
+
+        // arena clamp
+        this.pos.x = clamp(this.pos.x, ARENA_MIN_X + .6, ARENA_MAX_X - .6);
+        this.pos.y = clamp(this.pos.y, ARENA_MIN_Y + .6, ARENA_MAX_Y - .6);
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
@@ -77,6 +109,8 @@ async function gameInit()
 
     canvasClearColor = hsl(.3, .15, .05);  // dark forest-floor green
 
+    inputWASDEmulateDirection = true;
+
     // menus.js wiring — any visible menu auto-pauses the engine.
     setMenuVisibilityCallback(v => paused = v);
     const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
@@ -85,11 +119,16 @@ async function gameInit()
         select:   () => sound_select.play(),
         activate: () => sound_activate.play(),
     });
+
+    player = new Player();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate() { }
-function gameUpdatePost() { }
+function gameUpdatePost()
+{
+    cameraPos = player.pos;
+}
 function gameRender() { }
 function gameRenderPost() { }
 
