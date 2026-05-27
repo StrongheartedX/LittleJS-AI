@@ -2422,7 +2422,7 @@ function persistedRead(key, defaultValue, kind)
             'persist:"' + key + '" read before saveDataInit(name); using default');
         return defaultValue;
     }
-    const raw = _gameSaveData.options && _gameSaveData.options[key];
+    const raw = _gameSaveData.options?.[key];
     if (raw === undefined) return defaultValue;
     if (kind === 'number')
         return Number.isFinite(+raw) ? +raw : defaultValue;
