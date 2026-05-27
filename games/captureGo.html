@@ -662,7 +662,7 @@ function startGame(mode)
 function setDifficulty(d)
 {
     difficulty = d;
-    localStorage.setItem('captureGo.difficulty', d);
+    saveData({difficulty: d});
     refreshDifficultyUI();
 }
 
@@ -697,10 +697,11 @@ function quitToTitle()
 
 async function gameInit()
 {
+    saveDataInit('captureGo');
     setCanvasFixedSize(vec2(600, 820));
     cameraPos       = vec2(0, 0);
     canvasClearColor = new Color().setHex('#0d0d14');
-    difficulty = localStorage.getItem('captureGo.difficulty') || 'medium';
+    difficulty = getSaveData().difficulty ?? 'medium';
     setSoundVolume(0.8);
 
     // One callback drives `paused` for every menu (including dialogs).
@@ -729,7 +730,7 @@ async function gameInit()
 
     // ----- options menu -----
     createOptionsMenu({
-        persistKey: 'captureGo.volume',
+        persistKey: 'volume',
         extraItems: [
             {type:'separator'},
             {type:'label', text:'DIFFICULTY'},
