@@ -702,6 +702,8 @@ function updateAI()
   {
     if (!m.alive) continue;
     if (isHarmless(m.target)) continue;
+    // Smart bombs dodge — long shots whiff. Wait until they're low.
+    if (m.smart && m.pos.y > levelSize.y * .40) continue;
     const dir = m.target.subtract(m.start).normalize();
     const pred = m.pos.add(dir.scale(m.speed * horizon));
     threats.push({ pos: pred, altitude: m.pos.y });
