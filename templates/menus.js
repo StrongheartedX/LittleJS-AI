@@ -1255,16 +1255,16 @@ function _writeGlobalSaveData()
 // Shared mute state — single source of truth for the toolbar's 🔊/🔇
 // button and any options-menu volume slider. Refactored out of
 // installDefaultToolbar so a volume change can keep the mute icon in
-// sync (and vice versa). Persists to localStorage['menu.muted']; the
-// saved volume restores on unmute so a user's slider preference survives.
-const _MUTE_STORAGE_KEY = 'menu.muted';
+// sync (and vice versa). Persists in the 'littlejs.global' save blob;
+// the saved volume restores on unmute so a user's slider preference
+// survives.
 let _menuMuted = false;
 let _menuSavedVolume = 0.3;
 function _initMuteState()
 {
     if (_initMuteState._done) return;
     _initMuteState._done = true;
-    _menuMuted = localStorage.getItem(_MUTE_STORAGE_KEY) === '1';
+    _menuMuted = !!_readGlobalSaveData().muted;
     if (typeof soundVolume === 'number' && soundVolume > 0)
         _menuSavedVolume = soundVolume;
     if (_menuMuted && typeof setSoundVolume === 'function')
@@ -1288,7 +1288,8 @@ function setMenuMuted(muted)
         if (typeof setSoundVolume === 'function')
             setSoundVolume(_menuSavedVolume || 0.3);
     }
-    localStorage.setItem(_MUTE_STORAGE_KEY, _menuMuted ? '1' : '0');
+    _readGlobalSaveData().muted = _menuMuted;
+    _writeGlobalSaveData();
     _refreshMuteUI();
 }
 function toggleMenuMuted() { setMenuMuted(!isMenuMuted()); }
