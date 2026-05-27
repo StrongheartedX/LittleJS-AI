@@ -20,6 +20,7 @@ gravity = vec2(0, 0);
 cameraPos = vec2(0, 0);
 canvasMaxSize = vec2(2048, 2048);
 setTileDefaultBleed(0);
+tilesPixelated = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 // LEVEL
@@ -448,8 +449,9 @@ async function gameInit()
     lampTile       = drawToTexture(11, paintLamp,      'tall lamp on a pole with a glowing yellow-white bulb');
     barrelTile     = drawToTexture(12, paintBarrel,    'wooden barrel with iron bands and a yellow hazard stripe');
 
-    // wall-column sampler (mutated per slice)
-    wallSliceInfo = new TileInfo(vec2(0, 0), vec2(2, CELL_PIX), textureInfos[0], 0);
+    // wall-column sampler (mutated per slice). bleed=0.5 keeps subpixel
+    // filtering from reaching past the tile edge into the atlas gutter.
+    wallSliceInfo = new TileInfo(vec2(0, 0), vec2(2, CELL_PIX), textureInfos[0], 0, .5);
 
     setSoundVolume(.7);
     setMenuVisibilityCallback(v => paused = v);
@@ -843,7 +845,10 @@ function gameRender()
         const u = Math.abs(wallNormal.x) > .5
             ? (hit.y - Math.floor(hit.y))   // vertical wall — sample along Y
             : (hit.x - Math.floor(hit.x));  // horizontal wall — sample along X
-        const samplePx = origin.x + u * CELL_PIX;
+        // clamp so the 2-px sample never crosses the right tile edge into the
+        // atlas gutter — that's what was showing as transparent vertical cracks
+        // at every cell seam.
+        const samplePx = origin.x + Math.min(CELL_PIX - 2, u * CELL_PIX);
 
         // lighting: face the +X-leaning light, shadow walls facing away
         const lit = Math.max(0, wallNormal.x * .5 + wallNormal.y * .8);
