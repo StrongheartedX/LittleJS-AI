@@ -53,7 +53,6 @@ let scrollSpeed = 0;
 let score = 0;
 let distance = 0;
 let bestScore = 0;
-try { bestScore = +localStorage.getItem('skiing.best') || 0; } catch(e) {}
 let gameTime = 0;
 let gameState = 'playing'; // 'playing', 'crashed'
 let gameStarted = false;
@@ -218,7 +217,7 @@ class Player
         gameState = 'crashed';
         if (score > bestScore) {
             bestScore = score;
-            try { localStorage.setItem('skiing.best', bestScore|0); } catch(e) {}
+            saveData({bestScore});
         }
         sfxCrash && sfxCrash.play(this.pos);
 
@@ -574,6 +573,8 @@ function resetGame()
 
 async function gameInit()
 {
+    saveDataInit('skiing');
+    bestScore = getSaveData().bestScore ?? 0;
     setCanvasFixedSize(vec2(1440, 900));
     cameraPos = vec2(0, 0);
 
