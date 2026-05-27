@@ -656,9 +656,9 @@
   </div>
   <div id="list"></div>
   <div id="sidebar-footer">
-    <a class="btn" id="sourceBtn" target="_blank" rel="noopener" title="View the LittleJS-AI repo on GitHub">Source ↗</a>
+    <a class="btn" id="sourceBtn" target="_blank" rel="noopener" title="View the LittleJS-AI repo on GitHub">Source { }</a>
+    <button class="btn" id="shareBtn" title="Share this link">Share ↗</button>
     <button class="btn" id="fullscreenBtn" title="Fullscreen the whole page">Full ⛶</button>
-    <a class="btn disabled" id="openBtn" target="_blank" rel="noopener" title="Open in a new tab">Open ↗</a>
   </div>
 </aside>
 
@@ -761,7 +761,7 @@ const frameEl = document.getElementById('frame');
 const welcomeEl = document.getElementById('welcome');
 const sourceBtn = document.getElementById('sourceBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
-const openBtn = document.getElementById('openBtn');
+const shareBtn = document.getElementById('shareBtn');
 // Base URL for the per-game "Source ↗" button — points at the game file on GitHub.
 const SOURCE_BASE = 'https://github.com/KilledByAPixel/LittleJS-AI/blob/main/games/';
 const MAIN_REPO   = 'https://github.com/KilledByAPixel/LittleJS-AI';
@@ -1088,8 +1088,7 @@ function showWelcome(pushHistory = true) {
   sourceBtn.href = MAIN_REPO;
   sourceBtn.title = 'View the LittleJS-AI repo on GitHub';
   fullscreenBtn.title = 'Fullscreen the whole page';
-  openBtn.classList.add('disabled');
-  openBtn.removeAttribute('href');
+  shareBtn.title = 'Share the LittleJS Mini Arcade';
   // Push a history entry only on user-driven game→library transitions,
   // so the browser back button can return to the previously played game.
   const clean = location.pathname + location.search;
@@ -1115,8 +1114,7 @@ function selectGame(file, pushHistory = true) {
   sourceBtn.href = SOURCE_BASE + file;
   sourceBtn.title = "View this game's source on GitHub";
   fullscreenBtn.title = 'Play this game fullscreen';
-  openBtn.classList.remove('disabled');
-  openBtn.href = file;
+  shareBtn.title = 'Share a link to this game';
   localStorage.setItem(LAST_GAME_KEY, file);
   const newHash = '#' + file.replace(/\.html$/, '');
   if (location.hash !== newHash) {
@@ -1164,6 +1162,27 @@ fullscreenBtn.addEventListener('click', () => {
     // Library view → toggle the whole page in/out of fullscreen.
     if (document.fullscreenElement) document.exitFullscreen();
     else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  }
+});
+
+// Share — uses the native share sheet on mobile/Safari, falls back to copying
+// the URL to the clipboard with a brief "Copied!" label swap.
+shareBtn.addEventListener('click', async () => {
+  const url = location.href;
+  const title = currentFile
+    ? (gameByFile[currentFile].name + ' · LittleJS Mini Arcade')
+    : 'LittleJS Mini Arcade';
+  if (navigator.share) {
+    try { await navigator.share({ title, url }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; /* else fall through */ }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    const orig = shareBtn.textContent;
+    shareBtn.textContent = 'Copied!';
+    setTimeout(() => { shareBtn.textContent = orig; }, 1200);
+  } catch {
+    prompt('Copy this URL:', url);
   }
 });
 
