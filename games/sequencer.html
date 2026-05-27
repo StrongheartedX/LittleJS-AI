@@ -303,24 +303,6 @@ function closePasteModal()
     setTimeout(()=> m.destroy(), 0);
 }
 
-function showConfirm(message, onYes)
-{
-    const modal = new UIObject(vec2(), vec2(500, 220));
-    modal.isMouseOverlapping = ()=> true;
-
-    modal.addChild(new UIText(vec2(0,-40), vec2(440, 60), message));
-
-    const close = ()=> setTimeout(()=> modal.destroy(), 0);
-
-    const btnYes = new UIButton(vec2(-90, 50), vec2(140, 60), 'YES');
-    btnYes.onClick = ()=> { close(); onYes && onYes(); };
-    modal.addChild(btnYes);
-
-    const btnNo = new UIButton(vec2(90, 50), vec2(140, 60), 'NO');
-    btnNo.onClick = close;
-    modal.addChild(btnNo);
-}
-
 function clearAllCells()
 {
     for (const obj of uiSystem.uiObjects)
@@ -368,28 +350,46 @@ function gameInit()
     for (let track=trackCount; track--;)
         new UITrackLabel(track);
 
-    const clearButton = new UIButton(vec2(100,500).subtract(mainCanvasSize.scale(.5)), vec2(140,60), 'CLEAR');
-    clearButton.onClick = ()=> showConfirm('Clear pattern?', clearAllCells);
+    createToolbar({
+        id: 'transport',
+        anchor: 'top-left',
+        direction: 'horizontal',
+        items: [
+            {type:'button', id:'play',
+                label: isPlaying ? '■ STOP' : '▶ PLAY',
+                onClick: ()=>
+                {
+                    isPlaying = !isPlaying;
+                    currentStep = stepTime = 0;
+                    getToolbar('transport').getItem('play').setLabel(isPlaying ? '■ STOP' : '▶ PLAY');
+                }},
+            {type:'button', id:'tempo',
+                label: `TEMPO: ${tempo}`,
+                onClick: ()=> {}},
+        ],
+    });
+    getToolbar('transport').show();
 
-    const playButton = new UIButton(vec2(660,500).subtract(mainCanvasSize.scale(.5)), vec2(180,60), 'PLAY');
-    playButton.onClick = ()=>
-    {
-        isPlaying = !isPlaying;
-        currentStep = stepTime = 0;
-        playButton.text = isPlaying ? 'STOP' : 'PLAY';
-    };
-
-    const minTempo = 120, maxTempo = 480;
-    const tempoPercent = percent(tempo, minTempo, maxTempo);
-    const tempoSlider = new UISlider(vec2(380,500).subtract(mainCanvasSize.scale(.5)), vec2(340,40), tempoPercent);
-    tempoSlider.onChange = ()=>
-    {
-        tempo = lerp(minTempo, maxTempo, tempoSlider.value);
-        tempo = floor(tempo/10) * 10;
-        tempoSlider.text = `${tempo} BPM`;
-        scheduleSave();
-    };
-    tempoSlider.onChange();
+    createToolbar({
+        id: 'global',
+        anchor: 'top-right',
+        direction: 'horizontal',
+        items: [
+            {type:'button', id:'clear', label:'CLEAR',
+                onClick: ()=> showConfirmDialog({
+                    title: 'CLEAR',
+                    icon: '🗑',
+                    message: 'Clear pattern?',
+                    yesLabel: 'CLEAR',
+                    noLabel: 'CANCEL',
+                    onYes: clearAllCells,
+                })},
+            {type:'button', id:'fullscreen', label:'⛶ FULLSCREEN',
+                hideOnTouch: true,
+                onClick: toggleFullscreen},
+        ],
+    });
+    getToolbar('global').show();
 }
 
 function gameUpdate()
