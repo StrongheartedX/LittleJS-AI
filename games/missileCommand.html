@@ -413,7 +413,8 @@ function resetWaveState(newWaveIndex)
 
   flierCooldown = 5;
   smartBombsToSpawn = clamp(waveIndex - 4, 0, 5) | 0;
-  sWave && sWave.play();
+  if (isPlaying)
+    sWave && sWave.play();
 }
 
 function newGame()
