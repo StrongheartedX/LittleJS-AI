@@ -974,19 +974,9 @@ function buildMenus()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button',              label:'RESTART',       onClick: () => { hideMenu('pause'); resetGame(); gameTimer = 0; }},
-            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () => quitToTitle(),
-                })},
-        ],
+    createPauseMenu({
+        onRestart: () => { resetGame(); gameTimer = 0; },
+        onQuit:    () => quitToTitle(),
     });
 
     installDefaultToolbar();

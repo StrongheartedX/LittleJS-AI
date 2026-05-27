@@ -1071,7 +1071,7 @@ function gameInit()
 
   try { bestScore = +localStorage.getItem('missilecommand.best') || 0; } catch(e) { bestScore = 0; }
 
-  installAutoPause(() => isPlaying);
+  installAutoPause();
 
   buildMenus();
 
@@ -1119,20 +1119,7 @@ function buildMenus()
     },
   });
 
-  createMenu({
-    id: 'options',
-    title: 'OPTIONS',
-    onHide: popMenu,
-    items: [
-      {type:'slider', id:'volume', label:'VOLUME', value:.28, min:0, max:1,
-        persist:'missilecommand.volume',
-        onChange: v => setSoundVolume(v)},
-      {type:'separator'},
-      {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-      {type:'separator'},
-      {type:'button', label:'BACK', onClick: () => hideMenu('options')},
-    ],
-  });
+  createOptionsMenu({persistKey: 'missilecommand.volume'});
 
   createMenu({
     id: 'about',
@@ -1150,25 +1137,11 @@ function buildMenus()
     ],
   });
 
-  createMenu({
-    id: 'pause',
-    title: 'PAUSED',
-    initialItemId: 'resume',
-    items: [
-      {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-      {type:'button', id:'restart', label:'RESTART',       onClick: () =>
-      {
-        hideMenu('pause');
-        startGame();
-      }},
-      {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
-      {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-      {
-        showConfirmDialog({
-          message:'Quit to title?',
-          onYes: quitToTitle,
-        });
-      }},
+  createPauseMenu({
+    onRestart: startGame,
+    onQuit:    quitToTitle,
+    extraItems: [
+      {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
     ],
   });
 

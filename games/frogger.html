@@ -350,7 +350,7 @@
 
     setSoundVolume(.8);
     if (typeof installAutoPause === 'function')
-        installAutoPause(() => isPlaying);
+        installAutoPause();
 
     buildLanes();
     resetRun(true);
@@ -394,18 +394,7 @@
       },
     });
 
-    createMenu({
-      id: 'options', title: 'OPTIONS', onHide: popMenu,
-      items: [
-        {type:'slider', id:'volume', label:'VOLUME', value:.8, min:0, max:1,
-          persist:'frogger.volume',
-          onChange: v => setSoundVolume(v)},
-        {type:'separator'},
-        {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-        {type:'separator'},
-        {type:'button', label:'BACK', onClick: () => hideMenu('options')},
-      ],
-    });
+    createOptionsMenu({persistKey: 'frogger.volume'});
 
     createMenu({
       id: 'about', title: 'HOW TO PLAY', onHide: popMenu,
@@ -422,15 +411,11 @@
       ],
     });
 
-    createMenu({
-      id: 'pause', title: 'PAUSED', initialItemId: 'resume',
-      items: [
-        {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-        {type:'button', id:'restart', label:'RESTART',       onClick: () => { hideMenu('pause'); startGame(); }},
-        {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
-        {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () => {
-          showConfirmDialog({ message:'Quit to title?', onYes: quitToTitle });
-        }},
+    createPauseMenu({
+      onRestart: startGame,
+      onQuit:    quitToTitle,
+      extraItems: [
+        {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
       ],
     });
 

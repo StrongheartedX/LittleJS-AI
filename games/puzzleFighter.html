@@ -2432,18 +2432,9 @@ function setupMenus()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        dismissable: true,
-        items: [
-            { type:'button', label:'RESUME',          onClick: () => hideMenu('pause') },
-            { type:'button', label:'RESTART',         onClick: () => { hideMenu('pause'); startMatchFromSelection(); } },
-            { type:'button', label:'QUIT TO TITLE',   onClick: () => { showConfirmDialog({
-                message:'Quit to title?',
-                onYes: () => quitToTitle(),
-            }); } },
-        ],
+    createPauseMenu({
+        onRestart: startMatchFromSelection,
+        onQuit:    quitToTitle,
     });
 
     createMenu({
@@ -2460,6 +2451,8 @@ function setupMenus()
 
     installDefaultToolbar();
 
+    // Character-select and round-over menus aren't pause-worthy — only
+    // freeze the engine during an actual playing match.
     installAutoPause(() => matchState === 'playing');
 }
 

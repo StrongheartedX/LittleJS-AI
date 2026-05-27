@@ -646,7 +646,7 @@ async function gameInit()
     highScore = parseInt(localStorage.getItem('breakout.highScore') || '0', 10);
 
     // One callback drives `paused` for every menu (including dialogs).
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     createTitleMenu({
         id: 'title',
@@ -664,19 +664,13 @@ async function gameInit()
         onPlay: startNewGame,
     });
 
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider',   id:'sfxVol', label:'SFX VOLUME', value:.8, min:0, max:1,
-                persist:'breakout.sfxVolume',
-                onChange: v => setSoundVolume(v)},
-            {type:'checkbox', id:'shake',  label:'SCREEN SHAKE', value:true,
+    createOptionsMenu({
+        persistKey: 'breakout.sfxVolume',
+        volumeLabel: 'SFX VOLUME',
+        extraItems: [
+            {type:'checkbox', id:'shake', label:'SCREEN SHAKE', value:true,
                 persist:'breakout.shake',
                 onChange: v => shakeEnabled = v},
-            {type:'separator'},
-            {type:'button',   label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -693,20 +687,10 @@ async function gameInit()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: backToTitle,
-                });
-            }},
+    createPauseMenu({
+        onQuit: backToTitle,
+        extraItems: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
 

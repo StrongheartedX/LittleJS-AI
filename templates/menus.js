@@ -93,6 +93,16 @@
 // while the title menu is on top, unless titleDismissable). Toolbar is
 // always visible — no per-game show/hide wiring needed.
 //
+// Standard pause + options menus:
+//   createPauseMenu({onRestart, onQuit, extraItems, confirmQuit})
+//   createOptionsMenu({volume, extraItems, persistKey})
+// Stamp out the RESUME/RESTART/extras/QUIT-TO-TITLE pause shape every game
+// hand-rolls, and an OPTIONS menu with a volume slider that syncs with
+// the toolbar's mute button.
+//
+// Mute API: isMenuMuted(), setMenuMuted(bool), toggleMenuMuted(). Single
+// shared mute state across the toolbar button and any volume slider.
+//
 // Inputs: mouse/touch always; keyboard (arrows/Enter/Esc, with arrow
 // auto-repeat) and gamepad (d-pad/stick/A/B/Start) handled automatically
 // when a menu is visible. Selection only auto-shows for keyboard/gamepad
@@ -483,9 +493,6 @@ function installDefaultToolbar(opts)
         pauseMenuId:      'pause',
         titleMenuId:      'title',
         titleDismissable: false,
-        muteStorageKey:   'menu.muted',
-        muteLabelOn:      '🔊',
-        muteLabelOff:     '🔇',
         extraItemsBefore: [],
         extraItemsAfter:  [],
         onHamburger:      null,   // override default click behavior
@@ -497,41 +504,15 @@ function installDefaultToolbar(opts)
 
     if (opts.mute)
     {
-        // Persisted mute state. Saved volume restores on unmute so the
-        // user's volume preference (set via an OPTIONS slider) survives.
-        let muted = localStorage.getItem(opts.muteStorageKey) === '1';
-        let savedVolume = (typeof soundVolume === 'number' && soundVolume > 0)
-            ? soundVolume : 0.3;
-        if (muted && typeof setSoundVolume === 'function')
-            setSoundVolume(0);
-
+        // Mute state is shared module-level — see isMenuMuted / setMenuMuted /
+        // toggleMenuMuted. The options-menu volume slider syncs with it too.
+        const muted = isMenuMuted();
         items.push({
             type: 'button',
             id:   'mute',
-            label: muted ? opts.muteLabelOff : opts.muteLabelOn,
+            label: muted ? '🔇' : '🔊',
             title: muted ? 'Unmute' : 'Mute',
-            onClick: () =>
-            {
-                muted = !muted;
-                if (muted)
-                {
-                    if (typeof soundVolume === 'number' && soundVolume > 0)
-                        savedVolume = soundVolume;
-                    if (typeof setSoundVolume === 'function') setSoundVolume(0);
-                }
-                else
-                {
-                    if (typeof setSoundVolume === 'function')
-                        setSoundVolume(savedVolume || 0.3);
-                }
-                localStorage.setItem(opts.muteStorageKey, muted ? '1' : '0');
-                const item = getToolbar(opts.id)?.getItem('mute');
-                if (item)
-                {
-                    item.setLabel(muted ? opts.muteLabelOff : opts.muteLabelOn);
-                    item.setTitle?.(muted ? 'Unmute' : 'Mute');
-                }
-            },
+            onClick: toggleMenuMuted,
         });
     }
 
@@ -622,6 +603,141 @@ function refreshDefaultToolbar(id)
         const item = reg.toolbar.getItem('menu');
         if (item) item.setDisabled(_isHamburgerGrayed(reg.opts));
     }
+}
+
+// ============================================================================
+// Standard pause + options menus.
+// ============================================================================
+//
+// Every game's pause menu was the same shape: RESUME, RESTART, optional
+// extras (OPTIONS / HOW TO PLAY), QUIT TO TITLE (with confirm). These
+// helpers stamp that shape from a couple of callbacks.
+//
+//   createPauseMenu({
+//       onRestart: startGame,                 // adds RESTART button
+//       onQuit:    quitToTitle,               // adds QUIT TO TITLE (with confirm)
+//       extraItems: [                         // inserted between RESTART and QUIT
+//           {type:'button', label:'OPTIONS',     onClick: () => pushMenu('options')},
+//           {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
+//       ],
+//   });
+//
+//   createOptionsMenu();    // VOLUME slider + BACK, in-sync with toolbar mute
+//   createOptionsMenu({
+//       extraItems: [                         // custom controls go above BACK
+//           {type:'checkbox', label:'SCREEN SHAKE', value:true,
+//                            persist:'tetris.shake',
+//                            onChange: v => screenShakeEnabled = v},
+//       ],
+//   });
+//
+// Skip `onRestart` or `onQuit` to drop the corresponding button. Pass
+// `confirmQuit: false` to bypass the "Quit to title?" confirm dialog.
+function createPauseMenu(opts)
+{
+    opts = Object.assign({
+        id:           'pause',
+        title:        'PAUSED',
+        onRestart:    null,
+        onQuit:       null,
+        onShow:       null,        // forwarded to createMenu — for live labels
+        onHide:       null,        // forwarded to createMenu
+        extraItems:   [],
+        confirmQuit:  true,
+        quitMessage:  'Quit to title?',
+        resumeLabel:  'RESUME',
+        restartLabel: 'RESTART',
+        quitLabel:    'QUIT TO TITLE',
+    }, opts || {});
+
+    const items = [
+        {type:'button', id:'resume', label:opts.resumeLabel,
+            onClick: () => hideMenu(opts.id)},
+    ];
+
+    if (opts.onRestart)
+        items.push({type:'button', id:'restart', label:opts.restartLabel,
+            onClick: () => { hideMenu(opts.id); opts.onRestart(); }});
+
+    items.push(...opts.extraItems);
+
+    if (opts.onQuit)
+        items.push({type:'button', id:'quit', label:opts.quitLabel,
+            onClick: () =>
+            {
+                if (opts.confirmQuit)
+                    showConfirmDialog({
+                        message: opts.quitMessage,
+                        onYes:   opts.onQuit,
+                    });
+                else
+                    opts.onQuit();
+            }});
+
+    return createMenu({
+        id:            opts.id,
+        title:         opts.title,
+        initialItemId: 'resume',
+        onShow:        opts.onShow,
+        onHide:        opts.onHide,
+        items,
+    });
+}
+
+// Standard options menu. Default body: a single VOLUME slider that drives
+// soundVolume and syncs with the toolbar's mute button (changing the
+// slider above 0 unmutes; muting via the toolbar leaves the slider
+// position intact — the slider value is the "saved volume" for unmute).
+// extras go above BACK. Wired with onHide: popMenu so BACK returns to
+// the parent menu when pushed.
+function createOptionsMenu(opts)
+{
+    opts = Object.assign({
+        id:          'options',
+        title:       'OPTIONS',
+        volume:      true,
+        volumeLabel: 'VOLUME',
+        persistKey:  'menu.volume',
+        extraItems:  [],
+        backLabel:   'BACK',
+    }, opts || {});
+
+    const items = [];
+
+    if (opts.volume)
+    {
+        // Slider value defaults from current soundVolume, persisted under
+        // opts.persistKey. onChange ALSO writes _menuSavedVolume so a
+        // later mute → unmute restores to the slider's last position.
+        const initial = (typeof soundVolume === 'number' && soundVolume > 0)
+            ? soundVolume : 0.5;
+        items.push({
+            type: 'slider', id: 'volume', label: opts.volumeLabel,
+            min: 0, max: 1, value: initial,
+            persist: opts.persistKey,
+            onChange: v =>
+            {
+                if (typeof setSoundVolume === 'function') setSoundVolume(v);
+                _menuSavedVolume = v;
+                // Unmute if user drags slider above zero. A zero value
+                // leaves mute state alone — silence via slider stays muted
+                // for the toolbar button's purposes too.
+                if (v > 0 && isMenuMuted()) setMenuMuted(false);
+            },
+        });
+    }
+
+    items.push(...opts.extraItems);
+    items.push({type:'separator'});
+    items.push({type:'button', label: opts.backLabel,
+        onClick: () => hideMenu(opts.id)});
+
+    return createMenu({
+        id:     opts.id,
+        title:  opts.title,
+        onHide: popMenu,
+        items,
+    });
 }
 
 // ============================================================================
@@ -1034,6 +1150,59 @@ function setMenuSounds(sounds)
     if (!sounds) { menuSounds.select = menuSounds.activate = null; return; }
     menuSounds.select   = sounds.select   || null;
     menuSounds.activate = sounds.activate || null;
+}
+
+// Shared mute state — single source of truth for the toolbar's 🔊/🔇
+// button and any options-menu volume slider. Refactored out of
+// installDefaultToolbar so a volume change can keep the mute icon in
+// sync (and vice versa). Persists to localStorage['menu.muted']; the
+// saved volume restores on unmute so a user's slider preference survives.
+const _MUTE_STORAGE_KEY = 'menu.muted';
+let _menuMuted = false;
+let _menuSavedVolume = 0.3;
+function _initMuteState()
+{
+    if (_initMuteState._done) return;
+    _initMuteState._done = true;
+    _menuMuted = localStorage.getItem(_MUTE_STORAGE_KEY) === '1';
+    if (typeof soundVolume === 'number' && soundVolume > 0)
+        _menuSavedVolume = soundVolume;
+    if (_menuMuted && typeof setSoundVolume === 'function')
+        setSoundVolume(0);
+}
+function isMenuMuted() { _initMuteState(); return _menuMuted; }
+function setMenuMuted(muted)
+{
+    _initMuteState();
+    muted = !!muted;
+    if (_menuMuted === muted) return;
+    _menuMuted = muted;
+    if (_menuMuted)
+    {
+        if (typeof soundVolume === 'number' && soundVolume > 0)
+            _menuSavedVolume = soundVolume;
+        if (typeof setSoundVolume === 'function') setSoundVolume(0);
+    }
+    else
+    {
+        if (typeof setSoundVolume === 'function')
+            setSoundVolume(_menuSavedVolume || 0.3);
+    }
+    localStorage.setItem(_MUTE_STORAGE_KEY, _menuMuted ? '1' : '0');
+    _refreshMuteUI();
+}
+function toggleMenuMuted() { setMenuMuted(!isMenuMuted()); }
+// Update every toolbar's mute button label/title to match current state.
+// Called whenever mute changes (toolbar click, slider drag, programmatic).
+function _refreshMuteUI()
+{
+    for (const tb of allToolbars)
+    {
+        const item = tb.getItem('mute');
+        if (!item) continue;
+        item.setLabel(_menuMuted ? '🔇' : '🔊');
+        item.setTitle?.(_menuMuted ? 'Unmute' : 'Mute');
+    }
 }
 // Manually play one of the wired sounds. Use this from game code that
 // opens a menu without going through a focusable item — e.g., Esc / Start

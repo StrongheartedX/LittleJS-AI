@@ -602,7 +602,7 @@ function gameInit()
     sTick  = new SoundGenerator({volume:.30, frequency:300, attack:.001, sustain:.02, release:.10, shape:2, slide:-.10, noise:.02});
 
     // ----- menus.js wiring -----
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // ----- title menu -----
     // Stays up at startup (no click-to-reveal). onShow resets the field so the
@@ -621,19 +621,7 @@ function gameInit()
     });
 
     // ----- options menu -----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider', id:'volume', label:'VOLUME', value:.8, min:0, max:1,
-                persist:'snood.volume', onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
-        ],
-    });
+    createOptionsMenu({persistKey: 'snood.volume'});
 
     // ----- about menu -----
     createMenu({
@@ -652,31 +640,21 @@ function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
-            {type:'button', id:'restart', label:'RESTART',       onClick: () =>
+    createPauseMenu({
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            setPlaying(false);
+            showMenu('title');
+        },
+        extraItems: [
+            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', id:'restart', label:'RESTART', onClick: () =>
             {
                 showConfirmDialog({
                     message: 'Restart current game?',
                     onYes: () => { clearSubmenuStack(); startNewGame(); },
-                });
-            }},
-            {type:'button', id:'quit', label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        setPlaying(false);
-                        showMenu('title');
-                    },
                 });
             }},
         ],

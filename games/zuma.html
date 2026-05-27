@@ -505,7 +505,7 @@ async function gameInit()
     newGame();
 
     setSoundVolume(.6);
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     sound_shoot = new SoundGenerator({frequency: 520, attack: 0,    release: .12, shapeCurve: 1, slide: -3,  noise: .05, volume: .7});
     sound_pop   = new SoundGenerator({frequency: 380, attack: .01,  release: .25, shapeCurve: 1, slide:  6,  pitchJump: 200, pitchJumpTime: .04, volume: .9});
@@ -531,18 +531,7 @@ async function gameInit()
         ],
     });
 
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider', id:'volume', label:'VOLUME', value:.6, min:0, max:1,
-                persist:'zuma.volume', onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
-        ],
-    });
+    createOptionsMenu({persistKey: 'zuma.volume'});
 
     createMenu({
         id: 'about',
@@ -561,19 +550,14 @@ async function gameInit()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
+    createPauseMenu({
+        onQuit: () =>
+        {
+            clearSubmenuStack(); hideAllMenus();
+            setPlaying(false); newGame(); showMenu('title');
+        },
+        extraItems: [
             {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () => {
-                showConfirmDialog({ message:'Quit to title?', onYes: () => {
-                    clearSubmenuStack(); hideAllMenus();
-                    setPlaying(false); newGame(); showMenu('title');
-                }});
-            }},
         ],
     });
 

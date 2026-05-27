@@ -332,9 +332,16 @@ function startNewRun()
     hideAllMenus();
 }
 
+function quitToTitle()
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    isPlaying = false;
+    showMenu('title');
+}
+
 function buildMenus()
 {
-    // Title screen
     createTitleMenu({
         title: 'SNAKE',
         subtitle: 'Eat the green dots. Avoid the walls.',
@@ -346,23 +353,8 @@ function buildMenus()
         ],
     });
 
-    // Options
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider',   id:'volume', label:'VOLUME', value:.7, min:0, max:1,
-                persist:'snake.volume',
-                onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button',   label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'separator'},
-            {type:'button',   label:'BACK', onClick: () => hideMenu('options')},
-        ],
-    });
+    createOptionsMenu({persistKey: 'snake.volume'});
 
-    // About
     createMenu({
         id: 'about',
         title: 'ABOUT',
@@ -377,32 +369,12 @@ function buildMenus()
         ],
     });
 
-    // Pause
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        isPlaying = false;
-                        showMenu('title');
-                    },
-                });
-            }},
+    createPauseMenu({
+        onQuit: quitToTitle,
+        extraItems: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
-
-    // Game Over (built fresh each death so the score lines reflect this run)
-    // We expose a helper that (re)builds and shows it.
 
     installDefaultToolbar();
 }
@@ -424,13 +396,7 @@ function showGameOverMenu()
             {type:'label', text: newBest ? `New Best!` : `Best: ${best}`},
             {type:'separator'},
             {type:'button', id:'again', label:'PLAY AGAIN', onClick: startNewRun},
-            {type:'button', label:'TITLE', onClick: () =>
-            {
-                clearSubmenuStack();
-                hideAllMenus();
-                isPlaying = false;
-                showMenu('title');
-            }},
+            {type:'button', label:'TITLE', onClick: quitToTitle},
         ],
     });
     showMenu('gameover');
@@ -455,7 +421,7 @@ async function gameInit()
     // Pause whenever a gameplay menu (pause/dialog) is up. Title menu sits
     // over the frozen board without freezing the engine. Default menu sounds
     // ship in menus.js — no per-game setMenuSounds needed.
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // initial state — title up, no run in progress
     isPlaying = false;

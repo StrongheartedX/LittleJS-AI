@@ -704,7 +704,7 @@ async function gameInit()
     setSoundVolume(0.8);
 
     // One callback drives `paused` for every menu (including dialogs).
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // Gameplay sounds.
     sfxPlace  = new SoundGenerator({frequency: 300, release: 0.05, volume: 0.3});
@@ -728,24 +728,16 @@ async function gameInit()
     });
 
     // ----- options menu -----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
+    createOptionsMenu({
+        persistKey: 'captureGo.volume',
+        extraItems: [
+            {type:'separator'},
             {type:'label', text:'DIFFICULTY'},
             {type:'grid', id:'difficultyGrid', columns:3, cells: [
                 {label:'EASY',   title:'Random moves',               onClick: () => setDifficulty('easy')},
                 {label:'MEDIUM', title:'Greedy 1-ply',               onClick: () => setDifficulty('medium')},
                 {label:'HARD',   title:'Adaptive depth (4-6) by board fill', onClick: () => setDifficulty('hard')},
             ]},
-            {type:'separator'},
-            {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
-                persist:'captureGo.volume',
-                onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'button', label:'BACK',       onClick: () => hideMenu('options')},
         ],
     });
 
@@ -764,18 +756,11 @@ async function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button', id:'restart', label:'RESTART', onClick: () => { initBoard(); hideMenu('pause'); }},
-            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button',               label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({message: 'Quit to title?', onYes: quitToTitle});
-            }},
+    createPauseMenu({
+        onRestart: initBoard,
+        onQuit:    quitToTitle,
+        extraItems: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
 

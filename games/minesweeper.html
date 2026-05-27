@@ -286,7 +286,7 @@ async function gameInit()
     resetGame();
 
     // pause the engine whenever any menu (including dialogs) is visible
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     const startDifficulty = (w, h, m) =>
     {
@@ -324,25 +324,15 @@ async function gameInit()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button',              label:'RESTART', onClick: () => { hideMenu('pause'); resetGame(); }},
-            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        isPlaying = false;
-                        showMenu('title');
-                    },
-                })},
-        ],
+    createPauseMenu({
+        onRestart: resetGame,
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            isPlaying = false;
+            showMenu('title');
+        },
     });
 
     installDefaultToolbar();

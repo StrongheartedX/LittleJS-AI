@@ -481,7 +481,7 @@ async function gameInit()
 
     // Pause whenever a menu is up during a run. Title menu sits over the
     // canvas without freezing anything.
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // ----- title menu -----
     const playFromTitle = () => { setPlaying(true); hideMenu('title'); };
@@ -498,21 +498,12 @@ async function gameInit()
     });
 
     // ----- options menu -----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
+    createOptionsMenu({
+        persistKey: 'freecell.volume',
+        extraItems: [
             {type:'checkbox', id:'hints', label:'HINTS', value: true,
                 persist: 'freecell.hints',
                 onChange: v => { hintsEnabled = v; }},
-            {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min: 0, max: 1,
-                persist: 'freecell.volume',
-                onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -549,30 +540,22 @@ async function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button',              label:'NEW GAME',      onClick: () =>
+    createPauseMenu({
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            newGame();             // reset board so title backdrop is clean
+            setPlaying(false);
+            showMenu('title');
+        },
+        extraItems: [
+            {type:'button', label:'NEW GAME', onClick: () =>
                 showConfirmDialog({
                     message: 'Abandon this game and start a new one?',
                     onYes: () => { newGame(); clearSubmenuStack(); hideAllMenus(); },
                 })},
-            {type:'button',              label:'OPTIONS',       onClick: () => pushMenu('options')},
-            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        newGame();             // reset board so title backdrop is clean
-                        setPlaying(false);
-                        showMenu('title');
-                    },
-                })},
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
 

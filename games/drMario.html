@@ -662,7 +662,7 @@ function buildMenus()
 
     // Only pause when a game is actually running. Title menu sits over
     // the canvas without freezing anything.
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     createTitleMenu({
         title: 'DR MARIO',
@@ -671,19 +671,9 @@ function buildMenus()
         revealOnClick: false,
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button',              label:'RESTART',       onClick: () => { hideMenu('pause'); startGame(); }},
-            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: quitToTitle,
-                })},
-        ],
+    createPauseMenu({
+        onRestart: startGame,
+        onQuit:    quitToTitle,
     });
 
     installDefaultToolbar();

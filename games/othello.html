@@ -803,7 +803,7 @@ async function gameInit()
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu (including dialogs).
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // Sounds (gameplay)
     sfxPlaceWhite = new SoundGenerator({frequency: 220, release: 0.05, volume: 0.3});
@@ -828,24 +828,16 @@ async function gameInit()
     });
 
     // ----- options menu -----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
+    createOptionsMenu({
+        persistKey: 'othello.volume',
+        extraItems: [
+            {type:'separator'},
             {type:'label', text:'DIFFICULTY'},
             {type:'grid', id:'difficultyGrid', columns:3, cells: [
                 {label:'EASY',   title:'Random moves',                  onClick: () => setDifficulty('easy')},
                 {label:'MEDIUM', title:'Alpha-beta search depth 4',     onClick: () => setDifficulty('medium')},
                 {label:'HARD',   title:'Depth 7 + perfect endgame solver', onClick: () => setDifficulty('hard')},
             ]},
-            {type:'separator'},
-            {type:'slider', id:'volume', label:'VOLUME', value: 0.8, min:0, max:1,
-                persist:'othello.volume',
-                onChange: v => setSoundVolume(v)},
-            {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'button', label:'BACK',       onClick: () => hideMenu('options')},
         ],
     });
 
@@ -863,18 +855,11 @@ async function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button', id:'restart', label:'RESTART', onClick: () => { initBoard(); aiThinkTimer = 0; hideMenu('pause'); }},
+    createPauseMenu({
+        onRestart: () => { initBoard(); aiThinkTimer = 0; },
+        onQuit:    quitToTitle,
+        extraItems: [
             {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button',               label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({message: 'Quit to title?', onYes: quitToTitle});
-            }},
         ],
     });
 

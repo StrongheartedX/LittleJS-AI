@@ -186,7 +186,7 @@ function createBucket()
 
 function buildMenus()
 {
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     createTitleMenu({
         title:    'PEGGLE',
@@ -199,40 +199,24 @@ function buildMenus()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        dismissable: true,
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',
-                onClick: () => hideMenu('pause')},
+    createPauseMenu({
+        onQuit: () => {
+            resetGame();
+            setPlaying(false);
+            showMenu('title');
+        },
+        extraItems: [
             {type:'button', label:'OPTIONS',
                 onClick: () => pushMenu('options')},
-            {type:'button', label:'QUIT TO TITLE',
-                onClick: () => {
-                    hideMenu('pause');
-                    resetGame();
-                    setPlaying(false);
-                    showMenu('title');
-                }},
         ],
     });
 
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        dismissable: true,
-        onHide: popMenu,
-        items: [
-            {type:'slider', label:'Volume', min:0, max:1, step:.05, value:.5,
-                persist:'peggle_volume',
-                onChange: v => soundVolume = v},
+    createOptionsMenu({
+        persistKey: 'peggle_volume',
+        extraItems: [
             {type:'checkbox', label:'Sound', value:true,
                 persist:'peggle_sound',
                 onChange: v => soundEnable = v},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 

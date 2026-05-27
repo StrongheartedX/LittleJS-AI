@@ -624,10 +624,18 @@
      isPlaying = p;
  }
 
+ function quitToTitle()
+ {
+     clearSubmenuStack();
+     hideAllMenus();
+     setPlaying(false);
+     showMenu('title');
+ }
+
  function buildMenus()
  {
      // Pause whenever any menu (incl. dialogs) is up.
-     installAutoPause(() => isPlaying);
+     installAutoPause();
 
      // ----- title menu -----
      const playFromTitle = () =>
@@ -665,13 +673,10 @@
      });
 
      // ----- pause menu (Esc) -----
-     createMenu({
-         id: 'pause',
-         title: 'PAUSED',
-         initialItemId: 'resume',
-         items: [
-             {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-             {type:'button', id:'restart', label:'RESTART',       onClick: () =>
+     createPauseMenu({
+         onQuit: quitToTitle,
+         extraItems: [
+             {type:'button', id:'restart', label:'RESTART', onClick: () =>
              {
                  showConfirmDialog({
                      message: 'Restart this run?',
@@ -680,19 +685,6 @@
                          restartGame();
                          clearSubmenuStack();
                          hideAllMenus();
-                     },
-                 });
-             }},
-             {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-             {
-                 showConfirmDialog({
-                     message: 'Quit to title?',
-                     onYes: () =>
-                     {
-                         clearSubmenuStack();
-                         hideAllMenus();
-                         setPlaying(false);
-                         showMenu('title');
                      },
                  });
              }},

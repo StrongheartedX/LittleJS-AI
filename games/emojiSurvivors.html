@@ -2000,7 +2000,7 @@ async function gameInit()
     inputWASDEmulateDirection = true;
 
     // menus.js wiring — pause whenever a menu is visible during a run.
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // Gameplay sound effects — via SoundGenerator (zzfx wrapper). Volumes are
     // intentionally low because they layer with weapon fire / hit flashes a lot.
@@ -2191,18 +2191,10 @@ async function gameInit()
     });
 
     // Pause menu — surfaced by Esc / gamepad Start via bindPauseKey().
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        dismissable: true,
-        initialItemId: 'resume',
-        items: [
-            {type: 'button', id: 'resume', label: 'RESUME',
-                onClick: () => hideMenu('pause')},
-            {type: 'separator'},
-            {type: 'button', label: 'TITLE',
-                onClick: () => { hideMenu('pause'); goToTitle(); }},
-        ],
+    createPauseMenu({
+        onQuit:      goToTitle,
+        quitLabel:   'TITLE',
+        confirmQuit: false,
     });
 
     // HUD toolbar — top-right corner. Always visible; the hamburger grays

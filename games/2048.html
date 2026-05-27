@@ -56,6 +56,15 @@ function setPlaying(p)
     isPlaying = p;
 }
 
+function quitToTitle()
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    newGame();
+    setPlaying(false);
+    showMenu('title');
+}
+
 function gameInit()
 {
     canvasClearColor = hsl(0, 0, .08);
@@ -76,7 +85,7 @@ function gameInit()
 ///////////////////////////////////////////////////////////////////////////////
 function buildMenus()
 {
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     createTitleMenu({
         title:    '2048',
@@ -89,41 +98,21 @@ function buildMenus()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        dismissable: true,
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME', onClick: () => hideMenu('pause')},
-            {type:'button', label:'NEW GAME', onClick: () => {
-                hideMenu('pause');
-                newGame();
-            }},
+    createPauseMenu({
+        onRestart: newGame,
+        onQuit: quitToTitle,
+        restartLabel: 'NEW GAME',
+        extraItems: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button', label:'QUIT TO TITLE', onClick: () => {
-                hideMenu('pause');
-                newGame();
-                setPlaying(false);
-                showMenu('title');
-            }},
         ],
     });
 
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        dismissable: true,
-        onHide: popMenu,
-        items: [
-            {type:'slider', label:'Volume', min:0, max:1, step:.05, value:.5,
-                persist:'2048_volume',
-                onChange: v => soundVolume = v},
+    createOptionsMenu({
+        persistKey: '2048_volume',
+        extraItems: [
             {type:'checkbox', label:'Sound', value:true,
                 persist:'2048_sound',
                 onChange: v => soundEnable = v},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 

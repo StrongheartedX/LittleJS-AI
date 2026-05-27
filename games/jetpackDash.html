@@ -877,7 +877,7 @@ async function gameInit()
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu, including dialogs.
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // sounds — full set defined here so every gameplay event has audio.
     sndThrust        = new SoundGenerator({ frequency: 90,  release: 0.12, volume: 0.25, noise: 0.6 });
@@ -931,20 +931,8 @@ async function gameInit()
     });
 
     // ----- pause menu (initialItemId defaults selection to RESUME) -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: returnToTitle,
-                });
-            }},
-        ],
+    createPauseMenu({
+        onQuit: returnToTitle,
     });
 
     // ----- HUD toolbar (always visible; grays the hamburger over title) -----

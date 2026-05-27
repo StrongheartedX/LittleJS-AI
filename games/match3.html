@@ -209,7 +209,7 @@ async function gameInit()
     gameReset();
 
     setSoundVolume(.7);
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     createTitleMenu({
         title: 'MATCH 3',
@@ -228,18 +228,7 @@ async function gameInit()
         onPlay: () => { gameReset(); isPlaying = true; },
     });
 
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider', id:'vol', label:'VOLUME', value:.7, min:0, max:1,
-                persist:'match3.volume', onChange: v => setSoundVolume(v)},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
-        ],
-    });
+    createOptionsMenu({persistKey: 'match3.volume'});
 
     createMenu({
         id: 'about',
@@ -255,28 +244,20 @@ async function gameInit()
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button',              label:'RESTART', onClick: () => { hideMenu('pause'); gameReset(); }},
-            {type:'button',              label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        isPlaying = false;
-                        // Reset before showing title so the menu backdrop
-                        // doesn't reveal a half-cleared board mid-cascade.
-                        gameReset();
-                        showMenu('title');
-                    },
-                })},
+    createPauseMenu({
+        onRestart: gameReset,
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            isPlaying = false;
+            // Reset before showing title so the menu backdrop
+            // doesn't reveal a half-cleared board mid-cascade.
+            gameReset();
+            showMenu('title');
+        },
+        extraItems: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
 

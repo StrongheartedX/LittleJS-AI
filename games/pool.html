@@ -679,7 +679,7 @@ async function gameInit()
     sfxWin     = new SoundGenerator({volume:.9, frequency:520, attack:0, release:.45, shapeCurve:1.1, slide:1.5, pitchJump:200, pitchJumpTime:.12});
 
     // pause whenever any menu is visible
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // ----- title menu (no click-to-reveal — surfaced immediately at end of init) -----
     createTitleMenu({
@@ -719,31 +719,21 @@ async function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',     onClick: () => hideMenu('pause')},
-            {type:'button', id:'rack',   label:'NEW RACK',   onClick: () =>
+    createPauseMenu({
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            newGame();           // reset so the title backdrop shows a fresh rack
+            setPlaying(false);
+            showMenu('title');
+        },
+        extraItems: [
+            {type:'button', id:'rack', label:'NEW RACK', onClick: () =>
             {
                 showConfirmDialog({
                     message: 'Start a fresh rack?',
                     onYes: () => { newGame(); hideMenu('pause'); },
-                });
-            }},
-            {type:'button', id:'quit',   label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        newGame();           // reset so the title backdrop shows a fresh rack
-                        setPlaying(false);
-                        showMenu('title');
-                    },
                 });
             }},
         ],

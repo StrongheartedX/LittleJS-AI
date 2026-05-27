@@ -597,7 +597,7 @@ async function gameInit() {
     canvasClearColor = new Color().setHex('#06061a');
     setSoundVolume(0.6);
 
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // ---- sounds ----
     sfxCatch    = new SoundGenerator({ frequency: 700, release: 0.05, volume: 0.5, shapeCurve: 0.6 });
@@ -650,19 +650,7 @@ async function gameInit() {
     highScore = +(localStorage.getItem('kaboomHigh') || 0);
 
     // ---- menus ----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            { type: 'slider', id: 'volume', label: 'VOLUME', value: 0.6, min: 0, max: 1,
-              persist: 'kaboom.volume', onChange: v => setSoundVolume(v) },
-            { type: 'separator' },
-            { type: 'button', label: 'FULLSCREEN', onClick: toggleFullscreen },
-            { type: 'separator' },
-            { type: 'button', label: 'BACK', onClick: () => hideMenu('options') },
-        ],
-    });
+    createOptionsMenu({persistKey: 'kaboom.volume'});
 
     createMenu({
         id: 'about',
@@ -681,30 +669,20 @@ async function gameInit() {
         ],
     });
 
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            { type: 'button', id: 'resume', label: 'RESUME', onClick: () => hideMenu('pause') },
+    createPauseMenu({
+        onQuit: () => {
+            clearSubmenuStack();
+            hideAllMenus();
+            isPlaying = false;
+            gameOverShown = false;
+            // Reset visuals so title attract loop is clean.
+            bombs = []; particles = [];
+            lives = 3;
+            showMenu('title');
+        },
+        extraItems: [
             { type: 'button', label: 'OPTIONS', onClick: () => pushMenu('options') },
             { type: 'button', label: 'HOW TO PLAY', onClick: () => pushMenu('about') },
-            { type: 'separator' },
-            { type: 'button', label: 'QUIT TO TITLE', onClick: () => {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () => {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        isPlaying = false;
-                        gameOverShown = false;
-                        // Reset visuals so title attract loop is clean.
-                        bombs = []; particles = [];
-                        lives = 3;
-                        showMenu('title');
-                    },
-                });
-            }},
         ],
     });
 

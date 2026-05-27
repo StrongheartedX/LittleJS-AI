@@ -723,6 +723,15 @@ function startGame()
     setPlaying(true);
 }
 
+function quitToTitle()
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    setPlaying(false);
+    resetWorld();
+    showMenu('title');
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
@@ -760,7 +769,7 @@ async function gameInit()
     wallSliceInfo = new TileInfo(vec2(0, 0), vec2(2, CELL_PIX), textureInfos[0], 0, .5);
 
     setSoundVolume(.7);
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     // gameplay sounds
     sndShoot       = new SoundGenerator({frequency: 380, attack: .002, release: .12, shapeCurve: 0, slide: -8, noise: .3, bitCrush: 4, volume: .9});
@@ -791,22 +800,15 @@ async function gameInit()
     });
 
     // ----- OPTIONS -----
-    createMenu({
-        id: 'options', title: 'OPTIONS', onHide: popMenu,
-        items: [
-            {type: 'slider',   id: 'vol',  label: 'VOLUME',      value: .7, min: 0, max: 1,
-                persist: 'wolfenstein.volume',
-                onChange: v => setSoundVolume(v)},
+    createOptionsMenu({
+        persistKey: 'wolfenstein.volume',
+        extraItems: [
             {type: 'slider',   id: 'sens', label: 'LOOK SPEED',  value: 1.0, min: .25, max: 4,
                 persist: 'wolfenstein.sens',
                 onChange: v => mouseSensitivity = v * .004},
             {type: 'checkbox', id: 'invert', label: 'INVERT X',  value: false,
                 persist: 'wolfenstein.invertX',
                 onChange: v => invertX = v},
-            {type: 'separator'},
-            {type: 'button',   label: 'FULLSCREEN', onClick: toggleFullscreen},
-            {type: 'separator'},
-            {type: 'button',   label: 'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -826,25 +828,10 @@ async function gameInit()
     });
 
     // ----- PAUSE -----
-    createMenu({
-        id: 'pause', title: 'PAUSED', initialItemId: 'resume',
-        items: [
-            {type: 'button', id: 'resume',  label: 'RESUME', onClick: () => hideMenu('pause')},
+    createPauseMenu({
+        onQuit: quitToTitle,
+        extraItems: [
             {type: 'button', id: 'options', label: 'OPTIONS', onClick: () => pushMenu('options')},
-            {type: 'button', id: 'quit',    label: 'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        setPlaying(false);
-                        resetWorld();
-                        showMenu('title');
-                    },
-                });
-            }},
         ],
     });
 

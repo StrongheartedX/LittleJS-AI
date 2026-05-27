@@ -303,6 +303,15 @@ function registerMissIfNoMakeWithin(ball)
 //------------------------------------------------------------------------------
 // game flow
 
+function quitToTitle()
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    gamePhase = 'title';
+    balls.length = 0;
+    showMenu('title');
+}
+
 function startGame()
 {
     gamePhase = 'playing';
@@ -356,6 +365,7 @@ async function gameInit()
 {
     canvasClearColor = COLOR_BG;
     setSoundVolume(.7);
+    // Title has its own attract-mode behind the menu — leave it animating.
     installAutoPause(() => gamePhase === 'playing');
 
     bestScore = parseInt(localStorage.getItem(BEST_KEY) || '0') | 0;
@@ -391,16 +401,10 @@ async function gameInit()
     });
 
     // ----- options menu -----
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider', id:'volume', label:'VOLUME', value: .7, min:0, max:1,
-                persist:'basketball.volume',
-                onChange: v => setSoundVolume(v)},
+    createOptionsMenu({
+        persistKey: 'basketball.volume',
+        extraItems: [
             {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
             {type:'button', label:'RESET BEST', onClick: () =>
             {
                 showConfirmDialog({
@@ -412,8 +416,6 @@ async function gameInit()
                     },
                 });
             }},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -433,27 +435,11 @@ async function gameInit()
     });
 
     // ----- pause menu -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume', label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button',              label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button',              label:'QUIT',    onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        gamePhase = 'title';
-                        balls.length = 0;
-                        showMenu('title');
-                    },
-                });
-            }},
+    createPauseMenu({
+        onQuit: quitToTitle,
+        quitLabel: 'QUIT',
+        extraItems: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
         ],
     });
 

@@ -363,7 +363,7 @@ async function gameInit()
     gravity = vec2(0, -50);
 
     setSoundVolume(.7);
-    installAutoPause(() => isPlaying);
+    installAutoPause();
 
     initSounds();
 
@@ -397,16 +397,10 @@ async function gameInit()
     });
 
     // ---------- Options ----------
-    createMenu({
-        id: 'options',
-        title: 'OPTIONS',
-        onHide: popMenu,
-        items: [
-            {type:'slider', id:'volume', label:'VOLUME', value:.7, min:0, max:1,
-                persist:'plinko.volume',
-                onChange: v => setSoundVolume(v)},
+    createOptionsMenu({
+        persistKey: 'plinko.volume',
+        extraItems: [
             {type:'separator'},
-            {type:'button', label:'FULLSCREEN', onClick: toggleFullscreen},
             {type:'button', label:'RESET BEST',
                 onClick: () => showConfirmDialog({
                     message: 'Erase your best score?',
@@ -418,8 +412,6 @@ async function gameInit()
                         lbl && lbl.setLabel('Best: 0');
                     },
                 })},
-            {type:'separator'},
-            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -440,34 +432,26 @@ async function gameInit()
     });
 
     // ---------- Pause ----------
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'label',  text:'', id:'pauseScore'},
-            {type:'button', id:'resume',  label:'RESUME',  onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS', onClick: () => pushMenu('options')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title? Your run will end.',
-                    onYes: () =>
-                    {
-                        clearSubmenuStack();
-                        hideAllMenus();
-                        setPlaying(false);
-                        resetGame();
-                        showMenu('title');
-                    },
-                });
-            }},
-        ],
+    createPauseMenu({
+        onQuit: () =>
+        {
+            clearSubmenuStack();
+            hideAllMenus();
+            setPlaying(false);
+            resetGame();
+            showMenu('title');
+        },
+        quitMessage: 'Quit to title? Your run will end.',
         onShow: () =>
         {
-            const lbl = getMenu('pause').getItem('pauseScore');
-            lbl && lbl.setLabel('Score: ' + score);
+            const m = getMenu('pause');
+            m?.getItem('pauseScore')?.setLabel(`Score: ${score|0}`);
         },
+        extraItems: [
+            {type:'label',     id:'pauseScore', text:'Score: 0'},
+            {type:'separator'},
+            {type:'button',    id:'options',    label:'OPTIONS', onClick: () => pushMenu('options')},
+        ],
     });
 
     // ---------- HUD toolbar ----------
