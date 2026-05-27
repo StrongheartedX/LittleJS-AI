@@ -1,5 +1,5 @@
 <!DOCTYPE html><head>
-<title>Gunderstein</title>
+<title>Wolfenstein</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -711,7 +711,7 @@ async function gameInit()
     // ----- TITLE -----
     createTitleMenu({
         id:       'title',
-        title:    'GUNDERSTEIN',
+        title:    'WOLFENSTEIN',
         subtitle: 'CLEAR THE GUARDS',
         revealOnClick: false,
         canReveal: () => !isPlaying,
@@ -727,13 +727,13 @@ async function gameInit()
         id: 'options', title: 'OPTIONS', onHide: popMenu,
         items: [
             {type: 'slider',   id: 'vol',  label: 'VOLUME',      value: .7, min: 0, max: 1,
-                persist: 'gunderstein.volume',
+                persist: 'wolfenstein.volume',
                 onChange: v => setSoundVolume(v)},
             {type: 'slider',   id: 'sens', label: 'LOOK SPEED',  value: 1.0, min: .25, max: 4,
-                persist: 'gunderstein.sens',
+                persist: 'wolfenstein.sens',
                 onChange: v => mouseSensitivity = v * .004},
             {type: 'checkbox', id: 'invert', label: 'INVERT X',  value: false,
-                persist: 'gunderstein.invertX',
+                persist: 'wolfenstein.invertX',
                 onChange: v => invertX = v},
             {type: 'separator'},
             {type: 'button',   label: 'FULLSCREEN', onClick: toggleFullscreen},
