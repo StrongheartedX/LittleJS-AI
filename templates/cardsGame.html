@@ -1,0 +1,171 @@
+<!DOCTYPE html><head>
+<title>LittleJS Playing Cards Template</title>
+<meta charset="utf-8">
+</head><body style="background:#000">
+<script src="../dist/littlejs.js?1.18.15"></script>
+<script src="soundGenerator.js"></script>
+<script src="textureGenerator.js"></script>
+<script src="cards.js"></script>
+<script>
+'use strict';
+
+// engine settings, do not remove
+debugWatermark = false;
+showEngineVersion = false;
+paused = false;
+tilesPixelated = false;
+
+// engine settings, customize if necessary
+gravity = vec2(0, 0);
+cameraPos = vec2(0, 0);
+cameraScale = 32;
+canvasMaxSize = vec2(2048, 2048);
+canvasClearColor = new Color().setHex('#264d40');   // felt green
+
+///////////////////////////////////////////////////////////////////////////////
+// PLAYING CARDS TEMPLATE
+//
+// A pure-rendering sandbox for templates/cards.js. Builds a 52-card deck,
+// lays it out in a 13x4 grid, lets the user push cards around to verify
+// every face renders correctly.
+//
+// Controls:
+//   Mouse           — hover highlights a card
+//   Left-click+drag — pick up the hovered card; release to drop
+//   Right-click     — flip the hovered (or held) card face-up <-> face-down
+//   Mouse wheel     — rotate the held card
+//   R               — reset to grid layout
+//   ` (backtick)    — LittleJS debug overlay
+
+const COL_PITCH = 7;        // horizontal spacing between cards in the grid
+const ROW_PITCH = 9.5;      // vertical spacing
+const ROT_STEP  = PI / 12;  // 15 deg per R press
+
+let cards = [];
+let dragging = null;        // card currently glued to the cursor
+let dragOffset = vec2();
+
+function dealGrid()
+{
+    cards = [];
+    // 13 columns (A..K) x 4 rows (suits) centered on world origin.
+    for (let suit = 0; suit < 4; ++suit)
+    for (let rank = 0; rank < 13; ++rank)
+    {
+        const x = (rank - 6) * COL_PITCH;
+        const y = (1.5 - suit) * ROW_PITCH;
+        cards.push({ rank, suit, pos: vec2(x, y), angle: 0, faceDown: false });
+    }
+    dragging = null;
+}
+
+function topmostCardAt(worldPos)
+{
+    // Iterate back-to-front: the last-drawn card is the topmost one.
+    for (let i = cards.length - 1; i >= 0; --i)
+    {
+        const c = cards[i];
+        // Hit test uses an axis-aligned approximation of the rotated card —
+        // good enough for a sandbox at small rotations and not worse than
+        // any other simple test at 45 degrees.
+        if (isOverlapping(worldPos, vec2(), c.pos, CARD_SIZE))
+            return c;
+    }
+    return null;
+}
+
+function bringToFront(card)
+{
+    const i = cards.indexOf(card);
+    if (i < 0) return;
+    cards.splice(i, 1);
+    cards.push(card);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+async function gameInit()
+{
+    initCardAtlas();   // default look (matches games/freecell.html)
+    dealGrid();
+
+    // Auto-fit camera so the 13x4 grid + a margin fills the canvas.
+    const tableW = 13 * COL_PITCH + 4;
+    const tableH = 4 * ROW_PITCH + 6;
+    cameraScale = min(mainCanvasSize.x / tableW, mainCanvasSize.y / tableH);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdate()
+{
+    // While dragging, the held card IS the hovered card.
+    const hovered = dragging || topmostCardAt(mousePos);
+
+    // Press-and-hold pickup: left-button down on a card grabs it; release drops it.
+    if (mouseWasPressed(0) && !dragging && hovered)
+    {
+        dragging   = hovered;
+        dragOffset = hovered.pos.subtract(mousePos);
+        bringToFront(hovered);
+    }
+    if (dragging && !mouseIsDown(0))
+        dragging = null;
+
+    if (dragging)
+        dragging.pos = mousePos.add(dragOffset);
+
+    // Right-click flips. Works on a held card mid-drag (left button still down)
+    // or on a hovered card with no drag in progress.
+    if (mouseWasPressed(2) && hovered)
+        hovered.faceDown = !hovered.faceDown;
+
+    // Mouse wheel rotates the held card. mouseWheel is +/-1 per notch and
+    // is reset to 0 by the engine each frame.
+    if (dragging && mouseWheel)
+        dragging.angle += mouseWheel * ROT_STEP;
+
+    if (keyWasPressed('KeyR')) dealGrid();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameUpdatePost()
+{
+    setCursor(dragging ? 'grabbing'
+            : topmostCardAt(mousePos) ? 'grab'
+            : 'default');
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRender()
+{
+    const hovered  = dragging || topmostCardAt(mousePos);
+    const SHADOW   = new Color(0, 0, 0, 0.35);
+    const HOVER    = new Color(1, 1, 0.4, 0.30);
+
+    for (const c of cards)
+    {
+        const isHovered = c === hovered;
+        const liftPos   = c === dragging
+            ? c.pos.add(vec2(0.4, -0.4))    // larger shadow offset while dragging
+            : c.pos.add(vec2(0.15, -0.15)); // subtle resting shadow
+        drawCardShape(liftPos, CARD_SIZE.add(vec2(0.1, 0.1)), SHADOW, c.angle);
+
+        const opts = { angle: c.angle, tint: isHovered ? HOVER : null };
+        if (c.faceDown) drawCardBack(c.pos, opts);
+        else            drawCard(c.pos, c.rank, c.suit, opts);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function gameRenderPost()
+{
+    drawTextScreen('Playing Cards Template',
+        vec2(mainCanvasSize.x / 2, 60), 50, WHITE, 4, BLACK);
+    drawTextScreen(
+        'Left-click = pick up   Right-click = flip   Wheel = rotate   R = reset',
+        vec2(mainCanvasSize.x / 2, 110), 22, hsl(0, 0, .85), 2, BLACK);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
+
+</script></body></html>
