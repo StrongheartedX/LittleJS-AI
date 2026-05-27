@@ -58,6 +58,7 @@ let score = 0;
 let bestScore = 0;
 let waveIndex = 1;
 let missilesToSpawn = 0;
+let smartBombsToSpawn = 0;
 let spawnTimer = 0;
 let betweenWaves = false;
 let betweenWavesTimer = 0;
@@ -408,6 +409,7 @@ function resetWaveState(newWaveIndex)
       b.ammo = Math.min(BASE_AMMO_MAX, b.ammo + 5);
 
   flierCooldown = 5;
+  smartBombsToSpawn = clamp(waveIndex - 4, 0, 5) | 0;
   sWave && sWave.play();
 }
 
@@ -428,6 +430,7 @@ function newGame()
   nextBonusCityScore = 10000;
   bankedCities = 0;
   bonusCityToast = 0;
+  smartBombsToSpawn = 0;
 
   cities = [];
   const cityXs = [6.5, 10.5, 14.5, 25.5, 29.5, 33.5];
@@ -553,7 +556,15 @@ function updateFliers()
   fliers = fliers.filter(f => f.alive);
 }
 
-function spawnEnemyMissile()
+function smartBombsOnScreen()
+{
+  let n = 0;
+  for (const m of enemyMissiles)
+    if (m.alive && m.smart) n++;
+  return n;
+}
+
+function spawnEnemyMissile(smart)
 {
   const start = vec2(rand(0, levelSize.x), levelSize.y + 2.5);
   const target = pickEnemyTarget();
@@ -568,9 +579,11 @@ function spawnEnemyMissile()
     t: 0,
     speed, len,
     alive: true,
-    w: .07,
+    w: smart ? .11 : .07,
     smokeT: 0,
-    mirv: rand() < mirvChance(waveIndex),
+    mirv: !smart && rand() < mirvChance(waveIndex),
+    smart: !!smart,
+    pulsePhase: rand() * 100,
   });
 }
 
@@ -600,6 +613,26 @@ function maybeSplitMirv(m)
     });
   }
   m.alive = false;
+}
+
+function applySmartBombDodge(m)
+{
+  const dangerR = explosionMaxRadius * 2.5;
+  const heading = m.target.subtract(m.start).normalize();
+  const perp = vec2(-heading.y, heading.x);
+  let nudge = 0;
+  for (const e of explosions)
+  {
+    if (!e.friendly || e.r <= 0) continue;
+    const offset = m.pos.subtract(e.pos);
+    const d = offset.length();
+    if (d > dangerR) continue;
+    const side = Math.sign(offset.dot(perp)) || (rand() < .5 ? -1 : 1);
+    const weight = (1 - d / dangerR);
+    nudge += side * weight * 4 * timeDelta;
+  }
+  if (nudge !== 0)
+    m.pos = m.pos.add(perp.scale(nudge));
 }
 
 function launchPlayerMissile(target)
@@ -667,7 +700,18 @@ function updateMissile(m)
   if (!m.alive) return;
   m.t += (m.speed * timeDelta) / m.len;
   const p = clamp(m.t, 0, 1);
-  m.pos = m.start.add(m.target.subtract(m.start).scale(p));
+  if (m.smart)
+  {
+    const ideal = m.start.add(m.target.subtract(m.start).scale(p));
+    const v = m.target.subtract(m.start).normalize();
+    const perp = vec2(-v.y, v.x);
+    const sideways = m.pos.subtract(ideal).dot(perp);
+    m.pos = ideal.add(perp.scale(sideways));
+  }
+  else
+  {
+    m.pos = m.start.add(m.target.subtract(m.start).scale(p));
+  }
 
   if (m.t >= 1)
   {
@@ -761,7 +805,8 @@ function checkExplosionHits()
       if (m.pos.distance(e.pos) <= e.r)
       {
         m.alive = false;
-        score += 25 * waveMultiplier(waveIndex);
+        const base = m.smart ? 125 : 25;
+        score += base * waveMultiplier(waveIndex);
         checkBonusCities();
         emitEnemyKillBurst(m.pos);
         sEnemyHit && sEnemyHit.play();
@@ -1142,21 +1187,45 @@ function gameUpdate()
     return;
   }
 
-  if (!betweenWaves)
+  if (!betweenWaves && !tally)
   {
     spawnTimer -= timeDelta;
     if (spawnTimer <= 0 && missilesToSpawn > 0)
     {
-      spawnEnemyMissile();
-      missilesToSpawn--;
+      const activeAttacks = enemyMissiles.reduce(
+        (a, m) => a + (m.alive ? (m.smart ? 2 : 1) : 0), 0);
+      if (activeAttacks >= 8)
+      {
+        spawnTimer = .15;
+      }
+      else
+      {
+        const onScreenCap = waveIndex < 8 ? 1 : 2;
+        const wantSmart = smartBombsToSpawn > 0
+                       && smartBombsOnScreen() < onScreenCap
+                       && rand() < .25;
+        if (wantSmart)
+        {
+          spawnEnemyMissile(true);
+          smartBombsToSpawn--;
+        }
+        else
+        {
+          spawnEnemyMissile(false);
+        }
+        missilesToSpawn--;
 
-      const base = Math.max(.25, .85 - (waveIndex-1)*.05);
-      spawnTimer = base + rand(-.12, .18);
+        const base = Math.max(.25, .85 - (waveIndex-1)*.05);
+        spawnTimer = base + rand(-.12, .18);
+      }
     }
   }
 
   for (const m of enemyMissiles)
   {
+    if (m.alive && m.smart)
+      applySmartBombDodge(m);
+
     const impacted = updateMissile(m);
     if (m.alive)
     {
@@ -1477,14 +1546,22 @@ function drawMissiles()
 
   for (const m of enemyMissiles)
   {
-    // outer glow line
     drawLine(m.start, m.pos, m.w * 2.4, hsl(pal.enemyHue, 1, .55, .2));
-    // bright trail
     drawLine(m.start, m.pos, m.w, hsl(pal.enemyHue, .95, .65));
-    // tip glow
-    drawCircle(m.pos, .35, hsl(pal.enemyHue, 1, .7, .5));
-    drawCircle(m.pos, .22, hsl(pal.enemyHue, 1, .8));
-    drawCircle(m.pos, .1, hsl(.15, 1, 1));
+    if (m.smart)
+    {
+      const pulse = .8 + .2 * Math.sin(time * 14 + m.pulsePhase);
+      drawCircle(m.pos, .55 * pulse, hsl(pal.enemyHue, 1, .7, .35));
+      drawCircle(m.pos, .32, hsl(.95, .9, .55));
+      drawCircle(m.pos, .18, hsl(.0,  1,  .9));
+      drawCircle(m.pos, .08, hsl(.13, 1, 1));
+    }
+    else
+    {
+      drawCircle(m.pos, .35, hsl(pal.enemyHue, 1, .7, .5));
+      drawCircle(m.pos, .22, hsl(pal.enemyHue, 1, .8));
+      drawCircle(m.pos, .1, hsl(.15, 1, 1));
+    }
   }
 
   for (const m of playerMissiles)
