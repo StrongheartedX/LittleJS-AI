@@ -34,6 +34,11 @@ paused = false;
 
 const stepCount = 8, trackCount = 16, sequencer = [];
 const buttonSize = vec2(68, 28);
+// Center the labels-plus-grid block on the canvas (canvas-center coords).
+// X: labels at step=-1, cells at step 0..stepCount-1, total stepCount+1 columns;
+// center of that range is (stepCount-1)/2, but we want labels visible too,
+// so shift right by half a button so label column doesn't go off the left.
+const gridOrigin = vec2(buttonSize.x * (1 - stepCount/2), buttonSize.y * (0.5 - trackCount/2));
 const customSlotCount = 4, drumCount = 4;
 const customSounds = [null, null, null, null];
 let currentStep = 0, stepTime = 0, tempo = 240;
@@ -151,9 +156,7 @@ class UITrackLabel extends UIButton
 {
     constructor(track)
     {
-        let pos = vec2(-1, trackCount-1-track);
-        pos = pos.multiply(buttonSize);
-        pos = pos.add(vec2(240, 40)).subtract(mainCanvasSize.scale(.5));
+        const pos = vec2(-1, trackCount-1-track).multiply(buttonSize).add(gridOrigin);
         super(pos, buttonSize);
 
         this.track = track;
@@ -190,9 +193,7 @@ class UISequencerButton extends UIButton
 {
     constructor(step, track)
     {
-        let pos = vec2(step, trackCount-1-track);
-        pos = pos.multiply(buttonSize);
-        pos = pos.add(vec2(240, 40)).subtract(mainCanvasSize.scale(.5));
+        const pos = vec2(step, trackCount-1-track).multiply(buttonSize).add(gridOrigin);
         super(pos, buttonSize);
 
         this.step = step;
