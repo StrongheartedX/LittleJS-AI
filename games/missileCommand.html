@@ -63,7 +63,11 @@ let gameOver = false;
 let isPlaying = false;
 let gameOverHoldTimer = 0; // seconds before the GAME OVER menu surfaces
 
-let sShoot, sBoom, sEnemyHit, sCityHit, sWave;
+let nextBonusCityScore = 10000;
+let bankedCities = 0;
+let bonusCityToast = 0;
+
+let sShoot, sBoom, sEnemyHit, sCityHit, sWave, sBonusCity;
 
 // Visual effects
 let particles = [];
@@ -414,6 +418,9 @@ function newGame()
   score = 0;
   waveIndex = 1;
   gameOver = false;
+  nextBonusCityScore = 10000;
+  bankedCities = 0;
+  bonusCityToast = 0;
 
   cities = [];
   const cityXs = [6.5, 10.5, 14.5, 25.5, 29.5, 33.5];
@@ -567,6 +574,11 @@ function resolveEnemyImpact(pos)
     {
       c.alive = false;
       c.hitFlash = .4;
+      if (bankedCities > 0)
+      {
+        bankedCities--;
+        reviveCity(c);
+      }
       addExplosion(c.pos, false);
       emitDebris(c.pos.add(vec2(0, .2)), c.shape.bodyColor, 22);
       // smaller bright-window shards
@@ -639,6 +651,7 @@ function checkExplosionHits()
       {
         m.alive = false;
         score += 25 * waveMultiplier(waveIndex);
+        checkBonusCities();
         emitEnemyKillBurst(m.pos);
         sEnemyHit && sEnemyHit.play();
       }
@@ -661,6 +674,34 @@ function checkWaveComplete()
     const cityBonus = cities.filter(c=>c.alive).length * 100 * mult;
     const ammoBonus = bases.reduce((a,b)=>a+(b.ammo|0),0) * 5 * mult;
     score += cityBonus + ammoBonus;
+    checkBonusCities();
+  }
+}
+
+function reviveCity(city)
+{
+  city.alive = true;
+  city.hitFlash = 0;
+  city.shape = makeCityShape();
+}
+
+function grantBonusCity()
+{
+  const dead = cities.filter(c => !c.alive);
+  if (dead.length)
+    reviveCity(dead[randInt(dead.length)]);
+  else
+    bankedCities++;
+  bonusCityToast = 2.0;
+  sBonusCity && sBonusCity.play();
+}
+
+function checkBonusCities()
+{
+  while (score >= nextBonusCityScore)
+  {
+    grantBonusCity();
+    nextBonusCityScore += 10000;
   }
 }
 
@@ -700,6 +741,7 @@ function gameInit()
   sEnemyHit = new SoundGenerator({volume:.65, frequency:260, attack:0, release:.1,  shapeCurve:1.1, noise:.08, randomness:.08, pitchJump:120, pitchJumpTime:.02});
   sCityHit  = new SoundGenerator({volume:1,  frequency:80,  attack:0, release:.35, shapeCurve:.6, noise:.35, randomness:.15, slide:-.05});
   sWave     = new SoundGenerator({volume:.5, frequency:420, attack:0, release:.18, shapeCurve:1.2, pitchJump:180, pitchJumpTime:.04});
+  sBonusCity = new SoundGenerator({volume:.7, frequency:660, attack:0, release:.4, shapeCurve:1.6, pitchJump:540, pitchJumpTime:.05});
 
   try { bestScore = +localStorage.getItem('missilecommand.best') || 0; } catch(e) { bestScore = 0; }
 
@@ -1346,6 +1388,14 @@ function gameRenderPost()
 
   if (betweenWaves && !gameOver)
     drawTextScreen('WAVE CLEARED!', vec2(mainCanvasSize.x/2, 70), 42, hsl(.16,.15,.95), 6, hsl(0,0,0,.7));
+
+  if (bonusCityToast > 0 && isPlaying)
+  {
+    const a = Math.min(1, bonusCityToast * 2);
+    drawTextScreen('BONUS CITY!', vec2(mainCanvasSize.x/2, 130),
+                   36, hsl(.32, .9, .8, a), 5, hsl(0,0,0,.7*a));
+    bonusCityToast -= timeDelta;
+  }
 
   // gameOver menu (DOM) now owns the GAME OVER banner.
 }
