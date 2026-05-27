@@ -824,27 +824,45 @@ let activeCategory = 'all'; // sidebar filter
 // Locale-aware number formatter for high-score badges ("1,234,567").
 const numFmt = new Intl.NumberFormat();
 
-// Read a game's high score from localStorage. Supports:
-//   scoreKey:'tetris_hi'           → reads localStorage.tetris_hi (number or numeric string)
-//   scoreKey:'mario.highScore'     → reads localStorage.mario as JSON, returns .highScore
-//   scoreKey:'save.level1.score'   → arbitrary dotted path through JSON
+// Read a game's high score from localStorage. Supports both:
+//   scoreKey:'robotron.best'         → reads localStorage['robotron.best'] as a literal key
+//                                       (dots are part of the key — the common case)
+//   scoreKey:'emojiSurvivors.v1.bestTime'
+//                                    → tries the literal key first; if absent, walks dotted
+//                                       prefixes looking for a key whose JSON payload contains
+//                                       the remaining path (here: key 'emojiSurvivors.v1',
+//                                       field 'bestTime')
 // Returns a number, or null if missing / unparsable / no scoreKey set.
 function getHighScore(g) {
   if (!g.scoreKey) return null;
-  const [key, ...path] = g.scoreKey.split('.');
-  const raw = localStorage.getItem(key);
-  if (raw == null) return null;
-  let v;
-  try { v = JSON.parse(raw); } catch { v = raw; }
-  for (const p of path) {
-    if (v == null || typeof v !== 'object') return null;
-    v = v[p];
+
+  // 1) Literal key — the common case for games like robotron.best, tetris.best, etc.
+  const literal = localStorage.getItem(g.scoreKey);
+  if (literal != null) {
+    const n = parseFloat(literal);
+    if (!isNaN(n)) return n;
   }
-  if (typeof v === 'string') {
-    const n = parseFloat(v);
-    return isNaN(n) ? null : n;
+
+  // 2) Dotted JSON-path fallback — walk prefixes right-to-left until we find
+  //    a real localStorage entry whose JSON contains the remaining path.
+  const parts = g.scoreKey.split('.');
+  for (let i = parts.length - 1; i > 0; i--) {
+    const key = parts.slice(0, i).join('.');
+    const raw = localStorage.getItem(key);
+    if (raw == null) continue;
+    let v;
+    try { v = JSON.parse(raw); } catch { continue; }
+    for (const p of parts.slice(i)) {
+      if (v == null || typeof v !== 'object') { v = undefined; break; }
+      v = v[p];
+    }
+    if (typeof v === 'string') {
+      const n = parseFloat(v);
+      if (!isNaN(n)) return n;
+    }
+    if (typeof v === 'number') return v;
   }
-  return typeof v === 'number' ? v : null;
+  return null;
 }
 
 // Recently-played history (newest first). Stored as an array of filenames.
