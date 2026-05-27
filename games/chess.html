@@ -1089,7 +1089,7 @@ function completePromotion(pieceType)
 function setDifficulty(d)
 {
     difficulty = d;
-    localStorage.setItem('chess.difficulty', d);
+    saveData({difficulty: d});
     refreshDifficultyUI();
 }
 
@@ -1137,9 +1137,10 @@ function quitToTitle()
 
 async function gameInit()
 {
+    saveDataInit('chess');
     setCanvasFixedSize(vec2(550, 720));
     canvasClearColor = new Color().setHex('#0d0d14');
-    difficulty = localStorage.getItem('chess.difficulty') || 'medium';
+    difficulty = getSaveData().difficulty ?? 'medium';
     setSoundVolume(.8);
     installAutoPause();
 
@@ -1168,7 +1169,7 @@ async function gameInit()
 
     // Options menu
     createOptionsMenu({
-        persistKey: 'chess.volume',
+        persistKey: 'volume',
         extraItems: [
             {type:'separator'},
             {type:'label', text:'DIFFICULTY'},
