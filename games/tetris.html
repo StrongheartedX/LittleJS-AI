@@ -1381,6 +1381,7 @@ function humanUpdate(p, dt)
 
 async function gameInit()
 {
+    saveDataInit('tetris');
     // Enable touch gamepad for mobile devices (8-way dpad + 4 face buttons)
     setTouchGamepadEnable(true);
     setTouchGamepadAnalog(false);
@@ -1397,7 +1398,7 @@ async function gameInit()
     sGarbage = new SoundGenerator({frequency:90,  release:.14, noise:.1, volume:.45, slide:.15});
     sSelect = new SoundGenerator({frequency:440, release:.08, volume:.3});
 
-    try { bestScore = +localStorage.getItem('tetris.best') || 0; } catch(e) { bestScore = 0; }
+    bestScore = getSaveData().bestScore ?? 0;
 
     setSoundVolume(.8);
     // Title draws an animated TETRIS word over falling blocks — keep the
@@ -1483,7 +1484,7 @@ function buildMenus()
         },
     });
 
-    createOptionsMenu({persistKey: 'tetris.volume'});
+    createOptionsMenu();
 
     createMenu({
         id: 'about',
@@ -1757,7 +1758,7 @@ function gameUpdate()
             if (gameMode === 'single' && human.score > bestScore)
             {
                 bestScore = human.score;
-                try { localStorage.setItem('tetris.best', bestScore); } catch(e) {}
+                saveData({bestScore});
             }
             if (typeof showMenu === 'function') showMenu('gameOver');
         }
