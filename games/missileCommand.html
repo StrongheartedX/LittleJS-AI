@@ -59,6 +59,7 @@ let missilesToSpawn = 0;
 let spawnTimer = 0;
 let betweenWaves = false;
 let betweenWavesTimer = 0;
+let tally = null;
 let gameOver = false;
 let isPlaying = false;
 let gameOverHoldTimer = 0; // seconds before the GAME OVER menu surfaces
@@ -67,7 +68,7 @@ let nextBonusCityScore = 10000;
 let bankedCities = 0;
 let bonusCityToast = 0;
 
-let sShoot, sBoom, sEnemyHit, sCityHit, sWave, sBonusCity;
+let sShoot, sBoom, sEnemyHit, sCityHit, sWave, sBonusCity, sBonusTick;
 
 // Visual effects
 let particles = [];
@@ -414,6 +415,7 @@ function newGame()
   explosions.length = 0;
   particles.length = 0;
   shakeTime = 0; shakeMag = 0; shakeTimeMax = 1;
+  tally = null;
 
   score = 0;
   waveIndex = 1;
@@ -703,13 +705,62 @@ function checkWaveComplete()
   if (missilesToSpawn <= 0 && !enemiesAlive && !playersAlive)
   {
     betweenWaves = true;
-    betweenWavesTimer = 1.2;
-
     const mult = waveMultiplier(waveIndex);
-    const cityBonus = cities.filter(c=>c.alive).length * 100 * mult;
-    const ammoBonus = bases.reduce((a,b)=>a+(b.ammo|0),0) * 5 * mult;
-    score += cityBonus + ammoBonus;
+    const ammoTotal = bases.reduce((a,b)=>a+(b.ammo|0),0);
+    const cityTotal = cities.filter(c=>c.alive).length;
+    tally = {
+      phase: 'hold',
+      t: 1.2,
+      ammoLeft: ammoTotal,
+      cityLeft: cityTotal,
+      ammoTotal,
+      cityTotal,
+      multiplier: mult,
+    };
+  }
+}
+
+function updateTally()
+{
+  if (!tally) return;
+  tally.t -= timeDelta;
+  if (tally.t > 0) return;
+
+  if (tally.phase === 'hold')
+  {
+    tally.phase = tally.ammoLeft > 0 ? 'ammo' : (tally.cityLeft > 0 ? 'cities' : 'done');
+    tally.t = tally.phase === 'done' ? .6 : 0;
+    return;
+  }
+
+  if (tally.phase === 'ammo')
+  {
+    tally.ammoLeft--;
+    score += 5 * tally.multiplier;
     checkBonusCities();
+    sBonusTick && sBonusTick.play();
+    if (tally.ammoLeft <= 0)
+      tally.phase = tally.cityLeft > 0 ? 'cities' : 'done';
+    tally.t = tally.phase === 'done' ? .6 : .06;
+    return;
+  }
+
+  if (tally.phase === 'cities')
+  {
+    tally.cityLeft--;
+    score += 100 * tally.multiplier;
+    checkBonusCities();
+    sBonusTick && sBonusTick.play();
+    if (tally.cityLeft <= 0)
+      tally.phase = 'done';
+    tally.t = tally.phase === 'done' ? .6 : .25;
+    return;
+  }
+
+  if (tally.phase === 'done')
+  {
+    tally = null;
+    resetWaveState(waveIndex + 1);
   }
 }
 
@@ -777,6 +828,7 @@ function gameInit()
   sCityHit  = new SoundGenerator({volume:1,  frequency:80,  attack:0, release:.35, shapeCurve:.6, noise:.35, randomness:.15, slide:-.05});
   sWave     = new SoundGenerator({volume:.5, frequency:420, attack:0, release:.18, shapeCurve:1.2, pitchJump:180, pitchJumpTime:.04});
   sBonusCity = new SoundGenerator({volume:.7, frequency:660, attack:0, release:.4, shapeCurve:1.6, pitchJump:540, pitchJumpTime:.05});
+  sBonusTick = new SoundGenerator({volume:.45, frequency:780, attack:0, release:.06, shapeCurve:1.6});
 
   try { bestScore = +localStorage.getItem('missilecommand.best') || 0; } catch(e) { bestScore = 0; }
 
@@ -1049,12 +1101,7 @@ function gameUpdate()
   playerMissiles = playerMissiles.filter(m=>m.alive);
 
   checkWaveComplete();
-  if (betweenWaves)
-  {
-    betweenWavesTimer -= timeDelta;
-    if (betweenWavesTimer <= 0)
-      resetWaveState(waveIndex+1);
-  }
+  updateTally();
 
   if (!anyCitiesAlive())
   {
@@ -1441,8 +1488,19 @@ function gameRenderPost()
   if (!gameOver && !anyBasesAliveWithAmmo())
     drawTextScreen('NO AMMO! (protect what\'s left)', vec2(mainCanvasSize.x/2, 30), 22, hsl(.06,1,.65), 4, hsl(0,0,0,.7));
 
-  if (betweenWaves && !gameOver)
-    drawTextScreen('WAVE CLEARED!', vec2(mainCanvasSize.x/2, 70), 42, hsl(.16,.15,.95), 6, hsl(0,0,0,.7));
+  if (tally && !gameOver)
+  {
+    const cx = mainCanvasSize.x/2;
+    drawTextScreen('WAVE CLEARED!', vec2(cx, 70), 42, hsl(.16,.15,.95), 6, hsl(0,0,0,.7));
+    const ammoDone = tally.ammoTotal - tally.ammoLeft;
+    const cityDone = tally.cityTotal - tally.cityLeft;
+    const ammoPts = ammoDone * 5 * tally.multiplier;
+    const cityPts = cityDone * 100 * tally.multiplier;
+    drawTextScreen(`AMMO  ${ammoDone}/${tally.ammoTotal}  ×${tally.multiplier}  =  ${ammoPts}`,
+                   vec2(cx, 120), 26, hsl(.12,.1,.95), 4, hsl(0,0,0,.6));
+    drawTextScreen(`CITIES  ${cityDone}/${tally.cityTotal}  ×${tally.multiplier}  =  ${cityPts}`,
+                   vec2(cx, 156), 26, hsl(.12,.1,.95), 4, hsl(0,0,0,.6));
+  }
 
   if (bonusCityToast > 0 && isPlaying)
   {
