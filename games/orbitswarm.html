@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.15"></script>
+<script src="../templates/menus.js"></script>
 <script>
 
 'use strict';
@@ -58,11 +59,6 @@ const STAR_COUNT = 1600;
 const NEBULA_CLUSTER_COUNT = 5;      // number of nebula clusters
 const NEBULA_BLOBS_PER_CLUSTER = 12; // blobs per cluster for realistic look
 
-// game flow
-const STATE_TITLE = 0;
-const STATE_MENU  = 1;
-const STATE_PLAY  = 2;
-
 // difficulty settings
 let difficulty = 'medium'; // 'easy', 'medium', 'hard'
 const DIFFICULTY_SETTINGS = {
@@ -96,10 +92,6 @@ const AI_SEND_FRACTION_LARGE = 0.7;   // AI sends 70% when it has lots of ships
 
 // debug display
 let debugShowStats = false;
-
-// Menu buttons
-let btnEasy, btnMedium, btnHard;
-let txtSelectDifficulty;
 
 // -------------------------------------------------------------
 // container for sprite atlas tiles
@@ -549,7 +541,7 @@ let planets = [];
 let fleets = [];
 
 let gameOver = 0;
-let gameState = STATE_TITLE;
+let isPlaying = false;
 let gameTimer = 0;  // tracks play time in seconds
 
 let dragSource = null;
@@ -562,11 +554,19 @@ let selectedPlanet = null;
 // -------------------------------------------------------------
 // Gameplay
 
-function startGame(){ resetGame(); gameState = STATE_PLAY; gameTimer = 0; updateMenuButtons(); }
-
-function goToTitle()
+function startGame(diff)
 {
-    gameState = STATE_TITLE;
+    if (diff) difficulty = diff;
+    resetGame();
+    isPlaying = true;
+    gameTimer = 0;
+    clearSubmenuStack();
+    hideAllMenus();
+}
+
+function quitToTitle()
+{
+    isPlaying = false;
     gameOver = 0;
     planets.length = 0;
     fleets.length = 0;
@@ -577,13 +577,7 @@ function goToTitle()
     selectedPlanet = null;
     initStarfield();
     explosionEffects.length = 0;
-    updateMenuButtons();
-}
-
-function goToMenu()
-{
-    gameState = STATE_MENU;
-    updateMenuButtons();
+    showMenu('title');
 }
 
 function resetGame()
@@ -937,110 +931,94 @@ function gameInit()
         dot:     tile(1, 256),
         triangle:tile(2, 256),
     };
-    
-    // Initialize UI system
-    new UISystemPlugin();
-    uiSystem.defaultCornerRadius = 6;
-    uiSystem.defaultLineWidth = 2;
-    
-    // Create menu buttons
-    createMenuButtons();
-    
-    goToTitle();
+
+    initStarfield();
+    buildMenus();
+    showMenu('title');
 }
 
-function createMenuButtons()
+function buildMenus()
 {
-    // UI positions are relative to canvas center (anchor system)
-    const cx = 0;
-    const cy = 0;
-    const btnW = 280;
-    const btnH = 70;
-    const spacing = 90;
-    
-    // Select Difficulty text
-    txtSelectDifficulty = new UIText(vec2(cx, cy + 10), vec2(400, 50), 'Select Difficulty');
-    txtSelectDifficulty.textColor = hsl(0, 0, 1);
-    txtSelectDifficulty.textLineColor = hsl(0, 0, 0);
-    txtSelectDifficulty.textLineWidth = 5;
-    txtSelectDifficulty.textHeight = 32;
-    txtSelectDifficulty.visible = false;
-    
-    // Easy button
-    btnEasy = new UIButton(vec2(cx, cy + 60), vec2(btnW, btnH), 'EASY');
-    btnEasy.color = hsl(.33, .6, .3);
-    btnEasy.hoverColor = hsl(.33, .8, .45);
-    btnEasy.textColor = hsl(0, 0, 1);
-    btnEasy.textLineColor = hsl(0, 0, 0);
-    btnEasy.textLineWidth = 4;
-    btnEasy.textHeight = 36;
-    btnEasy.visible = false;
-    btnEasy.onClick = () => { difficulty = 'easy'; startGame(); };
-    
-    // Medium button
-    btnMedium = new UIButton(vec2(cx, cy + 60 + spacing), vec2(btnW, btnH), 'MEDIUM');
-    btnMedium.color = hsl(.14, .6, .35);
-    btnMedium.hoverColor = hsl(.14, .8, .5);
-    btnMedium.textColor = hsl(0, 0, 1);
-    btnMedium.textLineColor = hsl(0, 0, 0);
-    btnMedium.textLineWidth = 4;
-    btnMedium.textHeight = 36;
-    btnMedium.visible = false;
-    btnMedium.onClick = () => { difficulty = 'medium'; startGame(); };
-    
-    // Hard button
-    btnHard = new UIButton(vec2(cx, cy + 60 + spacing * 2), vec2(btnW, btnH), 'HARD');
-    btnHard.color = hsl(.02, .6, .35);
-    btnHard.hoverColor = hsl(.02, .8, .5);
-    btnHard.textColor = hsl(0, 0, 1);
-    btnHard.textLineColor = hsl(0, 0, 0);
-    btnHard.textLineWidth = 4;
-    btnHard.textHeight = 36;
-    btnHard.visible = false;
-    btnHard.onClick = () => { difficulty = 'hard'; startGame(); };
-}
+    if (typeof createMenu !== 'function') return;
 
-function updateMenuButtons()
-{
-    const showMenu = gameState == STATE_MENU;
-    
-    txtSelectDifficulty.visible = showMenu;
-    btnEasy.visible = showMenu;
-    btnMedium.visible = showMenu;
-    btnHard.visible = showMenu;
-    
-    // Positions auto-center via the UI anchor system; nothing to update here.
+    setMenuVisibilityCallback(v => paused = v);
+
+    createTitleMenu({
+        title: '',     // canvas draws ORBITSWARM
+        subtitle: '',
+        playLabel: 'EASY',
+        onPlay: () => startGame('easy'),
+        revealOnClick: false,
+        items: [
+            {type:'button', label:'MEDIUM', onClick: () => startGame('medium')},
+            {type:'button', label:'HARD',   onClick: () => startGame('hard')},
+            {type:'button', label:'ABOUT',  onClick: () => pushMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'HOW TO PLAY',
+        onHide: popMenu,
+        items: [
+            {type:'text', text:
+                'Conquer the galaxy.\n\n' +
+                'DRAG from a planet you own to another to send ships.\n' +
+                'Wheel or 1-4 sets the send percentage (10/25/50/100).\n' +
+                'R restarts, Esc pauses.\n\n' +
+                'Higher difficulties give the AI faster reactions and better information.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume', label:'RESUME',        onClick: () => hideMenu('pause')},
+            {type:'button',              label:'RESTART',       onClick: () => { hideMenu('pause'); resetGame(); gameTimer = 0; }},
+            {type:'button',              label:'QUIT TO TITLE', onClick: () =>
+                showConfirmDialog({
+                    message: 'Quit to title?',
+                    onYes: () => quitToTitle(),
+                })},
+        ],
+    });
+
+    createToolbar({
+        id:'hud',
+        anchor:'top-right',
+        direction:'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen, hideOnTouch:true},
+            {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
+            {
+                if (isMenuVisible())
+                {
+                    clearSubmenuStack();
+                    hideAllMenus();
+                }
+                else if (isPlaying) showMenu('pause');
+            }},
+        ],
+    });
 }
 
 function gameUpdate()
 {
-    // Debug toggle: show troop/defense stats on all planets
-    if (keyWasPressed('KeyG'))
-        debugShowStats = !debugShowStats;
-    
-    if (keyWasPressed('Escape'))
+    if (bindPauseKey({when: () => isPlaying && !gameOver})) return;
+
+    if (!isPlaying)
     {
-        goToTitle();
+        updateStarfield(timeDelta);
         return;
     }
 
-    if (gameState == STATE_TITLE)
-    {
-        updateStarfield(timeDelta);
-        if (mouseWasPressed(0) || keyWasPressed('Space') || keyWasPressed('Enter'))
-        {
-            inputClear();
-            goToMenu();
-        }
-        return;
-    }
-    
-    if (gameState == STATE_MENU)
-    {
-        updateStarfield(timeDelta);
-        updateMenuButtons();
-        return;
-    }
+    // Debug toggle: show troop/defense stats on all planets
+    if (keyWasPressed('KeyG'))
+        debugShowStats = !debugShowStats;
 
     if (keyWasPressed('KeyR'))
         resetGame();
@@ -1053,8 +1031,9 @@ function gameUpdate()
 
     if (gameOver)
     {
-        if (keyWasPressed('Space') || keyWasPressed('Escape'))
-            goToMenu();
+        if (keyWasPressed('Space') || mouseWasPressed(0))
+            quitToTitle();
+        updateStarfield(timeDelta);
         return;
     }
 
@@ -1140,17 +1119,13 @@ function gameUpdate()
 function gameUpdatePost()
 {
     cameraPos = vec2(0, 0);
-    
-    // Update menu buttons on resize
-    if (gameState == STATE_MENU)
-        updateMenuButtons();
 }
 
 function gameRender()
 {
     renderStarfield();
 
-    if (gameState == STATE_TITLE || gameState == STATE_MENU)
+    if (!isPlaying)
     {
         drawTitleDecor();
         return;
@@ -1215,7 +1190,7 @@ function gameRender()
 
 function gameRenderPost()
 {
-    if (gameState == STATE_TITLE || gameState == STATE_MENU)
+    if (!isPlaying)
     {
         const cx = mainCanvasSize.x/2;
         const cy = mainCanvasSize.y/2;
@@ -1223,18 +1198,11 @@ function gameRenderPost()
         // Pulsing title effect
         const t = time;
         const huePulse = .4 + Math.sin(t * 1.8) * .08;
-        
-        // Glow layers behind title (centered)
-        // Main title with pulsing size and color
+
+        // Glow layers behind title (centered, sits above the menu panel)
         for(let i = 0; i < 9; ++i)
-            drawTextScreen('ORBITSWARM', vec2(cx, cy - 60-i*8), 110 + Math.sin(t * 2.5+i) * 2+i*3, hsl(huePulse+i*.1, 1, i/11), 0, BLACK, undefined,undefined, 'bold');
-        
-        if (gameState == STATE_TITLE)
-        {
-            drawTextScreen('Made With LittleJS AI', vec2(cx, cy + 80), 36, hsl(0,0,.7), 5, hsl(0,0,0));
-            drawTextScreen('Click to Start', vec2(cx, cy + 140), 44, hsl(0,0,1), 7, hsl(0,0,0));
-        }
-        // Menu state: Select Difficulty text is rendered by UIText, buttons by UI system
+            drawTextScreen('ORBITSWARM', vec2(cx, cy - 180-i*8), 110 + Math.sin(t * 2.5+i) * 2+i*3, hsl(huePulse+i*.1, 1, i/11), 0, BLACK, undefined,undefined, 'bold');
+
         return;
     }
 
@@ -1242,7 +1210,7 @@ function gameRenderPost()
     const cx = mainCanvasSize.x / 2;
     const helpY = mainCanvasSize.y - 20;
     
-    drawTextScreen('Drag: Send Ships  |  Wheel or 1-4: Set %  |  R: Restart  |  Esc: Menu', 
+    drawTextScreen('Drag: Send Ships  |  Wheel or 1-4: Set %  |  R: Restart  |  Esc: Pause', 
         vec2(cx, helpY), 18, hsl(0,0,.7), 3, hsl(0,0,0));
 
     // Debug mode indicator
