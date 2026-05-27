@@ -169,7 +169,7 @@ class UITrackLabel extends UIButton
     }
     onClick()
     {
-        if (isMenuVisible()) return;
+        if (isMenuVisible() && getTopMenu()?.id !== 'controls') return;
         if (this.kind === 'piano') this.builtInSound.playNote(this.semitone);
         else if (this.kind === 'drum') this.builtInSound.play();
         else if (this.kind === 'custom') openPasteForSlot(this.track);
@@ -210,7 +210,7 @@ class UISequencerButton extends UIButton
     }
     onPress()
     {
-        if (isMenuVisible()) return;
+        if (isMenuVisible() && getTopMenu()?.id !== 'controls') return;
         if (mouseWasPressed(0))
             eraseMode = this.isOn;
         this.isOn = !eraseMode;
@@ -419,7 +419,7 @@ function gameInit()
                     message: 'Clear pattern?',
                     yesLabel: 'CLEAR',
                     noLabel: 'CANCEL',
-                    onYes: clearAllCells,
+                    onYes: ()=> { clearAllCells(); showMenu('controls'); },
                 })},
             {type:'button', id:'fullscreen', label:'⛶',
                 title: 'Toggle fullscreen',
