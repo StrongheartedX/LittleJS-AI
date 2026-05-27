@@ -254,7 +254,7 @@ function buildMenus()
 {
     if (typeof createMenu !== 'function') return;
 
-    setMenuVisibilityCallback(v => paused = v && isPlaying);
+    installAutoPause(() => isPlaying);
 
     createTitleMenu({
         title: 'RIVER RAID',

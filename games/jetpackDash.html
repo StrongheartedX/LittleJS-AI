@@ -877,7 +877,7 @@ async function gameInit()
     setSoundVolume(.8);
 
     // One callback drives `paused` for every menu, including dialogs.
-    setMenuVisibilityCallback(v => paused = v);
+    installAutoPause(() => isPlaying);
 
     // sounds — full set defined here so every gameplay event has audio.
     sndThrust        = new SoundGenerator({ frequency: 90,  release: 0.12, volume: 0.25, noise: 0.6 });
@@ -888,15 +888,6 @@ async function gameInit()
     sndMissileLaunch = new SoundGenerator({ frequency: 240,  release: 0.4,  volume: 0.5, slide: -3 });
     sndHit           = new SoundGenerator({ frequency: 110,  release: 0.3,  volume: 0.7, noise: 0.7 });
 
-    // ----- global UI sounds (LittleJS Sound class wraps zzfx params and
-    //       routes through the engine's audio system, so master volume,
-    //       muting, and user-gesture gating all just work). -----
-    const sound_select   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-    const sound_activate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-    setMenuSounds({
-        select:   () => sound_select.play(),
-        activate: () => sound_activate.play(),
-    });
 
     // ----- title menu -----
     // dismissable: true lets the player Esc / B back to the canvas prompt;

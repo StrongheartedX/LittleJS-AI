@@ -286,15 +286,7 @@ async function gameInit()
     resetGame();
 
     // pause the engine whenever any menu (including dialogs) is visible
-    setMenuVisibilityCallback(v => paused = v);
-
-    // global UI sounds for menu navigation / activation
-    const sndSelect   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-    const sndActivate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-    setMenuSounds({
-        select:   () => sndSelect.play(),
-        activate: () => sndActivate.play(),
-    });
+    installAutoPause(() => isPlaying);
 
     const startDifficulty = (w, h, m) =>
     {

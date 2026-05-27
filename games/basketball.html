@@ -356,7 +356,7 @@ async function gameInit()
 {
     canvasClearColor = COLOR_BG;
     setSoundVolume(.7);
-    setMenuVisibilityCallback(v => paused = v);
+    installAutoPause(() => gamePhase === 'playing');
 
     bestScore = parseInt(localStorage.getItem(BEST_KEY) || '0') | 0;
 

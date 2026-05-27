@@ -1195,7 +1195,7 @@ function buildMenus()
 {
     if (typeof createMenu !== 'function') return;
 
-    setMenuVisibilityCallback(v => paused = v && isPlaying);
+    installAutoPause(() => isPlaying);
 
     createTitleMenu({
         title: 'GRADIUS',
@@ -1302,8 +1302,8 @@ function gameRenderPost()
     // Score
     drawTextScreen('SCORE ' + score, vec2(20, hudY), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'left');
 
-    // Lives
-    drawTextScreen('LIVES ' + lives, vec2(mainCanvasSize.x - 20, hudY), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'right');
+    // Lives (stacked under score, top-left)
+    drawTextScreen('LIVES ' + lives, vec2(20, hudY + 32), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0), 'left');
 
     // Wave
     drawTextScreen('WAVE ' + waveNumber, vec2(mainCanvasSize.x / 2, hudY), 28, hsl(.55, .8, .7), 4, hsl(0, 0, 0));

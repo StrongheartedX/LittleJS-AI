@@ -75,6 +75,15 @@
 // per show/hide for ALL menus including dialogs. Use this for paused-
 // tracking; per-menu onShow/onHide are reserved for menu-specific logic.
 //
+// Shortcut: installAutoPause(predicate?) — wires the engine's `paused`
+// global to menu visibility. Most games just want
+//     installAutoPause(() => isPlaying);
+// so the title menu can sit interactively over an animated backdrop while
+// any in-game menu (pause/dialog) freezes gameplay. Without a predicate,
+// `paused = isMenuVisible()` (pauses for every menu, title included).
+// Uses an internal listener so the game's setMenuVisibilityCallback is
+// still available for custom one-off needs.
+//
 // Default toolbar: installDefaultToolbar({mute, fullscreen, pauseMenuId,
 //                                         titleMenuId, titleDismissable,
 //                                         extraItemsBefore, extraItemsAfter})
@@ -98,7 +107,10 @@
 // Sounds: setMenuSounds({select, activate}) wires global UI sounds.
 // `select` fires on keyboard/gamepad nav; `activate` on click / Enter / A.
 // playMenuSound('activate') lets game code (e.g. Esc -> showMenu('pause'))
-// trigger the same sound as a toolbar-button-driven open.
+// trigger the same sound as a toolbar-button-driven open. Default zzfx
+// select/activate tones are installed automatically on first createMenu
+// — call setMenuSounds() with your own handlers to override, or
+// setMenuSounds(null) to silence the menu UI entirely.
 //
 // Theming: every color, font, size and spacing is a CSS variable on
 // #littlejs-menus. Override any of them in your own <style>:
@@ -452,6 +464,14 @@ function createToolbar(config)
 // as createToolbar (button, toggle, etc.), inserted at the left or right
 // of the default trio. Anchor is top-right so the LAST item sits in the
 // corner; the hamburger is always the last item.
+//
+// Custom hamburger behavior: pass `onHamburger: () => {...}` to override
+// the default open-pause / close-current behavior — useful for games whose
+// "menu" action is something other than a pause menu (e.g. miniGolf's
+// back-to-hole-select). Pair with `grayedWhen: () => <predicate>` for a
+// custom grayed-state check (overrides the default title-on-top check);
+// when the underlying state changes, call `refreshDefaultToolbar()` to
+// re-evaluate the grayed state.
 function installDefaultToolbar(opts)
 {
     opts = Object.assign({
@@ -468,6 +488,8 @@ function installDefaultToolbar(opts)
         muteLabelOff:     '🔇',
         extraItemsBefore: [],
         extraItemsAfter:  [],
+        onHamburger:      null,   // override default click behavior
+        grayedWhen:       null,   // override default grayed-state predicate
     }, opts || {});
 
     const items = [];
@@ -534,11 +556,12 @@ function installDefaultToolbar(opts)
         title: 'Menu',
         onClick: () =>
         {
+            // Custom override wins. Don't fire if the button is grayed —
+            // the visual state must match the click behavior so a disabled
+            // hamburger never triggers anything.
+            if (_isHamburgerGrayed(opts)) return;
+            if (opts.onHamburger) { opts.onHamburger(); return; }
             const top = getTopMenu();
-            // Title is on top — leave it up (no useful exit). Games that
-            // genuinely want to dismiss the title set titleDismissable.
-            if (top && top.id === opts.titleMenuId && !opts.titleDismissable)
-                return;
             if (top)
             {
                 clearSubmenuStack();
@@ -559,21 +582,46 @@ function installDefaultToolbar(opts)
     });
     toolbar.show();
 
+    // Keep handle to opts so refreshDefaultToolbar can re-evaluate later
+    // when the game's underlying state (driving grayedWhen) changes.
+    _defaultToolbarRegistry.set(opts.id, { toolbar, opts });
+
     // Gray the hamburger whenever the title menu is on top (and not
-    // dismissable). Keeps the button visible so the bar layout doesn't
-    // shift, but blocks clicks so the player can't dismiss the title.
+    // dismissable), or whenever a custom grayedWhen predicate says so.
+    // Keeps the button visible so the bar layout doesn't shift, but
+    // blocks clicks so the player can't dismiss the title.
     function updateHamburgerGrayed()
     {
         const item = toolbar.getItem('menu');
         if (!item) return;
-        const top = getTopMenu();
-        const grayed = top && top.id === opts.titleMenuId && !opts.titleDismissable;
-        item.setDisabled(!!grayed);
+        item.setDisabled(_isHamburgerGrayed(opts));
     }
     _addInternalVisibilityListener(updateHamburgerGrayed);
     updateHamburgerGrayed();
 
     return toolbar;
+}
+
+// Default-toolbar bookkeeping. Lets refreshDefaultToolbar re-evaluate the
+// hamburger's grayed state in response to game-driven (non-menu) state
+// changes — e.g. miniGolf's gameState='menu'|'play' transitions.
+const _defaultToolbarRegistry = new Map();
+function _isHamburgerGrayed(opts)
+{
+    if (opts.grayedWhen) return !!opts.grayedWhen();
+    const top = getTopMenu();
+    return !!(top && top.id === opts.titleMenuId && !opts.titleDismissable);
+}
+function refreshDefaultToolbar(id)
+{
+    const ids = id ? [id] : [..._defaultToolbarRegistry.keys()];
+    for (const tid of ids)
+    {
+        const reg = _defaultToolbarRegistry.get(tid);
+        if (!reg) continue;
+        const item = reg.toolbar.getItem('menu');
+        if (item) item.setDisabled(_isHamburgerGrayed(reg.opts));
+    }
 }
 
 // ============================================================================
@@ -1006,10 +1054,25 @@ function playMenuSound(name)
 // miss the internal dialog menus entirely).
 let menuVisibilityCallback = null;
 function setMenuVisibilityCallback(cb) { menuVisibilityCallback = cb || null; }
-// Internal listeners — used by built-in features (e.g. installDefaultToolbar)
-// that need to react to menu changes without stomping the user's callback.
+// Internal listeners — used by built-in features (e.g. installDefaultToolbar,
+// installAutoPause) that need to react to menu changes without stomping the
+// user's callback.
 const _internalVisibilityListeners = [];
 function _addInternalVisibilityListener(fn) { _internalVisibilityListeners.push(fn); }
+// Auto-pause shortcut. installAutoPause() drives LittleJS's `paused` global
+// from menu visibility — pauses whenever any menu is visible. Pass a
+// predicate (e.g. `() => isPlaying`) to only pause when the game is
+// actually running, so the title menu stays interactive over an animated
+// backdrop. Internally uses the listener system so it doesn't conflict
+// with a separate setMenuVisibilityCallback.
+function installAutoPause(predicate)
+{
+    _addInternalVisibilityListener(v =>
+    {
+        // `paused` is LittleJS's global; this assignment writes to it.
+        paused = predicate ? (v && !!predicate()) : v;
+    });
+}
 function fireMenuVisibility()
 {
     const v = isMenuVisible();
@@ -1348,6 +1411,25 @@ function initMenuSystem()
     if (typeof setDebugKey === 'function' &&
         typeof debugKey !== 'undefined' && debugKey === 'Escape')
         setDebugKey('Backquote');
+
+    // Default UI sounds: tuned zzfx tones that worked across every game's
+    // hand-rolled `setMenuSounds(...)` block. Only installed if the game
+    // hasn't already wired its own — explicit setMenuSounds calls always
+    // win. To run silent, call `setMenuSounds(null)` after the first
+    // createMenu (or before, with empty handlers).
+    if (typeof Sound === 'function')
+    {
+        if (!menuSounds.select)
+        {
+            const _defaultSelect = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+            menuSounds.select = () => _defaultSelect.play();
+        }
+        if (!menuSounds.activate)
+        {
+            const _defaultActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+            menuSounds.activate = () => _defaultActivate.play();
+        }
+    }
 
     injectStyles();
 

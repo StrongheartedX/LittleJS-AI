@@ -602,15 +602,7 @@ function gameInit()
     sTick  = new SoundGenerator({volume:.30, frequency:300, attack:.001, sustain:.02, release:.10, shape:2, slide:-.10, noise:.02});
 
     // ----- menus.js wiring -----
-    setMenuVisibilityCallback(v => paused = v);
-
-    // global UI sounds
-    const sound_select   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-    const sound_activate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-    setMenuSounds({
-        select:   () => sound_select.play(),
-        activate: () => sound_activate.play(),
-    });
+    installAutoPause(() => isPlaying);
 
     // ----- title menu -----
     // Stays up at startup (no click-to-reveal). onShow resets the field so the

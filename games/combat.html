@@ -518,7 +518,7 @@ function buildMenus()
 
     // Only pause when a game is actually running. Title menu sits over
     // the canvas without freezing anything.
-    setMenuVisibilityCallback(v => paused = v && isPlaying);
+    installAutoPause(() => isPlaying);
 
     createTitleMenu({
         title: 'COMBAT',

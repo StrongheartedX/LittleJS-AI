@@ -775,24 +775,21 @@ async function gameInit()
     buildToolbar();
 }
 
-// HUD toolbar (fullscreen + back-to-menu). Only visible during play — on the
-// hole-select grid the canvas already shows what it needs.
+// HUD toolbar. Standard mute / fullscreen / hamburger, visible at all times.
+// On the hole-select screen the hamburger is grayed out (no useful action);
+// during play it returns to the hole-select grid.
 function buildToolbar()
 {
-    if (typeof createToolbar !== 'function') return;
-    createToolbar({
-        id:'hud', anchor:'top-right', direction:'horizontal',
-        items: [
-            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen, hideOnTouch:true},
-            {type:'button', id:'menu', label:'☰', title:'Back to menu', onClick: () =>
-            {
-                clearCourse();
-                gameState = 'menu';
-                getToolbar('hud')?.hide();
-            }},
-        ],
+    if (typeof installDefaultToolbar !== 'function') return;
+    installDefaultToolbar({
+        grayedWhen:  () => gameState === 'menu',
+        onHamburger: () =>
+        {
+            clearCourse();
+            gameState = 'menu';
+            refreshDefaultToolbar();
+        },
     });
-    getToolbar('hud')?.hide();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -806,7 +803,7 @@ function gameUpdate()
             gameState = 'play';
             totalStrokes = 0;
             buildHole(i);
-            getToolbar('hud')?.show();
+            refreshDefaultToolbar();
             return;
         }
     }
@@ -840,7 +837,7 @@ function gameUpdate()
                     gameState = 'play';
                     totalStrokes = 0;
                     buildHole(i);
-                    getToolbar('hud')?.show();
+                    refreshDefaultToolbar();
                     return;
                 }
             }
@@ -861,7 +858,7 @@ function gameUpdate()
     {
         clearCourse();
         gameState = 'menu';
-        getToolbar('hud')?.hide();
+        refreshDefaultToolbar();
         return;
     }
 

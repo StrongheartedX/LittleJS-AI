@@ -2421,14 +2421,6 @@ function buildMenus()
 {
     if (typeof createMenu !== 'function') return; // menus.js not loaded — fail gracefully
 
-    // Global UI feedback sounds
-    const sndSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-    const sndActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-    setMenuSounds({
-        select:   () => sndSelect.play(),
-        activate: () => sndActivate.play(),
-    });
-
     // Title menu — title is drawn on the canvas (fancy effect) so we suppress the DOM title here
     createTitleMenu({
         title: '',
@@ -2564,10 +2556,9 @@ function gameInit()
 
     // (menus.js auto-moves LittleJS's debug-overlay key off Escape to ` — no manual remap needed)
     setSoundVolume(.8);
-    if (typeof setMenuVisibilityCallback === 'function')
-        // Only pause when we're actually playing — keeps attract-mode entities
-        // animating behind the title screen.
-        setMenuVisibilityCallback(v => paused = v && isPlaying);
+    // Only pause when we're actually playing — keeps attract-mode entities
+    // animating behind the title screen.
+    installAutoPause(() => isPlaying);
 
     buildMenus();
     spawnAttractDecoration();

@@ -53,7 +53,7 @@ let snakeFlashTimer; // flash on death
 let foodSpawnTimer;  // small grow-in animation when food appears
 
 // sounds (created in gameInit so user-gesture audio is happy)
-let sEat, sPoison, sDie, sStep, sSelect, sActivate;
+let sEat, sPoison, sDie, sStep;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -452,17 +452,10 @@ async function gameInit()
     sDie    = new SoundGenerator({volume:1,  frequency:90,  release:.35, noise:.25, shapeCurve:.6, slide:-.4, delay:.03});
     sStep   = new SoundGenerator({volume:.10, frequency:380, release:.015, shapeCurve:1.4});
 
-    // menu UI sounds (zzfx-style Sound objects so master volume / muting just work)
-    sSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-    sActivate = new Sound([.5,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-    setMenuSounds({
-        select:   () => sSelect.play(),
-        activate: () => sActivate.play(),
-    });
-
-    // Pause whenever any menu (incl. dialogs) is visible — never toggle paused
-    // from gameUpdate (gameUpdate doesn't run while paused).
-    setMenuVisibilityCallback(v => paused = v);
+    // Pause whenever a gameplay menu (pause/dialog) is up. Title menu sits
+    // over the frozen board without freezing the engine. Default menu sounds
+    // ship in menus.js — no per-game setMenuSounds needed.
+    installAutoPause(() => isPlaying);
 
     // initial state — title up, no run in progress
     isPlaying = false;

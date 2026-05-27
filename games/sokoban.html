@@ -786,7 +786,7 @@ function buildMenus()
 {
     if (typeof createMenu !== 'function') return;
 
-    setMenuVisibilityCallback(v => paused = v && isPlaying);
+    installAutoPause(() => isPlaying);
 
     createTitleMenu({
         title: 'SOKOBAN',
@@ -987,10 +987,10 @@ function gameRenderPost()
     // UI - Level info
     const levelText = `Level ${currentLevel + 1}/${LEVELS.length}`;
     drawTextScreen(levelText, vec2(20, 24), 28, rgb(1,1,1), 4, rgb(0,0,0), 'left');
-    
-    // Moves and pushes
+
+    // Moves and pushes (stacked under level, top-left)
     const statsText = `Moves: ${moves}  Pushes: ${pushes}`;
-    drawTextScreen(statsText, vec2(mainCanvasSize.x - 20, 24), 22, rgb(.9,.9,.9), 3, rgb(0,0,0), 'right');
+    drawTextScreen(statsText, vec2(20, 56), 22, rgb(.9,.9,.9), 3, rgb(0,0,0), 'left');
     
     // Controls hint
     const controlsText = 'Arrows/WASD: Move | Z/U: Undo | R: Restart | N/P: Skip | V: Verify All';

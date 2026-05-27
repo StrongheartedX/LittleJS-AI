@@ -741,7 +741,7 @@ function buildMenus()
 {
     if (typeof createMenu !== 'function') return;
 
-    setMenuVisibilityCallback(v => paused = v && isPlaying);
+    installAutoPause(() => isPlaying);
 
     createTitleMenu({
         title: 'MICRO RACER',
@@ -924,8 +924,11 @@ function gameRenderPost()
     const w = mainCanvasSize.x, h = mainCanvasSize.y;
     const white = hsl(0,0,1), black = hsl(0,0,0);
 
+    // Top-left HUD stack: time, then lap, then place. Seed removed.
+    drawTextScreen(`${raceTime.toFixed(2)}s`, vec2(90, 34), 28, white, 4, black, 'center');
+
     const lapNum = Math.min(player.lap + 1, TOTAL_LAPS);
-    drawTextScreen(`Lap ${lapNum}/${TOTAL_LAPS}`, vec2(90, 34), 28, white, 4, black, 'center');
+    drawTextScreen(`Lap ${lapNum}/${TOTAL_LAPS}`, vec2(90, 68), 28, white, 4, black, 'center');
 
     // live standings
     const sortedLive = cars.slice().sort((a,b) => {
@@ -935,10 +938,7 @@ function gameRenderPost()
         return b.progress() - a.progress();
     });
     const place = sortedLive.indexOf(player) + 1;
-    drawTextScreen(`${place}${ordinalSuffix(place)} / ${cars.length}`, vec2(90, 68), 28, white, 4, black, 'center');
-
-    drawTextScreen(`${raceTime.toFixed(2)}s`, vec2(w - 90, 34), 28, white, 4, black, 'center');
-    drawTextScreen(`seed ${trackSeed}`, vec2(w - 90, 68), 18, hsl(0,0,.8), 3, black, 'center');
+    drawTextScreen(`${place}${ordinalSuffix(place)} / ${cars.length}`, vec2(90, 102), 28, white, 4, black, 'center');
 
     // countdown overlay
     if (!raceStarted)
