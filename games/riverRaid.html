@@ -196,7 +196,7 @@ function crash(reason)
     gameOverReason = reason;
     if (score > bestScore) {
         bestScore = score;
-        saveData({bestScore});
+        saveData({bestScore: bestScore|0});
     }
     flashTimer = 30;
     sExplode && sExplode.play();

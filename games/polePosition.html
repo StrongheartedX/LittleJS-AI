@@ -317,7 +317,7 @@ function gameUpdate()
         speed = 0;
         if (score > bestScore) {
             bestScore = score;
-            saveData({bestScore});
+            saveData({bestScore: bestScore|0});
         }
         return;
     }

@@ -787,7 +787,7 @@ function triggerGameOver()
     gameOver = true;
     if (score > bestScore) {
         bestScore = score;
-        saveData({bestScore});
+        saveData({bestScore: bestScore|0});
     }
     if (!player) return;
 
