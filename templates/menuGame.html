@@ -51,16 +51,11 @@ const playerSize = vec2(2, 2);
 // this, alert dialogs leave paused=false, letting gameUpdate run on the same
 // frame as a menu Esc and re-open pause on top of the surfaced menu.
 
-// HUD toolbar is only meaningful during gameplay. Tracked separately
-// because "in a menu" doesn't tell us whether the game has started yet
-// (title screen is also a menu, but the HUD shouldn't be available there).
+// Tracks whether the game proper has started (vs sitting on the title
+// menu). Gameplay code in gameUpdate / gameRender gates on this. The
+// toolbar is always visible — installDefaultToolbar grays the hamburger
+// when the title menu is on top.
 let isPlaying = false;
-function setPlaying(p)
-{
-    isPlaying = p;
-    const hud = getToolbar('hud');
-    if (hud) p ? hud.show() : hud.hide();
-}
 
 async function gameInit()
 {
@@ -90,16 +85,16 @@ async function gameInit()
     });
 
     // ----- title menu -----
-    // dismissable: true lets the player Esc / B back to the canvas prompt;
-    // attachClickToReveal (set up at the end of gameInit) re-shows the
-    // menu on the next click / Space / Enter / A / Start.
-    // onStart wires gamepad Start to launch "play" directly without the
+    // Shown immediately at the end of gameInit (no click-to-reveal step).
+    // dismissable: false so Esc/B can't strand the player in a "no menu,
+    // not playing" state — the only ways out are the action buttons.
+    // onStart wires gamepad Start to launch PLAY directly without the
     // player having to navigate to the PLAY item first.
-    const playFromTitle = () => { setPlaying(true); titleMenu.hide(); };
+    const playFromTitle = () => { isPlaying = true; titleMenu.hide(); };
     const titleMenu = createMenu({
         id: 'title',
         title: 'MENU DEMO',
-        dismissable: true,
+        dismissable: false,
         onStart: playFromTitle,
         items: [
             {type:'label',  text:'A demo of menus.js'},
@@ -229,7 +224,7 @@ async function gameInit()
                     {
                         clearSubmenuStack();
                         hideAllMenus();
-                        setPlaying(false);
+                        isPlaying = false;
                         showMenu('title');
                     },
                 });
@@ -237,49 +232,30 @@ async function gameInit()
         ],
     });
 
-    // ----- HUD toolbar (visible only during gameplay; setPlaying drives it) -----
-    createToolbar({
-        id:        'hud',
-        anchor:    'top-right',
-        direction: 'horizontal',
-        items: [
-            // Order: music, fullscreen, menu. Anchor is top-right so the
-            // LAST item sits on the far right — putting the hamburger
-            // (always shown, primary action) on the corner under the thumb.
+    // ----- toolbar (always visible, including over the title menu) -----
+    // installDefaultToolbar gives the standard mute / fullscreen / hamburger
+    // trio, with built-in title-aware hamburger graying so the player can't
+    // try to open the pause menu from on top of the title menu. The music
+    // toggle is appended via extraItemsBefore to demo the toolbar ↔ options
+    // menu sync pattern (changing music here updates the OPTIONS checkbox).
+    installDefaultToolbar({
+        extraItemsBefore: [
             {type:'toggle', id:'music', label:'♪', title:'Toggle music', value: musicOn,
                 onChange: v => { musicOn = v; getMenu('options').getItem('music').setValue(v); }},
-            {type:'button', id:'fs',    label:'⛶', title:'Toggle fullscreen', onClick: toggleFullscreen},
-            {type:'button', id:'menu',  label:'☰', title:'Menu', onClick: () =>
-            {
-                // ☰ toggles between gameplay and the pause-menu flow. If any
-                // menu is up (pause itself, or a sub-menu opened from pause),
-                // a press exits all the way back to gameplay.
-                if (isMenuVisible())
-                {
-                    clearSubmenuStack();
-                    hideAllMenus();
-                }
-                else showMenu('pause');
-            }},
         ],
     });
 
-    // Wait for first user interaction (click / touch / Space / Enter / A /
-    // Start) before showing the title menu. Mirrors the pinball pattern:
-    // the canvas shows a "CLICK TO PLAY" prompt while !isPlaying and no
-    // menu is up; the listener re-arms after Esc/B dismisses the title.
-    // The () => !isPlaying gate keeps clicks during gameplay from
-    // accidentally re-revealing the title menu.
-    attachClickToReveal('title', () => !isPlaying);
+    // Show the title menu immediately — no click-to-reveal step.
+    showMenu('title');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
-    // gameUpdate only runs when paused=false, which only happens when no
-    // menu is visible. Gate on isPlaying so the Esc/Start pause shortcut
-    // doesn't fire from the "CLICK TO PLAY" pre-play state — title-menu
-    // reveal owns Esc/Start there via attachClickToReveal.
+    // Esc / gamepad Start opens the pause menu while playing. Gated on
+    // isPlaying so the shortcut never fires before the player has clicked
+    // PLAY (when title is up, gameUpdate is paused anyway, so this is
+    // defensive — but also makes the intent obvious to readers).
     if (isPlaying && (keyWasPressed('Escape') || gamepadWasPressed(9)))
     {
         playMenuSound('activate');
@@ -312,21 +288,11 @@ function gameRender()
 function gameRenderPost()
 {
     // "Menu System Demo" header — title-screen banner only. Hide once
-    // the player is actually playing.
+    // the player is actually playing. The title menu is always up when
+    // !isPlaying, so no "click to play" prompt is needed.
     if (!isPlaying)
         drawTextScreen('Menu System Demo', vec2(mainCanvasSize.x/2, 150),
             32, hsl(0, 0, 1), 4, hsl(0, 0, 0));
-
-    // Pre-play / post-quit prompt — only when not playing AND no menu
-    // is up. Pulses opacity so it reads as "do something". Adapts to
-    // touch devices via isTouchDevice.
-    if (!isPlaying && !isMenuVisible())
-    {
-        const prompt = isTouchDevice ? 'TOUCH TO PLAY' : 'CLICK TO PLAY';
-        const a = 0.5 + 0.5 * Math.sin(time * 3);
-        drawTextScreen(prompt, vec2(mainCanvasSize.x/2, mainCanvasSize.y/2),
-            48, hsl(0, 0, 1, a), 6, hsl(0, 0, 0, a));
-    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
