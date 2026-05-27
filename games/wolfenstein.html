@@ -398,10 +398,15 @@ function paintHealth(ctx)
     ctx.strokeStyle = '#3a3a3a';
     ctx.lineWidth = 8;
     ctx.strokeRect(110, 200, 280, 240);
-    // red cross
-    ctx.fillStyle = '#e02828';
+    // green cross (the Red Cross emblem is a protected symbol — green is the
+    // common game-safe substitute, same shape, unambiguously medical)
+    ctx.fillStyle = '#28a848';
     ctx.fillRect(228, 240, 44, 160);    // vertical bar
     ctx.fillRect(170, 298, 160, 44);    // horizontal bar
+    // dark green inner shading for a bit of depth
+    ctx.fillStyle = '#106820';
+    ctx.fillRect(228, 240, 8, 160);
+    ctx.fillRect(170, 298, 160, 8);
     // a little highlight on the box top
     ctx.fillStyle = 'rgba(255,255,255,.4)';
     ctx.fillRect(118, 208, 264, 14);
@@ -1105,7 +1110,10 @@ function gameRender()
         const fogT = Math.min(1, perpDist / MAX_DIST);
         const dim = opts?.noFog ? 1 : (1 - fogT * .55);
         const tint = (opts?.tint ?? 1) * dim;
-        const yOff = opts?.yOff ?? 0;
+        // grounded:true shifts a small sprite down so its bottom edge sits at
+        // the floor instead of floating at horizon-level.
+        const groundShift = opts?.grounded ? -(1 - scale) * PROJ / (2 * perpDist) : 0;
+        const yOff = (opts?.yOff ?? 0) + groundShift;
         // Default: grayscale tint with full alpha (existing behavior — enemies, walls, lamps).
         // For effects that should fade out, pass {color: WHITE} — Color.scale fades alpha too.
         const baseColor = opts?.color;
@@ -1137,12 +1145,12 @@ function gameRender()
         else if (d.kind === 'barrel')
             pushSprite(d.pos, barrelTile);
     }
-    // pickups — billboards with a gentle hover bob; phase varies per item
+    // pickups — small floor-resting billboards with a gentle hover bob
     for (const p of pickups)
     {
-        const bob = Math.sin(time * 3 + p.pos.x * 1.1 + p.pos.y * .7) * .12;
+        const bob = Math.sin(time * 3 + p.pos.x * 1.1 + p.pos.y * .7) * .08;
         const tile = p.kind === 'health' ? healthTile : ammoTile;
-        pushSprite(p.pos, tile, {yOff: bob, scale: .55});
+        pushSprite(p.pos, tile, {yOff: bob, scale: .32, grounded: true});
     }
     // bullet-impact puffs — short-lived, fade out via alpha
     for (const p of hitEffects)
