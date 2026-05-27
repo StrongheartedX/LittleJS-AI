@@ -26,8 +26,15 @@ const GRID = 4;
 const CELL_SIZE = 1;
 const GAP = .12;
 
-let grid;
-let popGrid;
+const SLIDE_TIME = .12;       // seconds for a tile to slide to its new cell
+const SPAWN_TIME = .14;       // grow-in time for a newly spawned tile
+const MERGE_POP_TIME = .18;   // brief pulse on the survivor after a merge
+
+let tiles = [];               // every visible tile (including the dying ones during a slide)
+let grid;                     // grid[y][x] = tile reference or null (logical state)
+let animT = 0;                // remaining slide time; input is locked while > 0
+let pendingSpawn = false;
+
 let score = 0;
 let best = 0;
 let gameOver = false;
@@ -55,24 +62,36 @@ function gameInit()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+function makeTile(value, gx, gy)
+{
+    return {
+        value,              // logical value (used for merges)
+        shownValue: value,  // value rendered on the tile (lags behind during a merge slide)
+        gx, gy,             // target grid coords
+        ax: gx, ay: gy,     // current animated grid coords (rendered)
+        srcX: gx, srcY: gy, // animation start coords for this slide
+        spawnT: 0,          // > 0 while the spawn-pop is playing
+        mergeT: 0,          // > 0 while the merge-pop is playing
+        pendingMerge: false,// becomes true at move time; resolves at slide end
+        dying: false,       // absorbed tile; removed after the slide
+    };
+}
+
 function newGame()
 {
     score = 0;
     gameOver = false;
     won = false;
     continueAfterWin = false;
+    animT = 0;
+    pendingSpawn = false;
 
+    tiles = [];
     grid = [];
-    popGrid = [];
     for (let y = 0; y < GRID; ++y)
     {
         grid[y] = [];
-        popGrid[y] = [];
-        for (let x = 0; x < GRID; ++x)
-        {
-            grid[y][x] = 0;
-            popGrid[y][x] = 0;
-        }
+        for (let x = 0; x < GRID; ++x) grid[y][x] = null;
     }
 
     addRandomTile();
@@ -109,38 +128,12 @@ function addRandomTile()
     if (!e.length) return false;
     const [x, y] = e[(Math.random() * e.length) | 0];
     const v = Math.random() < .9 ? 2 : 4;
-    grid[y][x] = v;
-    popGrid[y][x] = .14;
+    const t = makeTile(v, x, y);
+    t.spawnT = SPAWN_TIME;
+    grid[y][x] = t;
+    tiles.push(t);
     sSpawn.play();
     return true;
-}
-
-function slideLine(line)
-{
-    const src = line.filter(v => v);
-    const out = [];
-    let moved = false;
-    let mergedAny = false;
-
-    for (let i = 0; i < src.length; ++i)
-    {
-        let v = src[i];
-        if (i + 1 < src.length && src[i + 1] === v)
-        {
-            v *= 2;
-            i++;
-            score += v;
-            mergedAny = true;
-            moved = true;
-        }
-        out.push(v);
-    }
-    while (out.length < GRID) out.push(0);
-
-    for (let i = 0; i < GRID; ++i)
-        if (out[i] !== line[i]) { moved = true; break; }
-
-    return { out, moved, mergedAny };
 }
 
 function canMove()
@@ -148,93 +141,164 @@ function canMove()
     for (let y = 0; y < GRID; ++y)
         for (let x = 0; x < GRID; ++x)
         {
-            const v = grid[y][x];
-            if (!v) return true;
-            if (x + 1 < GRID && grid[y][x + 1] === v) return true;
-            if (y + 1 < GRID && grid[y + 1][x] === v) return true;
+            const t = grid[y][x];
+            if (!t) return true;
+            const r = grid[y][x + 1], d = grid[y + 1] && grid[y + 1][x];
+            if (r && r.value === t.value) return true;
+            if (d && d.value === t.value) return true;
         }
     return false;
+}
+
+// Process one row/column of tiles in travel order (front-most first).
+// Mutates tile.value / tile.pendingMerge / tile.dying as merges resolve.
+// Returns each surviving tile's destination index within the line.
+function processLine(line, mergedRef)
+{
+    const result = [];
+    let i = 0;
+    while (i < line.length)
+    {
+        const a = line[i];
+        const b = line[i + 1];
+        if (b && b.value === a.value)
+        {
+            a.value *= 2;
+            a.pendingMerge = true;
+            b.dying = true;
+            score += a.value;
+            mergedRef.merged = true;
+            if (a.value >= 2048 && !won) { won = true; sWin.play(); }
+            result.push({tile: a, dst: result.length, absorbed: b});
+            i += 2;
+        }
+        else
+        {
+            result.push({tile: a, dst: result.length});
+            i += 1;
+        }
+    }
+    return result;
 }
 
 function applyMove(dir)
 {
     if (gameOver) return;
     if (won && !continueAfterWin) return;
+    if (animT > 0) return; // ignore input while a slide is in flight
 
     let anyMoved = false;
-    let anyMerged = false;
+    const mergedRef = {merged: false};
 
-    const markPop = (x, y) => popGrid[y][x] = max(popGrid[y][x], .16);
+    const horizontal = dir === 'L' || dir === 'R';
+    const forward = dir === 'L' || dir === 'U'; // travel toward grid-coord 0
 
-    if (dir === 'L' || dir === 'R')
+    for (let outer = 0; outer < GRID; ++outer)
     {
-        for (let y = 0; y < GRID; ++y)
+        // Collect tiles in travel order along this row/column
+        const line = [];
+        for (let i = 0; i < GRID; ++i)
         {
-            const row = grid[y].slice();
-            const line = dir === 'L' ? row : row.slice().reverse();
-            const { out, moved, mergedAny } = slideLine(line);
-            const newLine = dir === 'L' ? out : out.slice().reverse();
-            grid[y] = newLine;
-            if (moved) anyMoved = true;
-            if (mergedAny)
-            {
-                anyMerged = true;
-                for (let x = 0; x < GRID; ++x)
-                    if (newLine[x] && newLine[x] !== row[x]) markPop(x, y);
-            }
+            const inner = forward ? i : GRID - 1 - i;
+            const t = horizontal ? grid[outer][inner] : grid[inner][outer];
+            if (t) line.push(t);
         }
-    }
-    else
-    {
-        for (let x = 0; x < GRID; ++x)
+        const result = processLine(line, mergedRef);
+        for (const r of result)
         {
-            const col = [];
-            for (let y = 0; y < GRID; ++y) col.push(grid[y][x]);
-            const line = dir === 'U' ? col : col.slice().reverse();
-            const { out, moved, mergedAny } = slideLine(line);
-            const newLine = dir === 'U' ? out : out.slice().reverse();
-            for (let y = 0; y < GRID; ++y)
+            const dstAlong = forward ? r.dst : GRID - 1 - r.dst;
+            const newX = horizontal ? dstAlong : outer;
+            const newY = horizontal ? outer    : dstAlong;
+            if (r.tile.gx !== newX || r.tile.gy !== newY) anyMoved = true;
+            r.tile.gx = newX;
+            r.tile.gy = newY;
+            if (r.absorbed)
             {
-                const oldV = grid[y][x];
-                const newV = newLine[y];
-                grid[y][x] = newV;
-                if (mergedAny && newV && newV !== oldV) markPop(x, y);
+                r.absorbed.gx = newX;
+                r.absorbed.gy = newY;
+                anyMoved = true;
             }
-            if (moved) anyMoved = true;
-            if (mergedAny) anyMerged = true;
         }
     }
 
     if (!anyMoved) return;
 
-    if (anyMerged) sMerge.play();
+    // Rebuild grid pointers from the new (gx, gy) on surviving tiles
+    for (let y = 0; y < GRID; ++y)
+        for (let x = 0; x < GRID; ++x) grid[y][x] = null;
+    for (const t of tiles)
+    {
+        if (t.dying) continue;
+        grid[t.gy][t.gx] = t;
+    }
+
+    // Capture each tile's current animated position as the slide's start point
+    for (const t of tiles) { t.srcX = t.ax; t.srcY = t.ay; }
+    animT = SLIDE_TIME;
+    pendingSpawn = true;
+
+    if (mergedRef.merged) sMerge.play();
     else sMove.play();
 
     best = max(best, score);
     localStorage.setItem('ljs2048_best', best);
+}
 
-    if (!won)
+function updateAnimations()
+{
+    if (animT > 0)
     {
-        outer: for (let y = 0; y < GRID; ++y)
-            for (let x = 0; x < GRID; ++x)
-                if (grid[y][x] >= 2048) { won = true; sWin.play(); break outer; }
+        animT -= timeDelta;
+        if (animT <= 0)
+        {
+            // Slide complete: snap, resolve merges, spawn next tile, check end
+            animT = 0;
+            tiles = tiles.filter(t => !t.dying);
+            for (const t of tiles)
+            {
+                t.ax = t.srcX = t.gx;
+                t.ay = t.srcY = t.gy;
+                if (t.pendingMerge)
+                {
+                    t.pendingMerge = false;
+                    t.shownValue = t.value;
+                    t.mergeT = MERGE_POP_TIME;
+                }
+            }
+            if (pendingSpawn)
+            {
+                pendingSpawn = false;
+                addRandomTile();
+                if (!canMove()) { gameOver = true; sLose.play(); }
+            }
+        }
+        else
+        {
+            const p = 1 - animT / SLIDE_TIME;
+            const eased = p * (2 - p); // ease-out quad — fast start, soft landing
+            for (const t of tiles)
+            {
+                t.ax = lerp(t.srcX, t.gx, eased);
+                t.ay = lerp(t.srcY, t.gy, eased);
+            }
+        }
     }
 
-    addRandomTile();
-
-    if (!canMove())
+    for (const t of tiles)
     {
-        gameOver = true;
-        sLose.play();
+        if (t.spawnT > 0) t.spawnT = max(0, t.spawnT - timeDelta);
+        if (t.mergeT > 0) t.mergeT = max(0, t.mergeT - timeDelta);
     }
 }
 
 function readMoveInput()
 {
-    if (keyWasPressed('ArrowLeft') || keyWasPressed('KeyA')) return 'L';
+    if (animT > 0) return; // input locked during slide
+
+    if (keyWasPressed('ArrowLeft')  || keyWasPressed('KeyA')) return 'L';
     if (keyWasPressed('ArrowRight') || keyWasPressed('KeyD')) return 'R';
-    if (keyWasPressed('ArrowUp') || keyWasPressed('KeyW')) return 'U';
-    if (keyWasPressed('ArrowDown') || keyWasPressed('KeyS')) return 'D';
+    if (keyWasPressed('ArrowUp')    || keyWasPressed('KeyW')) return 'U';
+    if (keyWasPressed('ArrowDown')  || keyWasPressed('KeyS')) return 'D';
 
     if (mouseWasPressed(0))
     {
@@ -256,20 +320,13 @@ function readMoveInput()
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
-    // decay pop timers
-    for (let y = 0; y < GRID; ++y)
-        for (let x = 0; x < GRID; ++x)
-            popGrid[y][x] = max(0, popGrid[y][x] - timeDelta);
+    updateAnimations();
 
-    if (keyWasPressed('KeyR'))
-        newGame();
-
-    if (won && !continueAfterWin && keyWasPressed('KeyC'))
-        continueAfterWin = true;
+    if (keyWasPressed('KeyR')) newGame();
+    if (won && !continueAfterWin && keyWasPressed('KeyC')) continueAfterWin = true;
 
     const dir = readMoveInput();
-    if (dir)
-        applyMove(dir);
+    if (dir) applyMove(dir);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -286,7 +343,7 @@ function gameUpdatePost()
 function tileFillColor(v)
 {
     const p = clamp((Math.log2(v) - 1) / 11, 0, 1);
-    const hue = .12 - .10 * p; // golden -> red
+    const hue = .12 - .10 * p;
     const sat = .55 + .25 * p;
     const lit = .80 - .38 * p;
     return hsl(hue, sat, lit);
@@ -299,39 +356,44 @@ function tileTextColor(v)
 
 function gameRender()
 {
-    // background
     drawRect(cameraPos, vec2(200), hsl(0, 0, .09));
 
     const boardSize = boardWorldSize();
     drawRect(vec2(0, 0), vec2(boardSize), hsl(0, 0, .18));
 
-    // cells + tiles
     for (let y = 0; y < GRID; ++y)
     for (let x = 0; x < GRID; ++x)
+        drawRect(cellCenterWorld(x, y), vec2(CELL_SIZE), hsl(0, 0, .25));
+
+    // Dying tiles render under their absorber so the new value isn't revealed
+    // until the slide finishes
+    const sorted = tiles.slice().sort((a, b) => (a.dying ? 0 : 1) - (b.dying ? 0 : 1));
+    for (const t of sorted)
     {
-        const c = cellCenterWorld(x, y);
-        drawRect(c, vec2(CELL_SIZE), hsl(0, 0, .25)); // empty slot
+        const c = cellCenterWorld(t.ax, t.ay);
 
-        const v = grid[y][x];
-        if (!v) continue;
+        let scale = 1;
+        if (t.spawnT > 0)
+            scale = smoothStep(1 - t.spawnT / SPAWN_TIME);
+        if (t.mergeT > 0)
+            scale *= 1 + .18 * (t.mergeT / MERGE_POP_TIME);
 
-        const pop = popGrid[y][x];
-        const popT = pop ? pop / .16 : 0;
-        const scale = 1 + .10 * popT;
         const size = vec2(CELL_SIZE * .92 * scale);
+        drawRect(c, size, tileFillColor(t.shownValue));
 
-        drawRect(c, size, tileFillColor(v));
-
-        const digits = ('' + v).length;
-        const textSize = clamp(.52 - .07 * (digits - 1), .24, .52);
-        drawText(
-            '' + v,
-            c.add(vec2(0, -textSize * .06)),
-            textSize,
-            tileTextColor(v),
-            .08,
-            hsl(0, 0, .05)
-        );
+        if (scale > .35)
+        {
+            const digits = ('' + t.shownValue).length;
+            const textSize = clamp(.52 - .07 * (digits - 1), .24, .52) * scale;
+            drawText(
+                '' + t.shownValue,
+                c.add(vec2(0, -textSize * .06)),
+                textSize,
+                tileTextColor(t.shownValue),
+                .08,
+                hsl(0, 0, .05)
+            );
+        }
     }
 }
 
