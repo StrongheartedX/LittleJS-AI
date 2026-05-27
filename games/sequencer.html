@@ -24,6 +24,7 @@ const customSlotCount = 4, drumCount = 4;
 const customSounds = [null, null, null, null];
 let currentStep = 0, stepTime = 0, tempo = 240;
 let isPlaying = false, eraseMode = false;
+let currentSlot = 0;
 
 const STORAGE_KEY = 'ljs_sequencer_v1';
 let saveTimer = 0;
@@ -156,7 +157,7 @@ class UITrackLabel extends UIButton
     {
         if (this.kind === 'piano') this.builtInSound.playNote(this.semitone);
         else if (this.kind === 'drum') this.builtInSound.play();
-        else if (this.kind === 'custom') openPasteModal(this.track);
+        else if (this.kind === 'custom') openPasteForSlot(this.track);
     }
     render()
     {
@@ -231,76 +232,73 @@ class UISequencerButton extends UIButton
     }
 }
 
-let pasteModal = null;
-
-function openPasteModal(slot)
+function buildPasteDialog()
 {
-    if (pasteModal) { pasteModal.destroy(); pasteModal = null; }
-
-    const modal = new UIObject(vec2(), vec2(700, 320));
-    pasteModal = modal;
-
-    modal.addChild(new UIText(vec2(0,-110), vec2(600, 40), `Custom Sound — Slot ${slot+1}`));
-
-    const input = new UITextInput(vec2(0,-40), vec2(640, 60),
-        customSounds[slot] ? formatZzfxArray(customSounds[slot]) : '');
-    input.maxLength = 200;
-    input.textHeight = 32;
-    modal.addChild(input);
-
-    const errorText = new UIText(vec2(0,10), vec2(640, 30), '');
-    errorText.color = RED;
-    errorText.textHeight = 18;
-    modal.addChild(errorText);
-
-    const tryParse = ()=>
-    {
-        try { return parseZzfxText(input.text); }
-        catch (e) { errorText.text = 'Parse error: ' + e.message; return null; }
-    };
-
-    const btnAudition = new UIButton(vec2(-220, 90), vec2(140, 50), 'AUDITION');
-    btnAudition.onClick = ()=>
-    {
-        errorText.text = '';
-        const arr = tryParse();
-        if (arr) new Sound(arr).play();
-    };
-    modal.addChild(btnAudition);
-
-    const btnSave = new UIButton(vec2(-70, 90), vec2(140, 50), 'SAVE');
-    btnSave.onClick = ()=>
-    {
-        errorText.text = '';
-        const arr = tryParse();
-        if (!arr) return;
-        customSounds[slot] = arr;
-        scheduleSave();
-        closePasteModal();
-    };
-    modal.addChild(btnSave);
-
-    const btnClear = new UIButton(vec2(80, 90), vec2(140, 50), 'CLEAR');
-    btnClear.disabled = !customSounds[slot];
-    btnClear.onClick = ()=>
-    {
-        customSounds[slot] = null;
-        scheduleSave();
-        closePasteModal();
-    };
-    modal.addChild(btnClear);
-
-    const btnCancel = new UIButton(vec2(230, 90), vec2(140, 50), 'CANCEL');
-    btnCancel.onClick = closePasteModal;
-    modal.addChild(btnCancel);
+    createMenu({
+        id: 'paste',
+        title: 'CUSTOM SOUND',
+        dismissable: true,
+        items: [
+            {type:'label',  id:'slotLabel', text:'Slot 1'},
+            {type:'input',  id:'params',    label:'zzfx', value:''},
+            {type:'text',   id:'error',     text:''},
+            {type:'button', id:'audition',  label:'AUDITION', onClick: pasteAudition},
+            {type:'button', id:'save',      label:'SAVE',     onClick: pasteSave},
+            {type:'button', id:'clear',     label:'CLEAR',    onClick: pasteClearSlot},
+            {type:'button', id:'cancel',    label:'CANCEL',   onClick: () => hideMenu('paste')},
+        ],
+    });
 }
 
-function closePasteModal()
+function getPasteItem(id) { return getMenu('paste').getItem(id); }
+
+function openPasteForSlot(slot)
 {
-    if (!pasteModal) return;
-    const m = pasteModal;
-    pasteModal = null;
-    setTimeout(()=> m.destroy(), 0);
+    currentSlot = slot;
+    const params = customSounds[slot];
+    getPasteItem('slotLabel').setLabel(`Slot ${slot+1}`);
+    getPasteItem('params').setValue(params ? formatZzfxArray(params) : '');
+    getPasteItem('error').setLabel('');
+    getPasteItem('clear').setDisabled(!params);
+    showMenu('paste');
+}
+
+function pasteAudition()
+{
+    const arr = pasteTryParse();
+    if (arr) new Sound(arr).play();
+}
+
+function pasteSave()
+{
+    const arr = pasteTryParse();
+    if (!arr) return;
+    customSounds[currentSlot] = arr;
+    scheduleSave();
+    hideMenu('paste');
+}
+
+function pasteClearSlot()
+{
+    customSounds[currentSlot] = null;
+    scheduleSave();
+    hideMenu('paste');
+}
+
+function pasteTryParse()
+{
+    const text = getPasteItem('params').getValue();
+    try
+    {
+        const arr = parseZzfxText(text);
+        getPasteItem('error').setLabel('');
+        return arr;
+    }
+    catch (e)
+    {
+        getPasteItem('error').setLabel('Parse error: ' + e.message);
+        return null;
+    }
 }
 
 function applyTempo(v)
@@ -414,6 +412,7 @@ function gameInit()
     });
     getToolbar('global').show();
     buildTempoDialog();
+    buildPasteDialog();
 }
 
 function gameUpdate()
