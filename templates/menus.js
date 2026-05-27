@@ -164,7 +164,7 @@
 // same as a toolbar-button-driven open.
 //
 // Persistent volume slider:
-//   {type:'slider', id:'volume', persist:'mygame.volume', value: 0.8,
+//   {type:'slider', id:'volume', persist:'volume', value: 0.8,
 //    min:0, max:1, onChange: v => setSoundVolume(v)}
 // On reload, persist re-applies the saved value via onChange before any
 // menu sound has a chance to play, so the very first nav sound is at the
@@ -626,7 +626,7 @@ function refreshDefaultToolbar(id)
 //   createOptionsMenu({
 //       extraItems: [                         // custom controls go above BACK
 //           {type:'checkbox', label:'SCREEN SHAKE', value:true,
-//                            persist:'tetris.shake',
+//                            persist:'shake',
 //                            onChange: v => screenShakeEnabled = v},
 //       ],
 //   });
@@ -697,7 +697,7 @@ function createOptionsMenu(opts)
         title:       'OPTIONS',
         volume:      true,
         volumeLabel: 'VOLUME',
-        persistKey:  'menu.volume',
+        persistKey:  'volume',
         extraItems:  [],
         backLabel:   'BACK',
     }, opts || {});
@@ -2410,7 +2410,7 @@ function buildButton(item)
 // persisted value immediately on load — you don't need a separate `applyX(
 // getMenu(...).getItem(...).getValue())` call after createMenu.
 //
-//   {type:'slider', id:'volume', persist:'mygame.volume', value: 0.8,
+//   {type:'slider', id:'volume', persist:'volume', value: 0.8,
 //                   onChange: v => setSoundVolume(v)},
 
 function persistedRead(key, defaultValue, kind)
