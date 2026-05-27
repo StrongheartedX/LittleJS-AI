@@ -1036,6 +1036,7 @@
 
   async function gameInit()
   {
+      saveDataInit('centipede');
       debugShowErrors();
 
       setShowSplashScreen(false);
@@ -1052,7 +1053,7 @@
       buildSpriteAtlas();
       await useAtlasImage('centipede.png');
 
-      try { bestScore = +localStorage.getItem('centipede.best') || 0; } catch(e) { bestScore = 0; }
+      bestScore = getSaveData().bestScore ?? 0;
 
       setSoundVolume(.8);
       installAutoPause();
@@ -1099,7 +1100,7 @@
           },
       });
 
-      createOptionsMenu({persistKey: 'centipede.volume'});
+      createOptionsMenu();
 
       createMenu({
           id: 'about', title: 'HOW TO PLAY', onHide: popMenu,
@@ -1185,7 +1186,7 @@
               if (score > bestScore)
               {
                   bestScore = score;
-                  try { localStorage.setItem('centipede.best', bestScore); } catch(e) {}
+                  saveData({bestScore});
               }
               if (typeof showMenu === 'function') showMenu('gameOver');
           }
