@@ -154,6 +154,8 @@ class UITrackLabel extends UIButton
     render()
     {
         const empty = this.kind === 'custom' && !customSounds[this.track];
+        if (this.kind === 'custom')
+            this.text = empty ? 'PASTE' : `S${this.track+1}`;
         const sat = empty ? .15 : .6;
         const lit = empty ? .2 : .3;
         this.color = this.isActiveObject() ? hsl(this.hue, .8, .5) : hsl(this.hue, sat, lit);
