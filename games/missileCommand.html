@@ -1698,7 +1698,7 @@ function gameRenderPost()
   if (bonusCityToast > 0 && isPlaying)
   {
     const a = Math.min(1, bonusCityToast * 2);
-    drawTextScreen('BONUS CITY!', vec2(mainCanvasSize.x/2, 130),
+    drawTextScreen('BONUS CITY!', vec2(mainCanvasSize.x/2, 210),
                    36, hsl(.32, .9, .8, a), 5, hsl(0,0,0,.7*a));
     bonusCityToast -= timeDelta;
   }
