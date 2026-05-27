@@ -703,12 +703,20 @@ function updateAI()
   for (const m of enemyMissiles)
   {
     if (!m.alive || m.split) continue;
-    if (isHarmless(m.target)) continue;
     // Smart bombs dodge — long shots whiff. Wait until they're low.
     if (m.smart && m.pos.y > levelSize.y * .40) continue;
+    if (m.mirv)
+    {
+      // MIRV parent is dangerous regardless of its own .target — the
+      // children re-pick fresh live targets at split, so harmless
+      // check doesn't apply. Defer until very low so we can hit the
+      // child cluster instead of wasting an ABM on the parent.
+      if (m.pos.y > levelSize.y * .25) continue;
+    }
+    else if (isHarmless(m.target)) continue;
     const dir = m.target.subtract(m.start).normalize();
     const pred = m.pos.add(dir.scale(m.speed * horizon));
-    threats.push({ pos: pred, altitude: m.pos.y });
+    threats.push({ pos: pred, altitude: m.pos.y, fromMirv: !!m.parent });
   }
   for (const f of fliers)
   {
@@ -727,6 +735,7 @@ function updateAI()
     let centroid = seed.pos.copy();
     const members = [seed];
     let minAlt = seed.altitude;
+    let mirvCount = seed.fromMirv ? 1 : 0;
     let added = true;
     while (added)
     {
@@ -740,6 +749,7 @@ function updateAI()
         for (const mm of members) { sx += mm.pos.x; sy += mm.pos.y; }
         centroid = vec2(sx / members.length, sy / members.length);
         minAlt = Math.min(minAlt, t.altitude);
+        if (t.fromMirv) mirvCount++;
         added = true;
       }
     }
@@ -749,10 +759,13 @@ function updateAI()
       if (tgt.distance(centroid) < coveredRadius) { covered = true; break; }
     if (covered) continue;
 
+    // MIRV children come in pre-formed fans and need fast cleanup so
+    // they don't spread out to multiple cities — boost their priority.
+    const score = members.length + mirvCount * .5;
     if (!best ||
-        members.length > best.size ||
-        (members.length === best.size && minAlt < best.minAlt))
-      best = { centroid, size: members.length, minAlt };
+        score > best.score ||
+        (score === best.score && minAlt < best.minAlt))
+      best = { centroid, size: members.length, minAlt, score };
   }
   if (!best) return;
 
