@@ -212,7 +212,7 @@ function die()
     if (score > best)
     {
         best = score;
-        try { localStorage.setItem('snake_best', ''+best); } catch(e){}
+        saveData({bestScore: best});
     }
 }
 
@@ -353,7 +353,7 @@ function buildMenus()
         ],
     });
 
-    createOptionsMenu({persistKey: 'snake.volume'});
+    createOptionsMenu();
 
     createMenu({
         id: 'about',
@@ -405,12 +405,13 @@ function showGameOverMenu()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('snake');
     canvasClearColor = BLACK;
     setCanvasFixedSize(vec2(1280, 720));
     cameraScale = 34;
     cameraPos = vec2(0,0);
 
-    best = parseInt(localStorage.getItem('snake_best') || '0') || 0;
+    best = getSaveData().bestScore ?? 0;
 
     // sounds (constructed after engine init so audio context can resume on gesture)
     sEat    = new SoundGenerator({volume:.7, frequency:520, release:.06, shapeCurve:1.2, pitchJump:120, pitchJumpTime:.02});
