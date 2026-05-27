@@ -285,7 +285,7 @@ function addScore(points)
     if (score > best)
     {
         best = score;
-        try { localStorage.setItem('asteroids.best', best); } catch(e) {}
+        saveData({bestScore: best});
     }
 }
 
@@ -786,6 +786,7 @@ function maybeSpawnUfo()
 // ============================================================
 function gameInit()
 {
+    saveDataInit('asteroids');
     setShowSplashScreen(false);
     setCanvasFixedSize(FIXED_RES);
     setCameraScale(CAMERA_SCALE);
@@ -847,7 +848,7 @@ function gameInit()
     }
 
     // Load best score
-    try { best = +localStorage.getItem('asteroids.best') || 0; } catch(e) { best = 0; }
+    best = getSaveData().bestScore ?? 0;
 
     setSoundVolume(.8);
     installAutoPause();
@@ -880,7 +881,7 @@ function buildMenus()
         },
     });
 
-    createOptionsMenu({persistKey: 'asteroids.volume'});
+    createOptionsMenu();
 
     createMenu({
         id: 'about',
