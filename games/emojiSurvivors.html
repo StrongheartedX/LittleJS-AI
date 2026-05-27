@@ -472,9 +472,6 @@ class Enemy extends EngineObject
         if (this.hp <= 0)  // only drop on death, not despawn
         {
             killCount++;
-            comboCount++;
-            comboTimer = COMBO_WINDOW;
-            if (comboCount > comboPeak) comboPeak = comboCount;
             // split into smaller enemies if the type or boss def defines a split
             const splitInto = this.type.splitInto ||
                               (this.bossDef && this.bossDef.splitInto);
@@ -1670,12 +1667,6 @@ let gameOver = false;
 let gameOverFrameCount = 0;
 let isPlaying = false;  // false on title / hero-select; true during a run
 
-// Combo counter — kills within COMBO_WINDOW seconds of the previous kill
-// stack up. Pure dopamine — doesn't change gameplay, just feedback.
-let comboCount = 0;
-let comboTimer = 0;
-let comboPeak = 0;      // best combo this run
-const COMBO_WINDOW = 1.5;
 
 // Sound effects bag — populated in gameInit so the user-gesture audio gate
 // has fired by the time anything calls .play().
@@ -1784,9 +1775,6 @@ function startRun(hero)
     chainFlashes.length = 0;
     damageNumbers.length = 0;
     aiSmoothedDir = vec2(1, 0);
-    comboCount = 0;
-    comboTimer = 0;
-    comboPeak = 0;
     timeSlowTimer = 0;
     spawner.timer = 0;
     spawner.interval = 1.5;
@@ -2419,9 +2407,6 @@ function goToTitle()
     chainFlashes.length = 0;
     damageNumbers.length = 0;
     aiSmoothedDir = vec2(1, 0);
-    comboCount = 0;
-    comboTimer = 0;
-    comboPeak = 0;
     timeSlowTimer = 0;
     bossesSpawned.clear();
     activeBoss = null;
@@ -2503,11 +2488,6 @@ function gameUpdate()
         return;
 
     elapsedTime += 1 / 60;
-    if (comboTimer > 0)
-    {
-        comboTimer -= 1 / 60;
-        if (comboTimer <= 0) comboCount = 0;
-    }
     if (player.pendingLevelUps > 0)
     {
         if (playerAI)
@@ -2643,27 +2623,6 @@ function drawBossHpBar()
                    vec2(x, y - 14), 22, new Color(1, .9, .7), 3, BLACK);
 }
 
-function drawComboCounter()
-{
-    if (comboCount < 5) return;
-    const cs = mainCanvasSize;
-    // Three escalating tiers — text gets bigger, color shifts hot
-    const tier = comboCount >= 100 ? 2 : comboCount >= 25 ? 1 : 0;
-    const size = [28, 42, 58][tier];
-    const color = tier === 0 ? new Color(1, 1, .6)
-                : tier === 1 ? new Color(1, .55, .2)
-                              : new Color(1, .2, .35);
-    // Subtle scale pulse on each kill so the count visibly snaps
-    const lifeFrac = comboTimer / COMBO_WINDOW;
-    const pop = 1 + (lifeFrac > .9 ? (lifeFrac - .9) * 4 : 0);
-    drawTextScreen(comboCount + 'x', vec2(cs.x / 2, cs.y * .25),
-                   size * pop, color, 4, BLACK);
-    if (tier > 0)
-        drawTextScreen('COMBO!',
-                       vec2(cs.x / 2, cs.y * .25 + size * pop + 4),
-                       size * .42, color, 3, BLACK);
-}
-
 function drawHUD()
 {
     const cs = mainCanvasSize;
@@ -2724,7 +2683,6 @@ function gameRenderPost()
     else          gameOverFrameCount = 0;
 
     drawHUD();
-    drawComboCounter();
 
     if (playerAI)
     {
