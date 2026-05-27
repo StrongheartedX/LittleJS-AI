@@ -277,7 +277,7 @@ function die(atPos)
     gameState = 1;
     if ((score|0) > (best|0)) {
         best = score|0;
-        try { localStorage.setItem('moonPatrol.best', best); } catch(e) {}
+        saveData({bestScore: best});
     }
 
     playSoundSafe(sBoom);
@@ -516,6 +516,7 @@ function drawEntities()
 ///////////////////////////////////////////////////////////////////////////////
 function gameInit()
 {
+    saveDataInit('moonPatrol');
     // prevent right click context menu so Mouse2 can be used to shoot
     document.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -533,8 +534,7 @@ function gameInit()
     sThud = new SoundGenerator({ volume:.5, frequency:140, attack:0, release:.10, shapeCurve:1.2, noise:.05 });
     sHeal = new SoundGenerator({ volume:.45, frequency:720, attack:0, release:.10, shapeCurve:1.1, slide:0.9, noise:.01 });
 
-    best = 0;
-    try { best = +localStorage.getItem('moonPatrol.best') || 0; } catch(e) {}
+    best = getSaveData().bestScore ?? 0;
     resetGame();
 
     buildMenus();
