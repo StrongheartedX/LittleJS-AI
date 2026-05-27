@@ -705,18 +705,14 @@ function updateAI()
     if (!m.alive || m.split) continue;
     // Smart bombs dodge — long shots whiff. Wait until they're low.
     if (m.smart && m.pos.y > levelSize.y * .40) continue;
-    if (m.mirv)
-    {
-      // MIRV parent is dangerous regardless of its own .target — the
-      // children re-pick fresh live targets at split, so harmless
-      // check doesn't apply. Defer until very low so we can hit the
-      // child cluster instead of wasting an ABM on the parent.
-      if (m.pos.y > levelSize.y * .25) continue;
-    }
-    else if (isHarmless(m.target)) continue;
+    // Kill MIRV parents on sight: one ABM neutralizes a 3-missile
+    // threat with a single reliable shot. Don't apply the harmless
+    // filter to them — letting one through means its children re-pick
+    // fresh live targets at split.
+    if (!m.mirv && isHarmless(m.target)) continue;
     const dir = m.target.subtract(m.start).normalize();
     const pred = m.pos.add(dir.scale(m.speed * horizon));
-    threats.push({ pos: pred, altitude: m.pos.y, fromMirv: !!m.parent });
+    threats.push({ pos: pred, altitude: m.pos.y, fromMirv: !!m.parent, isMirv: !!m.mirv });
   }
   for (const f of fliers)
   {
@@ -762,14 +758,17 @@ function updateAI()
     // MIRV children come in pre-formed fans and need fast cleanup so
     // they don't spread out to multiple cities — boost their priority.
     const score = members.length + mirvCount * .5;
+    const onlyMirvParent = members.length === 1 && seed.isMirv;
     if (!best ||
         score > best.score ||
         (score === best.score && minAlt < best.minAlt))
-      best = { centroid, size: members.length, minAlt, score };
+      best = { centroid, size: members.length, minAlt, score, onlyMirvParent };
   }
   if (!best) return;
 
-  if (best.size === 1 && best.minAlt > levelSize.y * .45)
+  // Defer solo high threats so clusters can form — but never a MIRV
+  // parent: pre-emptive kill avoids the entire 3-missile family.
+  if (best.size === 1 && best.minAlt > levelSize.y * .45 && !best.onlyMirvParent)
   {
     aiCooldown = .15;
     return;
