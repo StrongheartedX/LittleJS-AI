@@ -18,6 +18,8 @@ const customSounds = [null, null, null, null];
 let currentStep = 0, stepTime = 0, tempo = 240;
 let isPlaying = false, eraseMode = false;
 
+function scheduleSave() {} // real implementation in Task 6
+
 const sound_piano = new Sound([.3,0,220,,.1]);
 const sound_drumKick  = new Sound([,,99,,,.02,,,,,,,,2]);
 const sound_drumSnare = new Sound([2,.1,300,.02,.02,.1,4,2,,,,,,5]);
@@ -56,6 +58,40 @@ function getTrackConfig(track)
     return { kind:'piano', sound:sound_piano, semitone, hue, label };
 }
 
+function parseZzfxText(text)
+{
+    let s = (text || '').trim();
+    const wrapMatch = s.match(/^new\s+Sound\s*\(\s*(\[[\s\S]*\])\s*\)\s*;?\s*$/i);
+    if (wrapMatch) s = wrapMatch[1];
+    s = s.trim();
+    if (!s.startsWith('[') || !s.endsWith(']'))
+        throw new Error('expected [ ... ]');
+    let padded = '';
+    for (let i = 0; i < s.length; i++)
+    {
+        padded += s[i];
+        if (s[i] === '[' || s[i] === ',')
+        {
+            let j = i + 1;
+            while (j < s.length && /\s/.test(s[j])) j++;
+            if (j < s.length && (s[j] === ',' || s[j] === ']'))
+                padded += 'null';
+        }
+    }
+    const arr = JSON.parse(padded);
+    if (!Array.isArray(arr) || arr.length < 1)
+        throw new Error('not an array');
+    for (const v of arr)
+        if (v !== null && (typeof v !== 'number' || !isFinite(v)))
+            throw new Error('non-numeric element');
+    return arr;
+}
+
+function formatZzfxArray(arr)
+{
+    return '[' + arr.map(v => v === null ? '' : String(v)).join(',') + ']';
+}
+
 class UITrackLabel extends UIButton
 {
     constructor(track)
@@ -80,7 +116,7 @@ class UITrackLabel extends UIButton
     {
         if (this.kind === 'piano') this.builtInSound.playNote(this.semitone);
         else if (this.kind === 'drum') this.builtInSound.play();
-        // 'custom' kind: Task 4 will open the paste modal here
+        else if (this.kind === 'custom') openPasteModal(this.track);
     }
     render()
     {
@@ -150,6 +186,75 @@ class UISequencerButton extends UIButton
         if (this.kind === 'piano') snd.playNote(this.semitone);
         else snd.play();
     }
+}
+
+let pasteModal = null;
+
+function openPasteModal(slot)
+{
+    if (pasteModal) { pasteModal.destroy(); pasteModal = null; }
+
+    const modal = new UIObject(vec2(), vec2(700, 320));
+    pasteModal = modal;
+
+    modal.addChild(new UIText(vec2(0,-110), vec2(600, 40), `Custom Sound — Slot ${slot+1}`));
+
+    const input = new UITextInput(vec2(0,-40), vec2(640, 60),
+        customSounds[slot] ? formatZzfxArray(customSounds[slot]) : '');
+    input.maxLength = 200;
+    input.textHeight = 32;
+    modal.addChild(input);
+
+    const errorText = new UIText(vec2(0,10), vec2(640, 30), '');
+    errorText.color = RED;
+    errorText.textHeight = 18;
+    modal.addChild(errorText);
+
+    const tryParse = ()=>
+    {
+        try { return parseZzfxText(input.text); }
+        catch (e) { errorText.text = 'Parse error: ' + e.message; return null; }
+    };
+
+    const btnAudition = new UIButton(vec2(-220, 90), vec2(140, 50), 'AUDITION');
+    btnAudition.onClick = ()=>
+    {
+        errorText.text = '';
+        const arr = tryParse();
+        if (arr) new Sound(arr).play();
+    };
+    modal.addChild(btnAudition);
+
+    const btnSave = new UIButton(vec2(-70, 90), vec2(140, 50), 'SAVE');
+    btnSave.onClick = ()=>
+    {
+        errorText.text = '';
+        const arr = tryParse();
+        if (!arr) return;
+        customSounds[slot] = arr;
+        scheduleSave();
+        closePasteModal();
+    };
+    modal.addChild(btnSave);
+
+    const btnClear = new UIButton(vec2(80, 90), vec2(140, 50), 'CLEAR');
+    btnClear.disabled = !customSounds[slot];
+    btnClear.onClick = ()=>
+    {
+        customSounds[slot] = null;
+        scheduleSave();
+        closePasteModal();
+    };
+    modal.addChild(btnClear);
+
+    const btnCancel = new UIButton(vec2(230, 90), vec2(140, 50), 'CANCEL');
+    btnCancel.onClick = closePasteModal;
+    modal.addChild(btnCancel);
+}
+
+function closePasteModal()
+{
+    if (pasteModal) { pasteModal.destroy(); pasteModal = null; }
 }
 
 function gameInit()
