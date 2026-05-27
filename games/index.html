@@ -215,10 +215,9 @@
   }
   .card .body .score-badge { margin-bottom: 6px; }
   .tile .score-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 1;
+    align-self: flex-start;
+    justify-self: start;
+    margin: 2px 0 4px;
   }
 
   /* "Your Scores" row — tiles show the score number prominently instead of
@@ -487,6 +486,31 @@
   }
   .tiles.top .tile .name { font-size: 16px; }
   .tiles.top .tile .desc { font-size: 12.5px; }
+
+  /* Top tile: emoji + name on top row, rest spans full width below. */
+  .tiles.top .tile {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 12px;
+    row-gap: 6px;
+    align-items: start;
+  }
+  .tiles.top .tile .emoji { align-self: center; }
+  .tiles.top .tile .info { display: contents; }
+  .tiles.top .tile .info .name {
+    align-self: center;
+    margin-bottom: 0;
+  }
+  .tiles.top .tile:has(.score-badge) .emoji { grid-row: 1 / span 2; }
+  .tiles.top .tile .info .score-badge {
+    grid-column: 2;
+    margin: 0;
+  }
+  .tiles.top .tile .info .desc,
+  .tiles.top .tile .info .chips {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
 
   /* Standard category tiles */
   .row:not(.row-top) .tile { width: 170px; min-height: 100px; }
@@ -1009,7 +1033,8 @@ function makeTile(g, index) {
     const badge = document.createElement('div');
     badge.className = 'score-badge';
     badge.textContent = '🏆 ' + numFmt.format(score);
-    tile.appendChild(badge);
+    const info = tile.querySelector('.info');
+    info.insertBefore(badge, info.querySelector('.desc'));
   }
   // Stagger the entrance animation by position; cap so wide rows finish fast.
   if (index != null) tile.style.setProperty('--i', Math.min(index, 12));
@@ -1124,7 +1149,7 @@ function makeScoreTile(g, score, index) {
     '</div>';
   tile.querySelector('.emoji').textContent = g.emoji || '';
   tile.querySelector('.name').textContent = g.name;
-  tile.querySelector('.score-big').textContent = '🏆 ' + numFmt.format(score);
+  tile.querySelector('.score-big').textContent = numFmt.format(score);
   const cat = catByKey[g.category];
   if (cat) tile.style.setProperty('--cat-color', cat.color);
   if (index != null) tile.style.setProperty('--i', Math.min(index, 12));
