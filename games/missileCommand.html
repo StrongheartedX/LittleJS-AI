@@ -409,7 +409,7 @@ function resetWaveState(newWaveIndex)
 
   for (const b of bases)
     if (b.alive)
-      b.ammo = Math.min(BASE_AMMO_MAX, b.ammo + 5);
+      b.ammo = BASE_AMMO_MAX;
 
   flierCooldown = 5;
   smartBombsToSpawn = clamp(waveIndex - 4, 0, 5) | 0;
@@ -683,12 +683,25 @@ function updateAI()
   aiCooldown -= timeDelta;
   if (aiCooldown > 0) return;
 
+  // Threats aimed at already-destroyed targets will land in a crater
+  // and don't need an ABM. Skip them.
+  const deadTargets = [];
+  for (const c of cities) if (!c.alive) deadTargets.push(c.pos);
+  for (const b of bases) if (!b.alive) deadTargets.push(b.pos);
+  const isHarmless = pos =>
+  {
+    for (const d of deadTargets)
+      if (pos.distance(d) < .5) return true;
+    return false;
+  };
+
   const horizon = .8;
   const threats = [];
 
   for (const m of enemyMissiles)
   {
     if (!m.alive) continue;
+    if (isHarmless(m.target)) continue;
     const dir = m.target.subtract(m.start).normalize();
     const pred = m.pos.add(dir.scale(m.speed * horizon));
     threats.push({ pos: pred, altitude: m.pos.y });
@@ -739,7 +752,7 @@ function updateAI()
   }
   if (!best) return;
 
-  if (best.size === 1 && best.minAlt > levelSize.y * .55)
+  if (best.size === 1 && best.minAlt > levelSize.y * .45)
   {
     aiCooldown = .15;
     return;
