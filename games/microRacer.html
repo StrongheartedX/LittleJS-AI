@@ -68,7 +68,6 @@ let pickups = [];
 let cars = [], player;
 let raceTime = 0, countdown = 3, countdownTimer = 0;
 let bestTime = 0;
-try { bestTime = +localStorage.getItem('microRacer.bestTime') || 0; } catch(e) {}
 let raceStarted = false, raceFinished = false, finalPlacements = [];
 
 let sndCount, sndGo, sndLap, sndBump, sndBoost, sndWin;
@@ -556,7 +555,7 @@ class Car extends Box2dObject
                         // Best time: lower is better. Only save if first finish or beat previous.
                         if (bestTime === 0 || raceTime < bestTime) {
                             bestTime = raceTime;
-                            try { localStorage.setItem('microRacer.bestTime', bestTime); } catch(e) {}
+                            saveData({bestTime});
                         }
                     }
                 }
@@ -701,6 +700,8 @@ function setupRace()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('microRacer');
+    bestTime = getSaveData().bestTime ?? 0;
     // setup box2d before any physics objects (top-down — engine's gravity already vec2(0,0))
     await box2dInit();
 
