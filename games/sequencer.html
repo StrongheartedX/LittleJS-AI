@@ -11,30 +11,59 @@ debugWatermark = false;
 showEngineVersion = false;
 paused = false;
 
-const stepCount = 8, trackCount = 12, sequencer = [];
+const stepCount = 8, trackCount = 16, sequencer = [];
+const buttonSize = vec2(68, 28);
+const customSlotCount = 4, drumCount = 4;
+const customSounds = [null, null, null, null];
 let currentStep = 0, stepTime = 0, tempo = 240;
 let isPlaying = false, eraseMode = false;
 
-// sound sequencer instruments
 const sound_piano = new Sound([.3,0,220,,.1]);
-const sound_drumKick = new Sound([,,99,,,.02,,,,,,,,2]);
-const sound_drumHat = new Sound([,,1e3,,,.01,4,,,,,,,,,,,,,,4e3]);
+const sound_drumKick  = new Sound([,,99,,,.02,,,,,,,,2]);
+const sound_drumSnare = new Sound([2,.1,300,.02,.02,.1,4,2,,,,,,5]);
+const sound_drumClap  = new Sound([1.5,,200,.01,.02,.1,4,,,,,,.05]);
+const sound_drumHat   = new Sound([,,1e3,,,.01,4,,,,,,,,,,,,,,4e3]);
 
-// musical note scales
 const majorScale = [0,2,4,5,7,9,11];
-const minorScale = [0,2,3,5,7,8,10];
-const pentatonicScale = [0,3,5,7,10];
 const scale = majorScale;
+
+// track 0..3   = custom slots (sound looked up at play time from customSounds[])
+// track 4..7   = drums (kick, snare, clap, hat)
+// track 8..15  = piano notes (one octave including the octave repeat at semitone 12)
+function getTrackConfig(track)
+{
+    if (track < customSlotCount)
+    {
+        const slot = track;
+        const slotHues = [0.0, 0.08, 0.45, 0.85];
+        return { kind:'custom', slot, hue:slotHues[slot], label:`S${slot+1}` };
+    }
+    if (track < customSlotCount + drumCount)
+    {
+        const drum = track - customSlotCount;
+        const drumSounds = [sound_drumKick, sound_drumSnare, sound_drumClap, sound_drumHat];
+        const drumLabels = ['KICK', 'SNRE', 'CLAP', 'HAT'];
+        const drumHues   = [0.0,    0.1,    0.55,   0.15];
+        return { kind:'drum', sound:drumSounds[drum], hue:drumHues[drum], label:drumLabels[drum] };
+    }
+    const noteIndex = track - customSlotCount - drumCount; // 0..7
+    const octave = floor(noteIndex / scale.length);
+    const scaleNote = noteIndex % scale.length;
+    const semitone = scale[scaleNote] + 12*octave;
+    const hue = 0.6 - scaleNote/40 + octave*0.2;
+    const noteNames = ['C','D','E','F','G','A','B'];
+    const label = noteNames[scaleNote] + (octave > 0 ? '+' : '');
+    return { kind:'piano', sound:sound_piano, semitone, hue, label };
+}
 
 class UISequencerButton extends UIButton
 {
     constructor(step, track)
     {
-        const size = vec2(68, 35);
         let pos = vec2(step, trackCount-1-track);
-        pos = pos.multiply(size);
+        pos = pos.multiply(buttonSize);
         pos = pos.add(vec2(240, 40)).subtract(mainCanvasSize.scale(.5));
-        super(pos, size);
+        super(pos, buttonSize);
 
         this.step = step;
         this.track = track;
@@ -43,18 +72,11 @@ class UISequencerButton extends UIButton
         this.isOn = false;
         this.shadowColor = CLEAR_BLACK;
 
-        const pianoStart = 2;
-        this.hue = track*.15;
-        if (track >= pianoStart)
-        {
-            const octave = floor((track-pianoStart) / scale.length);
-            const scaleNote = (track-pianoStart) % scale.length;
-            this.semitone = scale[scaleNote] + 12*octave;
-            this.sound = sound_piano;
-            this.hue = .6 - scaleNote/40 + octave*.2;
-        }
-        else
-            this.sound = [sound_drumKick, sound_drumHat][track];
+        const cfg = getTrackConfig(track);
+        this.kind = cfg.kind;
+        this.hue = cfg.hue;
+        this.semitone = cfg.semitone;
+        this.builtInSound = cfg.sound; // undefined for custom slots
     }
     onPress()
     {
@@ -67,14 +89,31 @@ class UISequencerButton extends UIButton
     }
     render()
     {
+        const empty = this.kind === 'custom' && !customSounds[this.track];
         this.activeColor = eraseMode ? RED : WHITE;
-        this.color = this.isActiveObject() ? BLACK :
-            hsl(this.hue, this.isOn ? 1 : .5, this.isOn ? .5 : .15);
+        const sat = empty ? .2 : (this.isOn ? 1 : .5);
+        const lit = empty ? (this.isOn ? .3 : .1) : (this.isOn ? .5 : .15);
+        this.color = this.isActiveObject() ? BLACK : hsl(this.hue, sat, lit);
         if (isPlaying && this.step == currentStep)
             this.color = this.color.lerp(WHITE, .5);
         super.render();
     }
-    playSound() { this.sound.playNote(this.semitone); }
+    getSound()
+    {
+        if (this.kind === 'custom')
+        {
+            const params = customSounds[this.track];
+            return params ? new Sound(params) : null;
+        }
+        return this.builtInSound;
+    }
+    playSound()
+    {
+        const snd = this.getSound();
+        if (!snd) return;
+        if (this.kind === 'piano') snd.playNote(this.semitone);
+        else snd.play();
+    }
 }
 
 function gameInit()
