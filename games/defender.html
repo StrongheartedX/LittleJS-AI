@@ -43,7 +43,6 @@ const EXTRA_LIFE_EVERY = 10000;
 // Game state
 let score, lives, smartBombs, wave, nextExtra;
 let bestScore = 0;
-try { bestScore = +localStorage.getItem('defender.best') || 0; } catch(e) {}
 let humansAlive, planetDestroyed, mutantWavesLeft;
 let isPlaying, gameOver;
 let player;
@@ -1055,7 +1054,7 @@ function doGameOver()
     isPlaying = false;
     if (score > bestScore) {
         bestScore = score;
-        try { localStorage.setItem('defender.best', bestScore); } catch(e) {}
+        saveData({bestScore});
     }
     showAlertDialog({
         title: 'GAME OVER',
@@ -1170,6 +1169,8 @@ function enemyHitsPlayer()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('defender');
+    bestScore = getSaveData().bestScore ?? 0;
     initSounds();
     setSoundVolume(.6);
     // Only pause when a menu surfaces during gameplay. Title-screen menus
@@ -1210,7 +1211,7 @@ async function gameInit()
         ],
     });
 
-    createOptionsMenu({persistKey: 'defender.volume'});
+    createOptionsMenu();
 
     createMenu({
         id: 'about',
