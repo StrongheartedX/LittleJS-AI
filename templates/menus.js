@@ -1152,6 +1152,106 @@ function setMenuSounds(sounds)
     menuSounds.activate = sounds.activate || null;
 }
 
+// ============================================================================
+// Unified save data.
+// ============================================================================
+//
+// One blob per game (player-facing data) plus one global blob (site-wide
+// settings such as mute). All writes funnel through engine readSaveData /
+// writeSaveData. Call saveDataInit('GameName') once in gameInit, before any
+// menu construction, tweak() call, or getSaveData/saveData call — this
+// primes both blobs and is the canonical save name for the game (matches
+// medalsInit by convention).
+//
+// Storage layout:
+//   localStorage['<GameName>']        — { options:{...}, ...gameCustomFields }
+//   localStorage['littlejs.global']   — { muted: boolean }
+//   localStorage['<GameName>.tweaks'] — owned by tweakables.js (separate)
+//
+// Public API:
+//   saveDataInit(name)   call once in gameInit. Caches the blobs.
+//   getSaveData()        returns the cached per-game blob (read-only view).
+//                        MUST NOT be mutated — use saveData(patch) to write.
+//   saveData(patch)      shallow-merges patch into the blob, writes it.
+//   getSaveName()        current save name, or null if saveDataInit wasn't called.
+
+let _saveName = null;
+let _gameSaveData = null;
+let _globalSaveData = null;
+const _savePreInitWarned = new Set();
+
+function _warnPreInitOnce(key, msg)
+{
+    if (_savePreInitWarned.has(key)) return;
+    _savePreInitWarned.add(key);
+    console.warn(msg);
+}
+
+function saveDataInit(name)
+{
+    if (typeof name !== 'string' || !name)
+    {
+        console.warn('saveDataInit: name must be a non-empty string');
+        return;
+    }
+    if (_saveName === name) return;          // idempotent for same name
+    if (_saveName !== null)
+    {
+        console.warn('saveDataInit: already initialized as "' + _saveName +
+            '", ignoring re-init with "' + name + '"');
+        return;
+    }
+    _saveName = name;
+    _gameSaveData = readSaveData(name, {});
+    _globalSaveData = readSaveData('littlejs.global', {});
+}
+
+function getSaveName() { return _saveName; }
+
+function getSaveData()
+{
+    if (_saveName === null)
+    {
+        _warnPreInitOnce('getSaveData',
+            'getSaveData(): call saveDataInit(name) first; returning {}');
+        return {};
+    }
+    return _gameSaveData;
+}
+
+function saveData(patch)
+{
+    if (_saveName === null)
+    {
+        _warnPreInitOnce('saveData',
+            'saveData(): call saveDataInit(name) first; ignoring write');
+        return;
+    }
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch))
+    {
+        console.warn('saveData(): patch must be a plain object, got', patch);
+        return;
+    }
+    Object.assign(_gameSaveData, patch);
+    writeSaveData(_saveName, _gameSaveData);
+}
+
+// Internal helper for the global blob. Mute is the only consumer today;
+// add more if/when other site-wide prefs (master volume, fullscreen) move
+// here. Lazily inits if saveDataInit wasn't called so mute still works
+// when a toolbar is built before the game-level saveDataInit call.
+function _readGlobalSaveData()
+{
+    if (_globalSaveData === null)
+        _globalSaveData = readSaveData('littlejs.global', {});
+    return _globalSaveData;
+}
+
+function _writeGlobalSaveData()
+{
+    writeSaveData('littlejs.global', _readGlobalSaveData());
+}
+
 // Shared mute state — single source of truth for the toolbar's 🔊/🔇
 // button and any options-menu volume slider. Refactored out of
 // installDefaultToolbar so a volume change can keep the mute icon in
