@@ -152,8 +152,7 @@ function clampGapY(y)
 
 function loadBestScore()
 {
-    const v = getSaveData().bestScore ?? 0;
-    return isFinite(v) ? v : 0;
+    return getSaveData().bestScore ?? 0;
 }
 
 function saveBestScore(v)
