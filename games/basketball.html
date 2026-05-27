@@ -363,6 +363,7 @@ function updateHoopMotion()
 
 async function gameInit()
 {
+    saveDataInit('basketball');
     canvasClearColor = COLOR_BG;
     setSoundVolume(.7);
     // Title has its own attract-mode behind the menu — leave it animating.
@@ -402,7 +403,7 @@ async function gameInit()
 
     // ----- options menu -----
     createOptionsMenu({
-        persistKey: 'basketball.volume',
+        persistKey: 'volume',
         extraItems: [
             {type:'separator'},
             {type:'button', label:'RESET BEST', onClick: () =>
