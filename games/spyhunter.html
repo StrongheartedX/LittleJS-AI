@@ -104,7 +104,6 @@ let smokeScreens = [];
 
 let score = 0;
 let bestScore = 0;
-try { bestScore = +localStorage.getItem('spyhunter.best') || 0; } catch(e) {}
 let distance = 0;
 let gameOver = false;
 let isPlaying = false;
@@ -788,7 +787,7 @@ function triggerGameOver()
     gameOver = true;
     if (score > bestScore) {
         bestScore = score;
-        try { localStorage.setItem('spyhunter.best', bestScore|0); } catch(e) {}
+        saveData({bestScore});
     }
     if (!player) return;
 
@@ -1086,6 +1085,8 @@ function runSanityTests()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('spyhunter');
+    bestScore = getSaveData().bestScore ?? 0;
     setCanvasFixedSize(vec2(1280, 720));
     runSanityTests();
     resetGame();
