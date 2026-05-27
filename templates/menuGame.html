@@ -116,6 +116,7 @@ async function gameInit()
         new MenuMedal(2, 'Speed Run',    'Finish a level in under 30s.',   '⚡'),
         new MenuMedal(3, 'Combo x10',    'Chain 10 hits without missing.', '🔥'),
     ];
+    saveDataInit('LittleJS Menu Demo'); // primes unified save blobs
     medalsInit('LittleJS Menu Demo');   // loads `unlocked` from localStorage
 
     const medalCellOf = m => ({

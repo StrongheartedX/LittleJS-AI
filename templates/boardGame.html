@@ -146,6 +146,8 @@ async function gameInit()
     canvasClearColor = new Color().setHex('#0d0d14');
     setSoundVolume(.8);
 
+    saveDataInit('LittleJS Board Demo');
+
     // One callback drives `paused` for every menu (including dialogs).
     setMenuVisibilityCallback(v => paused = v);
 
