@@ -152,13 +152,13 @@ function clampGapY(y)
 
 function loadBestScore()
 {
-    const v = parseInt(localStorage.getItem('flappy_best')||'0');
+    const v = getSaveData().bestScore ?? 0;
     return isFinite(v) ? v : 0;
 }
 
 function saveBestScore(v)
 {
-    localStorage.setItem('flappy_best', '' + v);
+    saveData({bestScore: v});
 }
 
 function resetRun(toReady=true)
@@ -627,6 +627,7 @@ function buildMenus()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('flappyBird');
     // fixed resolution for consistent feel
     setCanvasFixedSize(vec2(900, 540));
     cameraScale = 32;
