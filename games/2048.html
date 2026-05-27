@@ -4,6 +4,7 @@
 </head><body style="background:#000">
 <script src="../dist/littlejs.js?1.18.15"></script>
 <script src="../templates/soundGenerator.js"></script>
+<script src="../templates/menus.js"></script>
 <script>
 'use strict';
 
@@ -41,10 +42,22 @@ let gameOver = false;
 let won = false;
 let continueAfterWin = false;
 
+let isPlaying = false;
+let winDialogShown = false;
+let loseDialogShown = false;
+
 let swipeStartScreen;
 let swipeArmed = false;
 
 let sMove, sMerge, sSpawn, sLose, sWin;
+let sMenuSelect, sMenuActivate;
+
+function setPlaying(p)
+{
+    isPlaying = p;
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
 
 function gameInit()
 {
@@ -58,7 +71,133 @@ function gameInit()
     sLose  = new SoundGenerator({frequency: 120, slide: -.15, release: .35, volume: .9, randomness: .02});
     sWin   = new SoundGenerator({frequency: 620, pitchJump: 220, pitchJumpTime: .05, release: .25, volume: 1, randomness: .01});
 
+    sMenuSelect   = new Sound([.5,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
+    sMenuActivate = new Sound([.7,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
+
     newGame();
+    buildMenus();
+    showMenu('title');
+}
+
+///////////////////////////////////////////////////////////////////////////////
+function buildMenus()
+{
+    setMenuVisibilityCallback(v => paused = v);
+    setMenuSounds({
+        select:   () => sMenuSelect.play(),
+        activate: () => sMenuActivate.play(),
+    });
+
+    createTitleMenu({
+        title:    '2048',
+        subtitle: 'slide tiles, double the numbers',
+        revealOnClick: false,
+        onPlay: () => { newGame(); setPlaying(true); },
+        items: [
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
+        ],
+    });
+
+    createMenu({
+        id: 'pause',
+        title: 'PAUSED',
+        dismissable: true,
+        initialItemId: 'resume',
+        items: [
+            {type:'button', id:'resume', label:'RESUME', onClick: () => hideMenu('pause')},
+            {type:'button', label:'NEW GAME', onClick: () => {
+                hideMenu('pause');
+                newGame();
+            }},
+            {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
+            {type:'button', label:'QUIT TO TITLE', onClick: () => {
+                hideMenu('pause');
+                newGame();
+                setPlaying(false);
+                showMenu('title');
+            }},
+        ],
+    });
+
+    createMenu({
+        id: 'options',
+        title: 'OPTIONS',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            {type:'slider', label:'Volume', min:0, max:1, step:.05, value:.5,
+                persist:'2048_volume',
+                onChange: v => soundVolume = v},
+            {type:'checkbox', label:'Sound', value:true,
+                persist:'2048_sound',
+                onChange: v => soundEnable = v},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
+        ],
+    });
+
+    createMenu({
+        id: 'about',
+        title: 'ABOUT',
+        dismissable: true,
+        onHide: popMenu,
+        items: [
+            {type:'text', text:
+                'Swipe or use arrow keys / WASD to slide every tile in one direction. ' +
+                'When two tiles of the same number touch, they merge into one with double the value.\n\n' +
+                'Reach the 2048 tile to win — but keep going for a higher score.\n\n' +
+                'Press ESC to pause. Made with LittleJS.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
+        ],
+    });
+
+    createToolbar({
+        id:        'hud',
+        anchor:    'top-right',
+        direction: 'horizontal',
+        items: [
+            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen',
+                hideOnTouch: true, onClick: toggleFullscreen},
+            {type:'button', id:'menu', label:'☰', title:'Menu',
+                onClick: () => {
+                    if (isMenuVisible())
+                    {
+                        clearSubmenuStack();
+                        hideAllMenus();
+                    }
+                    else showMenu('pause');
+                }},
+        ],
+    });
+    getToolbar('hud').hide();
+}
+
+function showWinDialog()
+{
+    showConfirmDialog({
+        title:    'YOU MADE 2048!',
+        icon:     '🏆',
+        message:  'Score: ' + score,
+        yesLabel: 'KEEP GOING',
+        noLabel:  'NEW GAME',
+        onYes: () => { continueAfterWin = true; },
+        onNo:  () => { newGame(); },
+    });
+}
+
+function showLoseDialog()
+{
+    showConfirmDialog({
+        title:    'GAME OVER',
+        icon:     '💥',
+        message:  'Score: ' + score + '\nBest: ' + best,
+        yesLabel: 'NEW GAME',
+        noLabel:  'QUIT',
+        onYes: () => { newGame(); },
+        onNo:  () => { newGame(); setPlaying(false); showMenu('title'); },
+    });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -83,6 +222,8 @@ function newGame()
     gameOver = false;
     won = false;
     continueAfterWin = false;
+    winDialogShown = false;
+    loseDialogShown = false;
     animT = 0;
     pendingSpawn = false;
 
@@ -320,13 +461,31 @@ function readMoveInput()
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
+    if (bindPauseKey({when: () => isPlaying})) return;
+
     updateAnimations();
 
+    if (!isPlaying) return;
+
     if (keyWasPressed('KeyR')) newGame();
-    if (won && !continueAfterWin && keyWasPressed('KeyC')) continueAfterWin = true;
 
     const dir = readMoveInput();
     if (dir) applyMove(dir);
+
+    // Surface win / lose dialogs once the animation that triggered them settles
+    if (animT === 0)
+    {
+        if (won && !continueAfterWin && !winDialogShown)
+        {
+            winDialogShown = true;
+            showWinDialog();
+        }
+        else if (gameOver && !loseDialogShown)
+        {
+            loseDialogShown = true;
+            showLoseDialog();
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -334,7 +493,7 @@ function gameUpdatePost()
 {
     cameraPos = vec2(0, 0);
     const s = boardWorldSize();
-    const margin = 1.1;
+    const margin = .5;
     const viewPixels = min(mainCanvasSize.x, mainCanvasSize.y * 0.78);
     cameraScale = viewPixels / (s + margin * 2);
 }
@@ -400,25 +559,12 @@ function gameRender()
 ///////////////////////////////////////////////////////////////////////////////
 function gameRenderPost()
 {
-    const topY = 54;
-    drawTextScreen('2048', vec2(86, topY), 64, hsl(.12, .7, .9), 6, hsl(0, 0, 0));
-    drawTextScreen(`Score: ${score}`, vec2(mainCanvasSize.x / 2, topY), 34, hsl(0, 0, 1), 4, hsl(0, 0, 0));
-    drawTextScreen(`Best: ${best}`, vec2(mainCanvasSize.x - 110, topY), 28, hsl(0, 0, .9), 4, hsl(0, 0, 0));
-    drawTextScreen('Arrows/WASD or swipe · R = restart', vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 22), 20, hsl(0, 0, .8), 3, hsl(0, 0, 0));
+    if (!isPlaying) return;
 
-    if (won && !continueAfterWin)
-    {
-        drawRect(vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2), mainCanvasSize, hsl(0, 0, 0, .55), 0, false, true);
-        drawTextScreen('You made 2048!', vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 - 30), 56, hsl(.25, .7, .9), 6, hsl(0, 0, 0));
-        drawTextScreen('Press C to keep going', vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 + 28), 28, hsl(0, 0, 1), 4, hsl(0, 0, 0));
-    }
-
-    if (gameOver)
-    {
-        drawRect(vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2), mainCanvasSize, hsl(0, 0, 0, .65), 0, false, true);
-        drawTextScreen('Game Over', vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 - 18), 64, hsl(0, 0, 1), 6, hsl(0, 0, 0));
-        drawTextScreen('Press R to restart', vec2(mainCanvasSize.x / 2, mainCanvasSize.y / 2 + 36), 28, hsl(0, 0, .9), 4, hsl(0, 0, 0));
-    }
+    const x = 28;
+    drawTextScreen('Score ' + score,          vec2(x, 56),  56, hsl(.12, .7, .9), 6, hsl(0, 0, 0), 'left');
+    if (best)
+        drawTextScreen('Best ' + best, vec2(x, 100), 28, hsl(0, 0, 1),     4, hsl(0, 0, 0), 'left');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
