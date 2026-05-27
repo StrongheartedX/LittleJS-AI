@@ -80,8 +80,8 @@ function parseLevel(rows)
                 levelGrid[wy][x] = '.';
                 if      (c === 'P') playerStartPos = center;
                 else if (c === 'G') enemySpawns.push(center);
-                else if (c === 'L') decorations.push({pos: center, kind: 'lamp'});
-                else if (c === 'B') decorations.push({pos: center, kind: 'barrel'});
+                else if (c === 'L') { levelGrid[wy][x] = 'L'; decorations.push({pos: center, kind: 'lamp'}); }
+                else if (c === 'B') { levelGrid[wy][x] = 'B'; decorations.push({pos: center, kind: 'barrel'}); }
             }
         }
     }
@@ -93,6 +93,16 @@ function isWallAt(p)
     if (x < 0 || x >= LEVEL_W || y < 0 || y >= LEVEL_H) return true;
     const c = levelGrid[y][x];
     return c === '#' || c === 'X';
+}
+
+// Movement collision — walls plus decoration cells. Rays/bullets/LOS keep
+// using isWallAt so visuals stay the same; only movement stops at L/B cells.
+function isBlocking(p)
+{
+    const x = Math.floor(p.x), y = Math.floor(p.y);
+    if (x < 0 || x >= LEVEL_W || y < 0 || y >= LEVEL_H) return true;
+    const c = levelGrid[y][x];
+    return c === '#' || c === 'X' || c === 'L' || c === 'B';
 }
 
 // Wall tile index: exit cell always uses the door tile; otherwise alternate 3 brick/stone/tech variants
@@ -669,26 +679,26 @@ function gameUpdate()
 
     const normal = vec2();
     let newPos = playerPos.add(vel);
-    if (lineTest(playerPos, newPos, isWallAt, normal))
+    if (lineTest(playerPos, newPos, isBlocking, normal))
     {
         const d = vel.dot(normal);
         newPos = newPos.subtract(vec2(d * normal.x, d * normal.y));
-        if (!isWallAt(newPos)) playerPos = newPos;
+        if (!isBlocking(newPos)) playerPos = newPos;
     }
     else playerPos = newPos;
 
-    // Keep a small buffer between the player and adjacent wall surfaces so
+    // Keep a small buffer between the player and adjacent blocking cells so
     // extreme close-ups can't push perpDist below the render cutoff. Without
     // this you can graze a wall hard enough to see the backdrop through it.
     const BUF = .07;
     const cx = Math.floor(playerPos.x), cy = Math.floor(playerPos.y);
-    if (isWallAt(vec2(cx + 1.1, playerPos.y)) && playerPos.x > cx + 1 - BUF)
+    if (isBlocking(vec2(cx + 1.1, playerPos.y)) && playerPos.x > cx + 1 - BUF)
         playerPos = vec2(cx + 1 - BUF, playerPos.y);
-    if (isWallAt(vec2(cx - .1,  playerPos.y)) && playerPos.x < cx + BUF)
+    if (isBlocking(vec2(cx - .1,  playerPos.y)) && playerPos.x < cx + BUF)
         playerPos = vec2(cx + BUF,     playerPos.y);
-    if (isWallAt(vec2(playerPos.x, cy + 1.1)) && playerPos.y > cy + 1 - BUF)
+    if (isBlocking(vec2(playerPos.x, cy + 1.1)) && playerPos.y > cy + 1 - BUF)
         playerPos = vec2(playerPos.x, cy + 1 - BUF);
-    if (isWallAt(vec2(playerPos.x, cy - .1))  && playerPos.y < cy + BUF)
+    if (isBlocking(vec2(playerPos.x, cy - .1))  && playerPos.y < cy + BUF)
         playerPos = vec2(playerPos.x, cy + BUF);
 
     // enemies
