@@ -69,7 +69,6 @@ let loadedShotColor = 0;
 let aimDir = vec2(1, 0);       // unit vector — pointing right at startup
 let score = 0;
 let bestScore = 0;
-try { bestScore = +localStorage.getItem('zuma.best') || 0; } catch(e) {}
 let isPlaying = false;
 let gameOverPending = false;
 let currentCombo = 0;          // resets on shoot, increments per pop event
@@ -459,7 +458,7 @@ function endGame(won)
     gameOverPending = true;
     if (score > bestScore) {
         bestScore = score;
-        try { localStorage.setItem('zuma.best', bestScore|0); } catch(e) {}
+        saveData({bestScore: bestScore|0});
     }
     if (!won) sound_lose.play();
     showAlertDialog({
@@ -498,6 +497,8 @@ let setPlaying;
 
 async function gameInit()
 {
+    saveDataInit('zuma');
+    bestScore = getSaveData().bestScore ?? 0;
     canvasClearColor = new Color().setHex('#0a0418');
 
     buildPath();
@@ -531,7 +532,7 @@ async function gameInit()
         ],
     });
 
-    createOptionsMenu({persistKey: 'zuma.volume'});
+    createOptionsMenu();
 
     createMenu({
         id: 'about',
