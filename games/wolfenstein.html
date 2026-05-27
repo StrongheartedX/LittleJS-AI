@@ -16,9 +16,9 @@
 debugWatermark = false;
 showEngineVersion = false;
 paused = false;
-gravity = vec2(0, 0);
-cameraPos = vec2(0, 0);
-canvasMaxSize = vec2(2048, 2048);
+gravity = vec2();
+cameraPos = vec2();
+canvasMaxSize = vec2(2048);
 setTileDefaultBleed(0);
 tilesPixelated = false;
 
@@ -133,7 +133,12 @@ function tileCellPx(idx)
 }
 
 let guardIdleTile, guardShootTile, guardDeadTile, gunIdleTile, gunFireTile, exitTile;
-let lampTile, barrelTile;
+let lampTile, barrelTile, sparkTile;
+
+// Short-lived puffs spawned at wall impact points. Updated in gameUpdate,
+// rendered through the same painter's-algorithm drawList so they sort with
+// walls and other sprites.
+let hitEffects = [];
 
 ///////////////////////////////////////////////////////////////////////////////
 // ATLAS PAINTERS
@@ -322,26 +327,55 @@ function paintLamp(ctx)
 {
     // pole
     ctx.fillStyle = '#1a0e04';
-    ctx.fillRect(238, 240, 24, 250);
+    ctx.fillRect(238, 250, 24, 240);
     // base
     ctx.fillStyle = '#0a0602';
     ctx.beginPath();
     ctx.ellipse(250, 492, 60, 14, 0, 0, Math.PI * 2);
     ctx.fill();
-    // soft halo: warm amber, partly transparent so walls behind read through
-    const g = ctx.createRadialGradient(250, 200, 4, 250, 200, 130);
+    // soft halo behind the shade — walls behind partially read through
+    const g = ctx.createRadialGradient(250, 205, 4, 250, 205, 135);
     g.addColorStop(0,  'rgba(255,208,112,.55)');
     g.addColorStop(.35,'rgba(212,128,40,.32)');
     g.addColorStop(.7, 'rgba(122, 54, 8,.14)');
     g.addColorStop(1,  'rgba( 60, 20, 0,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(250, 200, 130, 0, Math.PI * 2);
+    ctx.arc(250, 205, 135, 0, Math.PI * 2);
     ctx.fill();
-    // small warm bulb core (semi-transparent so it never punches a hole through)
-    ctx.fillStyle = 'rgba(255,232,160,.7)';
+    // trapezoidal lamp shade — dimmer at top, brighter at the bottom rim where the light spills out
+    const shadeG = ctx.createLinearGradient(0, 160, 0, 250);
+    shadeG.addColorStop(0,  '#c47820');
+    shadeG.addColorStop(.55,'#ffc24a');
+    shadeG.addColorStop(1,  '#fff2b8');
+    ctx.fillStyle = shadeG;
     ctx.beginPath();
-    ctx.arc(250, 200, 18, 0, Math.PI * 2);
+    ctx.moveTo(220, 160);
+    ctx.lineTo(280, 160);
+    ctx.lineTo(304, 250);
+    ctx.lineTo(196, 250);
+    ctx.closePath();
+    ctx.fill();
+    // dark outline so the shade reads as a solid object against the glow
+    ctx.strokeStyle = '#3a1c08';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // glowing bottom rim — the "lit" edge of the shade
+    ctx.fillStyle = '#fff8d8';
+    ctx.fillRect(196, 244, 108, 6);
+}
+
+function paintSpark(ctx)
+{
+    // soft white→amber→transparent radial glow used for wall-impact puffs
+    const g = ctx.createRadialGradient(250, 250, 4, 250, 250, 230);
+    g.addColorStop(0,   '#ffffff');
+    g.addColorStop(.18, '#fff0a8');
+    g.addColorStop(.5,  '#ff9028');
+    g.addColorStop(1,   'rgba(255,40,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(250, 250, 230, 0, Math.PI * 2);
     ctx.fill();
 }
 
@@ -396,7 +430,7 @@ function paintExit(ctx)
 
 ///////////////////////////////////////////////////////////////////////////////
 // SOUNDS
-let sndShoot, sndHurt, sndAlert, sndEnemyShoot, sndEnemyDie, sndVictory;
+let sndShoot, sndHurt, sndAlert, sndEnemyShoot, sndEnemyDie, sndVictory, sndWallHit;
 
 ///////////////////////////////////////////////////////////////////////////////
 function setPlaying(p)
@@ -412,6 +446,7 @@ function resetWorld()
     playerPos = playerStartPos.copy();
     playerAngle = PI / 2;           // LittleJS angle convention: 0=north, +PI/2=east
     bobPhase = bobAmount = 0;
+    hitEffects = [];
     playerHP = PLAYER_MAX_HP;
     isAlive = true;
     kills = 0;
@@ -448,6 +483,7 @@ async function gameInit()
     exitTile       = drawToTexture(10, paintExit,      'wooden exit door with brass knob');
     lampTile       = drawToTexture(11, paintLamp,      'tall lamp on a pole with a glowing yellow-white bulb');
     barrelTile     = drawToTexture(12, paintBarrel,    'wooden barrel with iron bands and a yellow hazard stripe');
+    sparkTile      = drawToTexture(13, paintSpark,     'soft white-to-amber radial glow, transparent edges, used for bullet impacts');
 
     // wall-column sampler (mutated per slice). bleed=0.5 keeps subpixel
     // filtering from reaching past the tile edge into the atlas gutter.
@@ -463,6 +499,7 @@ async function gameInit()
     sndEnemyShoot  = new SoundGenerator({frequency: 260, attack: .002, release: .1,  shapeCurve: 0, slide: -5, noise: .25, bitCrush: 6, volume: .6});
     sndEnemyDie    = new SoundGenerator({frequency: 120, attack: .005, release: .4,  shapeCurve: 2, slide: -3, noise: .5,  volume: .85});
     sndVictory     = new SoundGenerator({frequency: 440, attack: .02,  release: .5,  shapeCurve: 1, slide: 8,  pitchJump: 220, pitchJumpTime: .15, volume: 1});
+    sndWallHit     = new SoundGenerator({frequency: 720, attack: .001, release: .08, shapeCurve: 0, slide: -28, noise: .35, bitCrush: 6, volume: .45});
 
     // menu sounds
     const sndSelect   = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
@@ -657,6 +694,16 @@ function gameUpdate()
     // enemies
     for (const e of enemies) updateEnemy(e);
 
+    // bullet impact puffs
+    for (let i = hitEffects.length - 1; i >= 0; --i)
+    {
+        const p = hitEffects[i];
+        p.age += 1/60;
+        if (p.age >= p.life) { hitEffects.splice(i, 1); continue; }
+        p.pos = p.pos.add(p.vel);
+        p.vel = p.vel.scale(.88);     // damping
+    }
+
     // win on standing on exit OR all enemies dead AND on exit
     if (exitPos && enemies.every(e => !e.alive) && playerPos.distance(exitPos) < .8)
         triggerVictory();
@@ -674,7 +721,8 @@ function playerFire()
     // hitscan: first enemy along the ray closer than the first wall wins
     const dir = vec2().setAngle(playerAngle, 1);
     const endPos = playerPos.add(dir.scale(MAX_DIST));
-    const wallHit = lineTest(playerPos, endPos, isWallAt);
+    const wallNormal = vec2();
+    const wallHit = lineTest(playerPos, endPos, isWallAt, wallNormal);
     const wallDist = wallHit ? wallHit.distance(playerPos) : MAX_DIST;
 
     let target = null, targetT = wallDist;
@@ -693,6 +741,40 @@ function playerFire()
         if (--target.hp <= 0) killEnemy(target);
         else target.seenPlayer = true; // wakes the rest of its squad logic too via dist check
     }
+    else if (wallHit)
+        spawnWallHit(wallHit, wallNormal);
+}
+
+function spawnWallHit(pos, normal)
+{
+    // tangent runs along the wall surface (perpendicular to normal)
+    const tx = -normal.y, ty = normal.x;
+    // bright central flash — short and bright
+    hitEffects.push({
+        pos:   pos.add(normal.scale(.04)),
+        vel:   vec2(0, 0),
+        age:   0,
+        life:  .12,
+        scale: .18,
+    });
+    // a few sparks shooting outward from the wall with a tight cone
+    for (let i = 0; i < 5; ++i)
+    {
+        const along = rand(-1, 1) * .22;     // mostly straight out, only a little lateral spread
+        const out   = .8 + rand() * .5;      // strong outward bias
+        let dx = normal.x * out + tx * along;
+        let dy = normal.y * out + ty * along;
+        const len = Math.hypot(dx, dy) || 1;
+        const sp  = .012 + rand() * .015;
+        hitEffects.push({
+            pos:   pos.add(normal.scale(.04)),
+            vel:   vec2(dx / len * sp, dy / len * sp),
+            age:   0,
+            life:  .22 + rand() * .12,
+            scale: .06,
+        });
+    }
+    sndWallHit.play();
 }
 
 function killEnemy(e)
@@ -884,15 +966,20 @@ function gameRender()
         const perpDist = dist * Math.cos(relAng);
         if (perpDist < .15) return;
         const screenX = relAng * SCREEN_X_PER_RAD;       // CW of forward = right of screen
-        const sizeW = SCREEN_X_PER_RAD / perpDist;       // 1wu world width → same screen span as a 1wu wall
-        const sizeH = PROJ / perpDist;                   // matches wall vertical scale
+        const scale = opts?.scale ?? 1;
+        const sizeW = scale * SCREEN_X_PER_RAD / perpDist;
+        const sizeH = scale * PROJ / perpDist;
         const fogT = Math.min(1, perpDist / MAX_DIST);
         const dim = opts?.noFog ? 1 : (1 - fogT * .55);
         const tint = (opts?.tint ?? 1) * dim;
         const yOff = opts?.yOff ?? 0;
+        // Default: grayscale tint with full alpha (existing behavior — enemies, walls, lamps).
+        // For effects that should fade out, pass {color: WHITE} — Color.scale fades alpha too.
+        const baseColor = opts?.color;
+        const color = baseColor ? baseColor.scale(tint) : hsl(0, 0, tint);
         drawList.push({
             dist: perpDist,
-            draw: () => drawTile(vec2(screenX, yOff), vec2(sizeW, sizeH), tile, hsl(0, 0, tint)),
+            draw: () => drawTile(vec2(screenX, yOff), vec2(sizeW, sizeH), tile, color),
         });
     }
 
@@ -916,6 +1003,18 @@ function gameRender()
         }
         else if (d.kind === 'barrel')
             pushSprite(d.pos, barrelTile);
+    }
+    // bullet-impact puffs — short-lived, fade out via alpha
+    for (const p of hitEffects)
+    {
+        const t = p.age / p.life;       // 0 → 1 over lifetime
+        const fade = 1 - t;
+        pushSprite(p.pos, sparkTile, {
+            tint:   fade,
+            color:  WHITE,              // makes Color.scale fade alpha too
+            noFog:  true,
+            scale:  p.scale * (1 + t * .6),  // expand a bit as they fade
+        });
     }
 
     // painter's algorithm — far first
