@@ -232,6 +232,8 @@ function buildMenus()
             {type:'checkbox', label:'Sound', value:true,
                 persist:'peggle_sound',
                 onChange: v => soundEnable = v},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('options')},
         ],
     });
 
@@ -248,6 +250,8 @@ function buildMenus()
                 'Aim with the mouse, click or press SPACE to shoot. ' +
                 'Press ESC to pause.\n\n' +
                 'Made with LittleJS.'},
+            {type:'separator'},
+            {type:'button', label:'BACK', onClick: () => hideMenu('about')},
         ],
     });
 
