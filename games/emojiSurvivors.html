@@ -130,6 +130,8 @@ class Player extends EngineObject
 
         this.renderOrder = -this.pos.y;
 
+        if (playerAI && this.hp < 1) this.hp = 1;
+
         if (this.hp <= 0 && !gameOver)
         {
             gameOver = true;
@@ -205,7 +207,7 @@ let runVictory   = false;
 
 const REAPER_DEF = {
     key: 'reaper', sprite: 'reaper', name: '☠️ THE REAPER',
-    hp: 2500, dmg: 999, speed: 7.5, size: 3.2, xpDrop: 0,
+    hp: 2500, dmg: 40, speed: 6.0, size: 3.2, xpDrop: 0,
     isReaper: true,
 };
 
