@@ -260,7 +260,7 @@ const STAGES = [
         backdropProps: {tree1: 1.0, tree2: 1.0},
         // BackdropProps — y-sorted, ~3× the old scatter, ~1/10 the count.
         propCount: 700,
-        propSize: 3.0,
+        propSize: 2.5,
         borderKey: 'wall',
         // Meadow keeps the original elapsed-time ramp; later stages are
         // mostly static. Keeps existing balance for the default stage.
@@ -278,9 +278,9 @@ const STAGES = [
         floorColor: hsl(.65, .04, .14),    // muted stone-blue
         groundPalette: [hsl(.65, .04, .14), hsl(.30, .22, .20), hsl(.65, .04, .09)],
         roadColor: hsl(.10, .04, .28),     // pale cobble path
-        backdropProps: {deadFlower: .4, tree2: 1.0},
+        backdropProps: {deadFlower: .5, tree2: 1.0},
         propCount: 550,
-        propSize: 3.0,
+        propSize: 2.5,
         borderKey: 'brick',
         mixFn: () => ({zombie:.22, skull:.18, ghost:.20, skeleton:.20,
                        bat:.10, ant:.05, snail:.05}),
@@ -297,9 +297,9 @@ const STAGES = [
         floorColor: hsl(.12, .35, .55),    // sand
         groundPalette: [hsl(.12, .35, .55), hsl(.55, .35, .42), hsl(.12, .25, .68)],
         roadColor: hsl(.08, .35, .35),     // wooden boardwalk
-        backdropProps: {tree3: 1.0, shell: .35},
+        backdropProps: {tree3: 1.0, shell: .4},
         propCount: 500,
-        propSize: 3.0,
+        propSize: 2.5,
         borderKey: 'tsunami',
         mixFn: () => ({duck:.18, crab:.20, octopus:.15, bat:.12,
                        clown:.10, ghost:.08, ant:.10, zombie:.07}),
@@ -316,9 +316,9 @@ const STAGES = [
         floorColor: hsl(.55, .25, .58),    // pale blue ice
         groundPalette: [hsl(.55, .25, .58), hsl(.55, .45, .72), hsl(.55, .15, .48)],
         roadColor: hsl(.55, .10, .38),     // slush/ice trail
-        backdropProps: {snowman: .6, tree2: 1.0},
+        backdropProps: {snowman: .7, tree2: 1.0},
         propCount: 500,
-        propSize: 3.0,
+        propSize: 2.5,
         borderKey: 'snowflake',
         mixFn: () => ({penguin:.22, iceImp:.20, bat:.15, ghost:.10,
                        skull:.10, zombie:.10, ant:.08, snail:.05}),
@@ -335,9 +335,9 @@ const STAGES = [
         floorColor: hsl(.02, .35, .15),   // charred obsidian-red
         groundPalette: [hsl(.02, .35, .15), hsl(.05, .75, .32), hsl(.0, 0, .07)],
         roadColor: hsl(.06, .15, .25),     // dark stone path through the lava field
-        backdropProps: {volcano: .8, boulder: .8},
+        backdropProps: {volcano: .9, boulder: .9},
         propCount: 450,
-        propSize: 3.0,
+        propSize: 2.5,
         borderKey: 'boulder',
         mixFn: () => ({fireImp:.30, skull:.15, clown:.10, snail:.08,
                        zombie:.10, bat:.12, ant:.05, ghost:.10}),
