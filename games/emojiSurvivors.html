@@ -2905,23 +2905,23 @@ function playPickupSound(s, pos)
 const HEROES = [
     {key:'smiley', emoji:'🙂', name:'Smiley',  weapon:'DaggerSlash',
         spriteKey:'heroSmiley', stats:{},
-        blurb:'Cheerful little knife guy'},
+        blurb:'Cheerful knife guy'},
     {key:'wizard', emoji:'🧙', name:'Wizard',  weapon:'Fireball',
         spriteKey:'heroWizard', stats:{areaMult: 1.15},
         // Auto-aim weapons prefer breakables — fireball etc. clear crates
         // and barrels even when enemies are closer, since those are hard
         // to hit by hand.
         preferBreakables: true,
-        blurb:'Balanced caster, +15% area, hunts crates'},
+        blurb:'Wide projectile caster'},
     {key:'cat',    emoji:'🐱', name:'Cat',     weapon:'FishOrbit',
         spriteKey:'heroCat',    stats:{moveSpeedMult: 1.2, maxHpMult: .85},
-        blurb:'Quick on its paws, fragile'},
+        blurb:'Nimble but fragile'},
     {key:'bot',    emoji:'🤖', name:'Bot',     weapon:'ChainLightning',
         spriteKey:'heroBot',    stats:{fireRateMult: 1.15, projSpeedMult: 1.15},
-        blurb:'Fires fast, projectiles fly fast'},
+        blurb:'Rapid fire trigger'},
     {key:'vamp',   emoji:'🧛', name:'Vamp',    weapon:'HeartDrain',
         spriteKey:'heroVamp',   stats:{maxHpMult: 1.10, heartMult: 1.25},
-        blurb:'Lifesteal specialist',
+        blurb:'Lifesteal hunter',
         unlock: 'survive10', unlockHint: 'Survive 10 minutes on any stage'},
 ];
 
