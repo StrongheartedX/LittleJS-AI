@@ -256,11 +256,11 @@ const STAGES = [
         roadColor: hsl(.10, .25, .32),
         // backdropProps: per-sprite size multiplier on propSize. Each key
         // is picked with equal probability; the value scales propSize so a
-        // candle (mult .3) is small and a tree (mult 1.0) is full size.
+        // flower is small and a tree is full size.
         backdropProps: {tree1: 1.0, tree2: 1.0},
         // BackdropProps — y-sorted, ~3× the old scatter, ~1/10 the count.
         propCount: 700,
-        propSize: 3.5,
+        propSize: 3.0,
         borderKey: 'wall',
         // Meadow keeps the original elapsed-time ramp; later stages are
         // mostly static. Keeps existing balance for the default stage.
@@ -278,9 +278,9 @@ const STAGES = [
         floorColor: hsl(.65, .04, .14),    // muted stone-blue
         groundPalette: [hsl(.65, .04, .14), hsl(.30, .22, .20), hsl(.65, .04, .09)],
         roadColor: hsl(.10, .04, .28),     // pale cobble path
-        backdropProps: {deadFlower: .4, candle: .4, tree2: 1.0},
+        backdropProps: {deadFlower: .4, tree2: 1.0},
         propCount: 550,
-        propSize: 3.5,
+        propSize: 3.0,
         borderKey: 'brick',
         mixFn: () => ({zombie:.22, skull:.18, ghost:.20, skeleton:.20,
                        bat:.10, ant:.05, snail:.05}),
@@ -297,9 +297,9 @@ const STAGES = [
         floorColor: hsl(.12, .35, .55),    // sand
         groundPalette: [hsl(.12, .35, .55), hsl(.55, .35, .42), hsl(.12, .25, .68)],
         roadColor: hsl(.08, .35, .35),     // wooden boardwalk
-        backdropProps: {tree3: 1.0, shell: .4},
+        backdropProps: {tree3: 1.0, shell: .35},
         propCount: 500,
-        propSize: 3.5,
+        propSize: 3.0,
         borderKey: 'tsunami',
         mixFn: () => ({duck:.18, crab:.20, octopus:.15, bat:.12,
                        clown:.10, ghost:.08, ant:.10, zombie:.07}),
@@ -318,7 +318,7 @@ const STAGES = [
         roadColor: hsl(.55, .10, .38),     // slush/ice trail
         backdropProps: {snowman: .6, tree2: 1.0},
         propCount: 500,
-        propSize: 3.5,
+        propSize: 3.0,
         borderKey: 'snowflake',
         mixFn: () => ({penguin:.22, iceImp:.20, bat:.15, ghost:.10,
                        skull:.10, zombie:.10, ant:.08, snail:.05}),
@@ -335,9 +335,9 @@ const STAGES = [
         floorColor: hsl(.02, .35, .15),   // charred obsidian-red
         groundPalette: [hsl(.02, .35, .15), hsl(.05, .75, .32), hsl(.0, 0, .07)],
         roadColor: hsl(.06, .15, .25),     // dark stone path through the lava field
-        backdropProps: {volcano: .5, boulder: .5},
+        backdropProps: {volcano: .8, boulder: .8},
         propCount: 450,
-        propSize: 3.5,
+        propSize: 3.0,
         borderKey: 'boulder',
         mixFn: () => ({fireImp:.30, skull:.15, clown:.10, snail:.08,
                        zombie:.10, bat:.12, ant:.05, ghost:.10}),
@@ -3237,9 +3237,8 @@ async function gameInit()
     sprites.tree3      = drawTextToTexture(58, '🌴', {description: 'a palm tree'});
     sprites.wall       = drawTextToTexture(59, '⛰️', {description: 'a rocky mountain peak'});
     sprites.deadFlower = drawTextToTexture(60, '🥀', {description: 'a dead flower'});
-    sprites.candle     = drawTextToTexture(61, '🕯️', {description: 'a lit candle'});
-    sprites.brick      = drawTextToTexture(62, '🧱', {description: 'a red brick block'});
-    sprites.shell      = drawTextToTexture(63, '🐚', {description: 'a spiral seashell'});
+    sprites.brick      = drawTextToTexture(61, '🧱', {description: 'a red brick block'});
+    sprites.shell      = drawTextToTexture(62, '🐚', {description: 'a spiral seashell'});
 
     // Floor color is set per-stage in startRun; default to the Meadow tint
     // so the title backdrop looks right before any run starts.
