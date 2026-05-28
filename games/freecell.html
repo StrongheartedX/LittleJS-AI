@@ -337,7 +337,8 @@ async function gameInit()
 
     // ----- HUD toolbar -----
     // Extra game-specific buttons (undo / redo / new) live before the
-    // default mute / fullscreen / hamburger trio.
+    // default mute / fullscreen / hamburger trio. They're hidden while
+    // at title since there's no game in progress to undo or restart.
     installDefaultToolbar({
         extraItemsBefore: [
             {type:'button', id:'undo', label:'↶', title:'Undo (Z)', onClick: undoState},
@@ -348,6 +349,13 @@ async function gameInit()
                     onYes: () => newGame(),
                 })},
         ],
+    });
+    addPlayingListener(p =>
+    {
+        const hud = getToolbar('hud');
+        if (!hud) return;
+        for (const id of ['undo', 'redo', 'new'])
+            hud.getItem(id).setVisible(p);
     });
 
     // ----- pause menu -----

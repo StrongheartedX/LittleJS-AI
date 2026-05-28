@@ -213,20 +213,9 @@ async function gameInit()
         ],
     });
 
-    // ----- HUD toolbar (gameplay-only — setPlaying toggles visibility) -----
-    createToolbar({
-        id: 'hud',
-        anchor: 'top-right',
-        direction: 'horizontal',
-        items: [
-            {type:'button', id:'fs',   label:'⛶', title:'Toggle fullscreen', hideOnTouch:true, onClick: toggleFullscreen},
-            {type:'button', id:'menu', label:'☰', title:'Menu', onClick: () =>
-            {
-                if (isMenuVisible()) { clearSubmenuStack(); hideAllMenus(); }
-                else showMenu('pause');
-            }},
-        ],
-    });
+    // ----- HUD toolbar (always visible — hamburger grays out while
+    // the title menu is on top, since pause is meaningless before play).
+    installDefaultToolbar();
 
     initBoard();
     setPlaying(false);

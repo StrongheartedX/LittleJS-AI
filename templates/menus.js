@@ -1283,10 +1283,25 @@ function isPlaying() { return _isPlaying; }
 function setPlaying(p)
 {
     _isPlaying = !!p;
-    // Match the boardGame.html convention: a toolbar with id 'hud' is
-    // gameplay-only and auto-hides while at title / paused / dialogs.
-    const hud = getToolbar('hud');
-    if (hud) p ? hud.show() : hud.hide();
+    // Fire registered listeners (games hook these for game-state-driven
+    // UI toggles, e.g. hide undo / new-game while at title).
+    for (const fn of _playingListeners) fn(_isPlaying);
+}
+
+// Game-state hook: register a fn that fires every time setPlaying flips.
+// Used by games whose toolbars have gameplay-only items (undo, redo, new
+// game, etc.) that should hide while the player is at the title. The
+// default toolbar itself stays visible at all times — its hamburger is
+// title-aware via _isHamburgerGrayed, not via show/hide.
+//
+// Fires once with the current state on registration so the initial UI
+// matches without games needing to call setPlaying(false) explicitly.
+const _playingListeners = new Set();
+function addPlayingListener(fn)
+{
+    _playingListeners.add(fn);
+    fn(_isPlaying);
+    return () => _playingListeners.delete(fn);
 }
 
 // Single canonical quit-to-title flow. `onCleanup` is an optional sync
