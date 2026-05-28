@@ -1078,6 +1078,52 @@ function showAlertDialog(opts)
     pushMenu(id);
 }
 
+// ============================================================================
+// Standard "GAME OVER" dialog — extracted from 26 games that all used the
+// same showAlertDialog shape (title:'GAME OVER', icon:'💥', message with
+// score line, onOk: quitToTitle). Auto-submits to best score by default;
+// pass submitBest:false to opt out.
+// ============================================================================
+
+function showGameOverDialog(opts)
+{
+    opts = opts || {};
+    const won            = !!opts.won;
+    const score          = (typeof opts.score === 'number') ? opts.score : 0;
+    const submitBest     = opts.submitBest !== false;
+    const lowerIsBetter  = !!opts.lowerIsBetter;
+    const onContinue     = (typeof opts.onContinue === 'function')
+        ? opts.onContinue : () => quitToTitle();
+
+    let newBest = false;
+    if (submitBest)
+        newBest = submitBestScore(score, {lowerIsBetter});
+
+    let message;
+    if (typeof opts.customMessage === 'string')
+    {
+        message = opts.customMessage;
+    }
+    else
+    {
+        const scoreLine = (typeof opts.format === 'function')
+            ? opts.format(score) : ('Score: ' + score);
+        const lines = [scoreLine];
+        if (Array.isArray(opts.extraLines))
+            for (const line of opts.extraLines)
+                lines.push(line);
+        if (newBest) lines.push('NEW BEST!');
+        message = lines.join('\n');
+    }
+
+    showAlertDialog({
+        title: won ? 'YOU WIN!' : 'GAME OVER',
+        icon:  won ? '🏆' : '💥',
+        message,
+        onOk: onContinue,
+    });
+}
+
 // Two-button confirmation. Defaults selection to NO (safe choice). YES
 // clears the submenu stack so the caller can branch (e.g. QUIT to title);
 // NO closes the dialog and restores the parent.
