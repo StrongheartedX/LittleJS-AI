@@ -1705,7 +1705,7 @@ class DaggerSlashWeapon
         proj.size = vec2(1.2);
         // Mirror the sprite for left-facing throws so the dagger's blade
         // visually points the way it's flying instead of always up-right.
-        proj.mirror = this.facing < 0;
+        proj.mirror = this.facing > 0;
         // angleVelocity is PER-FRAME in LittleJS (engine line
         // `angle += angleVelocity *= angleDamping`), so 2 turns/sec at 60fps
         // is 4π / 60 rad/frame ≈ .209. Sign mirrors the throw direction so
@@ -2171,40 +2171,51 @@ class NukeWeapon
     }
 }
 
-// Tsunami — wide piercing wave that slows everything it touches.
-class TsunamiWeapon
+// Axe — Dagger Slash's evolution. Heavy spinning throw in the player's
+// last 2D movement direction (omnidirectional, no auto-aim). Larger and
+// harder-hitting than the dagger, same horizontal-mirror logic so the axe
+// blade reads as flying left or right correctly; on purely-vertical throws
+// the Y-axis sign decides the mirror.
+class AxeWeapon
 {
     constructor()
     {
-        this.level = 5; this.evolved = true; this.name = 'Tsunami';
-        this.cooldown = 0; this.facing = vec2(1, 0);
+        this.level = 5; this.evolved = true; this.name = 'Axe';
+        this.cooldown = 0;
+        this.facing = vec2(1, 0);   // last 2D facing — initialise right
     }
     levelUp() {}
-    damage() { return 10 * (this.lbBonus || 1); }
+    damage() { return 14 * (this.lbBonus || 1); }
 
     update()
     {
+        // Track 2D facing — whenever the player is moving, that's the
+        // direction the next axe is going. No auto-aim, no fallback to
+        // nearest enemy — the player is in control of where it flies.
         if (player.velocity.length() > .005)
             this.facing = player.velocity.normalize();
-        else
-        {
-            const target = nearestEnemy(player.pos, 30);
-            if (target)
-                this.facing = target.pos.subtract(player.pos).normalize();
-        }
+
         this.cooldown -= 1 / 60;
         if (this.cooldown > 0) return;
         this.cooldown = 1.4 / player.fireRateMult;
 
-        const dmg = this.damage() * player.dmgMult;
         const speed = 10 * player.projSpeedMult;
-        const proj = new Projectile(player.pos.copy(), this.facing, speed, dmg,
-            2.5, sprites.tsunami, true,
+        const range = 8   * player.areaMult;
+        const dmg   = this.damage() * player.dmgMult;
+        const proj  = new Projectile(player.pos.copy(), this.facing, speed, dmg,
+            range / speed, sprites.axe, true,
             e => { e.slowTimer = 2.5; });
-        proj.size = vec2(2.6 * player.areaMult, 1.8 * player.areaMult);
-        // rotate the upright wave glyph so its crest faces travel direction
-        proj.angle = this.facing.angle() - PI / 2;
-        proj.angleVelocity = 0;
+        proj.size  = vec2(1.8 * player.areaMult);   // 1.5× the dagger — bigger but not unwieldy
+        // Mirror by horizontal direction first (matches the dagger). When
+        // the throw is purely vertical (x == 0) the y axis decides instead
+        // so straight-up and straight-down throws still get a consistent
+        // sign. Default: no mirror (right-facing).
+        const sign = this.facing.x !== 0 ? this.facing.x : this.facing.y;
+        proj.mirror = sign > 0;
+        // Spin like the dagger — sign mirrors the throw direction so a
+        // right/up throw spins clockwise and a left/down throw counter-
+        // clockwise. angleVelocity is PER-FRAME, so 2 turns/sec = 4π / 60.
+        proj.angleVelocity = (sign >= 0 ? 1 : -1) * 4 * PI / 60;
     }
 }
 
@@ -2225,8 +2236,8 @@ const EVOLUTIONS = {
                      ctor: () => new CometWeapon()},
     Bomb:           {passive: 'Magnet',    name: 'Nuke',         emoji: '☢️',
                      ctor: () => new NukeWeapon()},
-    DaggerSlash:    {passive: 'Heart',     name: 'Tsunami',      emoji: '🌊',
-                     ctor: () => new TsunamiWeapon()},
+    DaggerSlash:    {passive: 'Heart',     name: 'Axe',          emoji: '🪓',
+                     ctor: () => new AxeWeapon()},
 };
 
 function findAvailableEvolution()
@@ -2298,7 +2309,9 @@ class Breakable extends EngineObject
     {
         super(pos, vec2(isBarrel ? 1.1 : 1.0),
               isBarrel ? sprites.barrel : sprites.crate);
-        this.hp = isBarrel ? 25 : 10;
+        // Bumped from 25 / 10 — walk-into damage is gone so weapons need
+        // to do real work to crack one open. Now a few solid hits each.
+        this.hp = isBarrel ? 60 : 25;
         this.maxHp = this.hp;
         this.isBarrel = isBarrel;
         this.isBreakable = true;
@@ -2687,7 +2700,7 @@ function updateSpawner()
 let magnetRadius = 3;
 let playerSpeed = 6;
 let playerMaxHp = 100;
-let enemySpawnIntervalBase = .6;   // bumped 2026-05-28 — early game felt sparse
+let enemySpawnIntervalBase = .66;  // 10% slower than .6 — early game felt too crowded
 let xpToNextBase = 5;
 let fireballDamage = 2;
 let pizzaSpinRate = .4;        // rad/sec tumble for PizzaToss + SpicyPizza slices
@@ -2970,6 +2983,7 @@ async function gameInit()
     sprites.heroVamp   = drawToTexture(5, paintEmoji('🧛'), 'vampire hero');
 
     sprites.fish      = drawToTexture(4, paintEmoji('🐟'), 'a blue fish');
+    sprites.tsunami   = drawToTexture(6, paintEmoji('🌊'), 'a cresting blue wave');   // beach border
 
     // enemies 8-15
     sprites.zombie    = drawToTexture(8,  paintEmoji('🧟'), 'a green zombie shambling forward');
@@ -3038,7 +3052,7 @@ async function gameInit()
     sprites.shark       = drawToTexture(41, paintEmoji('🦈'), 'a grey shark');
     sprites.comet       = drawToTexture(42, paintEmoji('☄️'), 'a fiery comet');
     sprites.nuke        = drawToTexture(43, paintEmoji('☢️'), 'a radioactive trefoil');
-    sprites.tsunami     = drawToTexture(44, paintEmoji('🌊'), 'a cresting blue wave');
+    sprites.axe         = drawToTexture(44, paintEmoji('🪓'), 'a wood-handled axe');
     sprites.heartSpiral = drawToTexture(45, paintEmoji('💖'), 'a sparkling pink heart');
 
     // Tiered XP gems — same 💎 glyph baked at three hues so big gems pop in
@@ -3431,7 +3445,7 @@ const WEAPON_DESCRIPTIONS = {
     StarStorm:      '🌟 wide fan of fast stars.',
     Comet:          '☄️ homing meteors with AOE on impact.',
     Nuke:           '☢️ huge blast that leaves a lingering damage field.',
-    Tsunami:        '🌊 piercing wave that slows everything it passes.',
+    Axe:            '🪓 heavy directional throw in your last facing direction, slows on hit.',
 };
 const PASSIVE_DESCRIPTIONS = {
     'Flex':       '+18% damage per level.',
@@ -3568,6 +3582,7 @@ function buildUpgradeChoices()
 // banish — there's nothing left to thin or skip). All reset when a fresh
 // level-up enters showLevelUpMenu (not on rebuild).
 let levelUpRerolls    = 0;
+let levelUpBanishes   = 0;     // banish-uses this level-up; doubles cost
 let levelUpBanishMode = false;
 let levelUpLimitBreak = false;
 let levelUpChoices    = [];
@@ -3636,10 +3651,15 @@ function buildLimitBreakChoices()
 }
 
 const REROLL_BASE_COST  = 10;
-const BANISH_COST       = 20;
+const BANISH_BASE_COST  = 20;
 const SKIP_XP_FRACTION  = .2;   // +20% of next-level XP
 
 function levelUpRerollCost() { return REROLL_BASE_COST + levelUpRerolls * REROLL_BASE_COST; }
+// Banish cost doubles per use within a single level-up (20 → 40 → 80 → …),
+// mirroring reroll's "expensive to repeat" feel but harsher since banish
+// is permanent for the run. Resets per level-up so you always get one
+// cheap banish per ding.
+function levelUpBanishCost() { return BANISH_BASE_COST * (1 << levelUpBanishes); }
 
 // Finish handling the current pending level-up — close the menu and either
 // show the next queued one or stop.
@@ -3671,6 +3691,7 @@ function refreshLevelUpChoices()
 function showLevelUpMenu()
 {
     levelUpRerolls = 0;
+    levelUpBanishes = 0;
     levelUpBanishMode = false;
     levelUpLimitBreak = false;
     // Once the build is fully maxed every level-up turns into a Limit Break
@@ -3763,11 +3784,12 @@ function rebuildLevelUpMenu()
         {type: 'button', id: 'banish',
             label: levelUpBanishMode
                 ? '🚫 CANCEL BANISH'
-                : '🚫 Banish  ' + BANISH_COST + '💰',
+                : '🚫 Banish  ' + levelUpBanishCost() + '💰',
             title: levelUpBanishMode
                 ? 'Cancel banish mode — no coins spent.'
-                : 'Spend ' + BANISH_COST + '💰 to permanently remove a choice ' +
-                  'for the rest of the run.',
+                : 'Spend ' + levelUpBanishCost() + '💰 to permanently remove ' +
+                  'a choice for the rest of the run. Cost doubles for each ' +
+                  'extra banish this level-up.',
             onClick: onLevelUpBanish},
         {type: 'button', id: 'skip',
             label: '⏭️  Skip  (+20% XP)',
@@ -3793,7 +3815,7 @@ function rebuildLevelUpMenu()
         const r = m.getItem('reroll');
         if (r) r.setDisabled(coins < rerollCost || levelUpBanishMode);
         const b = m.getItem('banish');
-        if (b) b.setDisabled(!levelUpBanishMode && coins < BANISH_COST);
+        if (b) b.setDisabled(!levelUpBanishMode && coins < levelUpBanishCost());
         const s = m.getItem('skip');
         if (s) s.setDisabled(levelUpBanishMode);
     }
@@ -3806,11 +3828,14 @@ function onLevelUpChoiceClick(i)
     if (!c) return;
     if (levelUpBanishMode)
     {
-        // Spend 20💰 and add to the run-scoped banish set; redraw.
-        if (coins < BANISH_COST) return;
-        coins -= BANISH_COST;
+        // Cost doubles per banish use within this level-up — second is 40,
+        // third is 80, fourth is 160. Reset between level-ups via showLevelUpMenu.
+        const cost = levelUpBanishCost();
+        if (coins < cost) return;
+        coins -= cost;
         saveMetaState();
         player.banishedUpgrades.add(c.key);
+        ++levelUpBanishes;
         levelUpBanishMode = false;
         refreshLevelUpChoices();
         return;
@@ -3839,7 +3864,7 @@ function onLevelUpBanish()
         rebuildLevelUpMenu();
         return;
     }
-    if (coins < BANISH_COST) return;
+    if (coins < levelUpBanishCost()) return;
     levelUpBanishMode = true;
     rebuildLevelUpMenu();
 }
@@ -4345,6 +4370,63 @@ window.unlockAll = function()
     saveMetaState();
     console.log('🔓 All stages + heroes unlocked, Curse Mode available.');
     return Array.from(stagesWon);
+};
+
+// Force a level-up right now. Queues one onto pendingLevelUps and surfaces
+// the menu directly so you can test the reroll / banish / skip / evolution
+// hint flow without grinding gems.
+window.levelUp = function()
+{
+    if (!player)
+    {
+        console.warn('levelUp: no player yet — start a run first.');
+        return;
+    }
+    player.level++;
+    player.pendingLevelUps = (player.pendingLevelUps || 0) + 1;
+    if (sounds.levelUp && sounds.levelUp.play) sounds.levelUp.play();
+    if (!isMenuVisible()) showLevelUpMenu();
+    console.log('⭐ Forced level-up → Lv ' + player.level);
+};
+
+// Drop a 🎁 chest right next to the player so you can test the evolution
+// flow without waiting for a scheduled boss. Pair with maxBuild() to also
+// have all the recipe passives in hand.
+window.spawnChest = function()
+{
+    if (!player)
+    {
+        console.warn('spawnChest: no player yet — start a run first.');
+        return;
+    }
+    const pos = player.pos.add(vec2(1.5, 0));
+    new Chest(pos);
+    console.log('🎁 Chest spawned at ' + pos.x.toFixed(1) + ', ' + pos.y.toFixed(1));
+};
+
+// In-run cheat — drops the player straight into max-build territory so
+// you can test evolutions / Limit Break without grinding a real run.
+// Levels every owned weapon to Lv 5, grants every passive at Lv 5 (going
+// past the normal 5-slot cap, which is fine for debug), then refreshes
+// multipliers. Next chest will offer the matching evolution.
+window.maxBuild = function()
+{
+    if (!player || !player.weapons)
+    {
+        console.warn('maxBuild: no player yet — start a run first.');
+        return;
+    }
+    for (const w of player.weapons) w.level = 5;
+    for (const name of ALL_PASSIVES)
+    {
+        let p = player.passives.find(pp => pp.name === name);
+        if (!p) { p = makePassiveByName(name); player.passives.push(p); }
+        p.level = 5;
+    }
+    recomputeMultipliers();
+    console.log('✨ Build maxed: ' + player.weapons.length + ' weapons + ' +
+                player.passives.length + ' passives, all at Lv 5');
+    return {weapons: player.weapons.length, passives: player.passives.length};
 };
 
 engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
