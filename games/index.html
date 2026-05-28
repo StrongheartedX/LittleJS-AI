@@ -992,7 +992,9 @@ function renderList() {
 // ===================== Filter chips =====================
 
 function buildFilterChips() {
-  const all = [{ key:'all', label:'All' }, ...CATEGORIES];
+  // Skip 'construction' — those games already have their own pinned section
+  // at the bottom of the list, so filtering by it would be redundant.
+  const all = [{ key:'all', label:'All' }, ...CATEGORIES.filter(c => c.key !== 'construction')];
   for (const c of all) {
     const btn = document.createElement('button');
     btn.className = 'chip-filter' + (c.key === 'all' ? ' active' : '');
