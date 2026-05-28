@@ -183,7 +183,17 @@ const ENEMY_TYPES = [
     {key:'ghost',   sprite:'ghost',   hp: 3,  dmg: 8,  speed: 1.6, xpDrop: 1, size: .9},
     {key:'fireImp', sprite:'fireImp', hp: 4,  dmg: 8,  speed: 1.6, xpDrop: 2, size: .85},
     {key:'iceImp',  sprite:'iceImp',  hp: 4,  dmg: 8,  speed: 1.2, xpDrop: 2, size: .85},
+    // Graveyard signature — collapses to bones on first kill, stands back up
+    // at half HP after ~4 s. Revival logic lives in Enemy.takeDamage/update.
+    {key:'skeleton', sprite:'skeleton', hp: 5,  dmg: 8,  speed: 1.3, xpDrop: 2, size: .9,
+                                       revivable: true},
+    {key:'crab',     sprite:'crab',     hp: 6,  dmg: 7,  speed: 1.4, xpDrop: 2, size: .9},
+    {key:'octopus',  sprite:'octopus',  hp: 6,  dmg: 9,  speed: 1.5, xpDrop: 2, size: .95},
+    {key:'penguin',  sprite:'penguin',  hp: 4,  dmg: 6,  speed: 1.8, xpDrop: 1, size: .85},
 ];
+
+// Quick lookup so stage mixes and signature spawns can resolve by key.
+const ENEMY_TYPES_BY_KEY = Object.fromEntries(ENEMY_TYPES.map(t => [t.key, t]));
 
 // Elite variants — color-coded by additive glow + stat multipliers.
 // Spawn chance ramps from 0 → ~5% over the first 3 minutes (after a 30s
@@ -218,17 +228,102 @@ const BOSS_SCHEDULE = [
 const bossesSpawned = new Set();
 let activeBoss = null;
 
-// Run duration — Reaper ☠️ spawns when the timer hits this. Tweakable so a
-// playtester can shorten it for fast iteration.
+// Run duration — the stage's final boss spawns when the timer hits this.
+// Tweakable so a playtester can shorten it for fast iteration.
 let runDuration = 900;          // 15 minutes per design doc §17
-let reaperSpawned = false;
+let finalBossSpawned = false;
 let runVictory   = false;
 
-const REAPER_DEF = {
-    key: 'reaper', sprite: 'reaper', name: '☠️ THE REAPER',
-    hp: 2500, dmg: 40, speed: 6.0, size: 3.2, xpDrop: 0,
-    isReaper: true,
-};
+// STAGES — visual + behavioral configuration for each playable arena. Each
+// stage owns its floor colour, backdrop scatter, border tile, enemy mix
+// function (returning a {key:weight} map; weights need not sum to 1), and a
+// final boss that replaces the Meadow's Reaper when the run timer expires.
+// Stage select is gated by stagesWon (unlock spine): killing one stage's
+// final boss unlocks the next.
+const STAGES = [
+    {
+        key: 'meadow',
+        name: 'Meadow',
+        emoji: '🌳',
+        floorColor: hsl(.3, .35, .18),
+        backdropKeys: ['tree1', 'tree2', 'tree3'],
+        borderKey: 'wall',
+        // Meadow keeps the original elapsed-time ramp; later stages are
+        // mostly static. Keeps existing balance for the default stage.
+        mixFn: meadowMixForTime,
+        finalBoss: {
+            key:'reaper',    sprite:'reaper',  name:'☠️ THE REAPER',
+            hp: 2500, dmg: 40, speed: 6.0, size: 3.2, xpDrop: 0,
+            isFinalBoss: true, finalBossTint: new Color(.65, 0, 0, 0),
+        },
+    },
+    {
+        key: 'graveyard',
+        name: 'Graveyard',
+        emoji: '🪦',
+        floorColor: hsl(.65, .04, .14),    // muted stone-blue
+        backdropKeys: ['graveStone', 'candle', 'tree2'],
+        borderKey: 'brick',
+        mixFn: () => ({zombie:.22, skull:.18, ghost:.20, skeleton:.20,
+                       bat:.10, ant:.05, snail:.05}),
+        finalBoss: {
+            key:'ogre',      sprite:'ogre',    name:'👹 THE OGRE',
+            hp: 2800, dmg: 30, speed: 2.5, size: 3.6, xpDrop: 0,
+            isFinalBoss: true, finalBossTint: new Color(.5, .1, .1, 0),
+        },
+    },
+    {
+        key: 'beach',
+        name: 'Beach',
+        emoji: '🏖️',
+        floorColor: hsl(.12, .35, .55),    // sand
+        backdropKeys: ['tree3', 'shell'],
+        borderKey: 'tsunami',
+        mixFn: () => ({duck:.18, crab:.20, octopus:.15, bat:.12,
+                       clown:.10, ghost:.08, ant:.10, zombie:.07}),
+        finalBoss: {
+            key:'kraken',    sprite:'octopus', name:'🐙 THE KRAKEN',
+            hp: 3200, dmg: 35, speed: 2.0, size: 4.0, xpDrop: 0,
+            isFinalBoss: true, finalBossTint: new Color(.3, 0, .55, 0),
+        },
+    },
+    {
+        key: 'frozen',
+        name: 'Frozen',
+        emoji: '❄️',
+        floorColor: hsl(.55, .25, .58),    // pale blue ice
+        backdropKeys: ['snowman', 'tree2'],
+        borderKey: 'snowflake',
+        mixFn: () => ({penguin:.22, iceImp:.20, bat:.15, ghost:.10,
+                       skull:.10, zombie:.10, ant:.08, snail:.05}),
+        finalBoss: {
+            key:'frostGiant', sprite:'snowman', name:'☃️ THE FROST GIANT',
+            hp: 3500, dmg: 35, speed: 2.0, size: 4.2, xpDrop: 0,
+            isFinalBoss: true, finalBossTint: new Color(.2, .55, .85, 0),
+        },
+    },
+    {
+        key: 'volcano',
+        name: 'Volcano',
+        emoji: '🌋',
+        floorColor: hsl(.02, .35, .15),   // charred obsidian-red
+        backdropKeys: ['volcano', 'boulder'],
+        borderKey: 'boulder',
+        mixFn: () => ({fireImp:.30, skull:.15, clown:.10, snail:.08,
+                       zombie:.10, bat:.12, ant:.05, ghost:.10}),
+        // The volcano scatters lava patches that DOT the player; configured
+        // here so it's all in one place.
+        lavaPatchCount: 14,
+        finalBoss: {
+            key:'dragon',    sprite:'dragon',  name:'🐉 THE DRAGON',
+            hp: 4000, dmg: 35, speed: 2.5, size: 4.5, xpDrop: 0,
+            shootEvery: 1.8, shootSprite: 'fireball',
+            isFinalBoss: true, finalBossTint: new Color(.85, .25, 0, 0),
+        },
+    },
+];
+const STAGES_BY_KEY = Object.fromEntries(STAGES.map(s => [s.key, s]));
+let currentStage = STAGES[0];
 
 class Chest extends EngineObject
 {
@@ -366,10 +461,23 @@ class Enemy extends EngineObject
         // velocity.x so a ball moving right rolls clockwise, left rolls CCW.
         this.rollAngle = 0;
         this.shootTimer = 0;
+        // Skeleton revival state — set by takeDamage when a revivable enemy
+        // hits 0 HP. While > 0 the enemy is "down" (no AI, no contact, no
+        // hit-box), then stands back up at half HP.
+        this.revivingTimer = 0;
+        this.hasRevived    = false;
     }
 
     render()
     {
+        // Collapsed-to-bones pose during the revival window. Drawn small,
+        // grey, and tilted so it visibly reads as "not standing yet."
+        if (this.revivingTimer > 0)
+        {
+            drawTile(this.pos, this.size.scale(.7), this.tileInfo,
+                     new Color(.7, .7, .7, .55), this.bobPhase + PI/2);
+            return;
+        }
         let tint = this.tint || WHITE;
         let additive = this.additive;
         // elite glow acts as the base layer; status effects (burn etc.)
@@ -419,6 +527,15 @@ class Enemy extends EngineObject
 
     update()
     {
+        // Skeleton revival — collapsed enemies skip AI, contact, and the
+        // physics step entirely until the timer expires. Then they pop back
+        // up to half HP and resume normal behaviour.
+        if (this.revivingTimer > 0)
+        {
+            this.revivingTimer -= 1 / 60;
+            this.renderOrder = -this.pos.y;
+            return;
+        }
         // tick status effects — priority order: freeze > burn > slow > none.
         // tint/additive are reset each frame; hit flash in render() overrides.
         let moveScale = 1;
@@ -568,9 +685,9 @@ class Enemy extends EngineObject
             }
             if (this.isBoss)
             {
-                if (this.bossDef && this.bossDef.isReaper)
+                if (this.bossDef && this.bossDef.isFinalBoss)
                 {
-                    // killing the Reaper wins the run
+                    // killing the stage's final boss wins the run
                     runVictory = true;
                     showVictoryMenu();
                 }
@@ -611,6 +728,9 @@ class Enemy extends EngineObject
 
     takeDamage(amount)
     {
+        // While collapsed, skeletons take no damage — the player has to
+        // wait out the revive (or move on) before re-engaging.
+        if (this.revivingTimer > 0) return;
         this.hp -= amount;
         this.hitFlashTimer = .08;
         // throttle damage numbers — multiple weapons hitting the same enemy
@@ -620,7 +740,20 @@ class Enemy extends EngineObject
             spawnDamageNumber(this.pos, amount);
             this._lastDmgT = time;
         }
-        if (this.hp <= 0) this.destroy();
+        if (this.hp <= 0)
+        {
+            // Skeleton-style revive — first kill collapses to bones, second
+            // kill drops loot normally. Bosses are never revivable.
+            if (this.type && this.type.revivable && !this.hasRevived && !this.isBoss)
+            {
+                this.hasRevived    = true;
+                this.hp            = this.maxHp * .5;
+                this.revivingTimer = 4;
+                if (sounds.hurt && sounds.hurt.play) sounds.hurt.play(this.pos);
+                return;
+            }
+            this.destroy();
+        }
     }
 }
 
@@ -1029,9 +1162,12 @@ class FishOrbitWeapon
         // damage check only — drawing moved to draw() because update() runs
         // during gameUpdate (before render). drawTile from update batches GL
         // vertices that the next frame's enginePreRender then asserts on.
-        for (let i = 0; i < this.level; ++i)
+        // Limit-Break can grow level past 5; soft-cap the fish count at 8
+        // so a long run doesn't tank the frame rate while damage keeps rising.
+        const orbCount = min(this.level, 8);
+        for (let i = 0; i < orbCount; ++i)
         {
-            const a = this.angle + i * 2 * PI / this.level;
+            const a = this.angle + i * 2 * PI / orbCount;
             const pos = player.pos.add(vec2().setAngle(a, radius));
             for (const e of enemies)
             {
@@ -1048,9 +1184,10 @@ class FishOrbitWeapon
     {
         const radius = 2.5 * player.areaMult;
         const orbSize = .7 * player.areaMult;
-        for (let i = 0; i < this.level; ++i)
+        const orbCount = min(this.level, 8);
+        for (let i = 0; i < orbCount; ++i)
         {
-            const a = this.angle + i * 2 * PI / this.level;
+            const a = this.angle + i * 2 * PI / orbCount;
             const pos = player.pos.add(vec2().setAngle(a, radius));
             drawTile(pos, vec2(orbSize), sprites.fish, WHITE, a + time);
         }
@@ -1200,7 +1337,7 @@ class ChainLightningWeapon
         if (!first) return;
         this.cooldown = max(.4, 2.0 - this.level * .2) / player.fireRateMult;
 
-        const hops = this.level + 1;
+        const hops = min(this.level + 1, 8);   // soft cap for Limit-Break runs
         const chainRange = 5 * player.areaMult;
         const dmg = this.damage() * player.dmgMult;
         const hit = new Set();
@@ -1414,7 +1551,7 @@ class SpicyPizzaWeapon
         this.cooldown = 0; this.facing = vec2(1, 0);
     }
     levelUp() {}   // already maxed
-    damage() { return 14; }
+    damage() { return 14 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1453,7 +1590,7 @@ class FishStormWeapon
         this.angle = 0; this.hitMap = new Map();
     }
     levelUp() {}
-    damage() { return 8; }
+    damage() { return 8 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1503,7 +1640,7 @@ class ThunderstormWeapon
         this.cooldown = 0;
     }
     levelUp() {}
-    damage() { return 9; }
+    damage() { return 9 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1537,7 +1674,7 @@ class BlizzardWeapon
         this.cooldown = 0; this.auraTick = 0;
     }
     levelUp() {}
-    damage() { return 4; }
+    damage() { return 4 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1590,7 +1727,7 @@ class HeartSpiralWeapon
         this.angle = 0; this.hitMap = new Map();
     }
     levelUp() {}
-    damage() { return 6; }
+    damage() { return 6 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1642,7 +1779,7 @@ class StarStormWeapon
         this.cooldown = 0;
     }
     levelUp() {}
-    damage() { return 10; }
+    damage() { return 10 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1731,7 +1868,7 @@ class CometWeapon
         this.cooldown = 0;
     }
     levelUp() {}
-    damage() { return 12; }
+    damage() { return 12 * (this.lbBonus || 1); }
 
     update()
     {
@@ -1871,7 +2008,7 @@ class NukeWeapon
         this.cooldown = 0;
     }
     levelUp() {}
-    damage() { return 40; }
+    damage() { return 40 * (this.lbBonus || 1); }
     radius() { return 6.0; }
 
     update()
@@ -1894,7 +2031,7 @@ class TsunamiWeapon
         this.cooldown = 0; this.facing = vec2(1, 0);
     }
     levelUp() {}
-    damage() { return 10; }
+    damage() { return 10 * (this.lbBonus || 1); }
 
     update()
     {
@@ -2129,6 +2266,80 @@ class Breakable extends EngineObject
     }
 }
 
+// Lava patch — volcano-stage terrain hazard. Static ground decal that
+// damages the player while overlapped (reuses the burn-style DOT pattern
+// from the design doc). Persistent, no respawn; cleaned up by the teardown
+// loops alongside breakables.
+const lavaPatches = [];
+
+class LavaPatch extends EngineObject
+{
+    constructor(pos, radius)
+    {
+        super(pos, vec2(radius * 2), sprites.volcano);
+        this.lavaRadius = radius;
+        this.damping = 1;
+        this.friction = 1;
+        this.gravityScale = 0;
+        this.angle = 0;
+        this.setCollision(false, false, false, false);
+        this.velocity = vec2();
+        this.bobPhase = rand(2 * PI);
+        lavaPatches.push(this);
+    }
+
+    update()
+    {
+        super.update();
+        this.renderOrder = -this.pos.y - 800;   // ground decal beneath entities
+        // DOT the player while standing in it. Respects the invuln window
+        // and the AI-mode gate (AI is intentionally invuln in test mode).
+        if (!playerAI && player.invulnTimer <= 0 &&
+            player.pos.distance(this.pos) < this.lavaRadius)
+        {
+            // ~12 HP per second while feet are in lava — survivable to
+            // cross, painful to camp in.
+            player.hp -= 12 / 60;
+            player.hurtTimer = .15;
+        }
+    }
+
+    render()
+    {
+        const t = .5 + .5 * sin(time * 4 + this.bobPhase);
+        // soft red puddle
+        drawTile(this.pos, this.size, sprites.circle,
+                 new Color(.85, .25 + .15 * t, .05, .55));
+        // small bubbling volcano glyph above so the hazard reads as molten
+        const additive = new Color(.7 * t, .25 * t, 0, 0);
+        drawTile(this.pos, this.size.scale(.45), sprites.volcano,
+                 WHITE, this.bobPhase * .2, false, additive);
+    }
+
+    destroy()
+    {
+        const i = lavaPatches.indexOf(this);
+        if (i >= 0) lavaPatches.splice(i, 1);
+        super.destroy();
+    }
+}
+
+function spawnLavaPatches(count)
+{
+    const safeRadiusSq = 64;   // 8 wu safe zone around the spawn point
+    for (let i = 0; i < count; ++i)
+    {
+        let pos;
+        for (let tries = 0; tries < 8; ++tries)
+        {
+            pos = vec2(rand(ARENA_MIN_X + 3, ARENA_MAX_X - 3),
+                       rand(ARENA_MIN_Y + 3, ARENA_MAX_Y - 3));
+            if (pos.lengthSquared() > safeRadiusSq) break;
+        }
+        new LavaPatch(pos, rand(1.6, 2.6));
+    }
+}
+
 function preSpawnBreakables()
 {
     const totalCrates  = 30;
@@ -2248,29 +2459,30 @@ const spawner = {
     interval: 1.5,
 };
 
-// Returns a weights array aligned with ENEMY_TYPES:
-//   [ant, zombie, bat, snail, skull, clown]
-function enemyMixForTime(seconds)
+// Per-stage enemy weight mixes. Meadow keeps its original elapsed-time
+// ramp; later stages return a static map keyed by enemy.key. Weights need
+// not sum to 1 — pickWeightedType normalises by total.
+function meadowMixForTime(seconds)
 {
-    // weights aligned with ENEMY_TYPES:
-    //   ant, zombie, bat, snail, skull, clown, duck, ghost, fireImp, iceImp
-    if (seconds < 15)  return [.60, .40,   0,   0,   0,   0,   0,   0,   0,   0];
-    if (seconds < 40)  return [.40, .30, .30,   0,   0,   0,   0,   0,   0,   0];
-    if (seconds < 80)  return [.25, .25, .20, .10, .10,   0, .10,   0,   0,   0];
-    if (seconds < 150) return [.20, .15, .15, .10, .10, .10, .10, .10,   0,   0];
-    if (seconds < 300) return [.10, .10, .15, .10, .10, .10, .10, .10, .075, .075];
-    return                    [.05, .05, .10, .15, .10, .15, .10, .10, .10, .10];
+    if (seconds < 15)  return {ant:.60, zombie:.40};
+    if (seconds < 40)  return {ant:.40, zombie:.30, bat:.30};
+    if (seconds < 80)  return {ant:.25, zombie:.25, bat:.20, snail:.10, skull:.10, duck:.10};
+    if (seconds < 150) return {ant:.20, zombie:.15, bat:.15, snail:.10, skull:.10, clown:.10, duck:.10, ghost:.10};
+    if (seconds < 300) return {ant:.10, zombie:.10, bat:.15, snail:.10, skull:.10, clown:.10, duck:.10, ghost:.10, fireImp:.075, iceImp:.075};
+    return                    {ant:.05, zombie:.05, bat:.10, snail:.15, skull:.10, clown:.15, duck:.10, ghost:.10, fireImp:.10, iceImp:.10};
 }
 
 function pickWeightedType(elapsed)
 {
-    const w = enemyMixForTime(elapsed);
-    const r = rand();
+    const mix = currentStage.mixFn(elapsed);
+    let total = 0;
+    for (const k in mix) total += mix[k];
+    const r = rand() * total;
     let acc = 0;
-    for (let i = 0; i < ENEMY_TYPES.length; ++i)
+    for (const k in mix)
     {
-        acc += w[i];
-        if (r < acc) return ENEMY_TYPES[i];
+        acc += mix[k];
+        if (r < acc) return ENEMY_TYPES_BY_KEY[k] || ENEMY_TYPES[0];
     }
     return ENEMY_TYPES[0];
 }
@@ -2309,13 +2521,16 @@ function updateSpawner()
             spawnBoss(boss);
         }
     }
-    // ☠️ Reaper at runDuration ends the run — boss with isReaper flag
-    if (elapsedTime >= runDuration && !reaperSpawned && !gameOver && !runVictory)
+    // Final boss at runDuration — each stage swaps this (Meadow = Reaper,
+    // Graveyard = Ogre, Beach = Kraken, Frozen = Frost Giant, Volcano = Dragon).
+    if (elapsedTime >= runDuration && !finalBossSpawned && !gameOver && !runVictory)
     {
-        reaperSpawned = true;
-        spawnBoss(REAPER_DEF);
-        // override the default gold boss glow with ominous red
-        if (activeBoss) activeBoss.eliteAdditive = new Color(.65, 0, 0, 0);
+        finalBossSpawned = true;
+        spawnBoss(currentStage.finalBoss);
+        // Stages can opt into an ominous tint that overrides the default
+        // gold boss-glow (e.g. red for the Reaper, green for the Dragon).
+        if (activeBoss && currentStage.finalBoss.finalBossTint)
+            activeBoss.eliteAdditive = currentStage.finalBoss.finalBossTint;
     }
 
     // Spawn pacing — VS-style: ~1 enemy/sec early, ramps to ~11/sec by 3 min.
@@ -2413,6 +2628,16 @@ let coins = 0;          // lifetime persistent
 let bestTime = 0;       // lifetime longest survival
 let firstVictory = false;  // unlocks Curse Mode on the title screen
 let curseLevel = 0;     // 0 = off, 1 = +50%, 2 = +100% (HP/speed/spawn ↔ XP/coin)
+// Stage keys the player has beaten. Drives the stage-select unlock chain
+// (beat one → unlock the next). Meadow is always playable.
+let stagesWon = new Set();
+
+function isStageUnlocked(stageKey)
+{
+    const idx = STAGES.findIndex(s => s.key === stageKey);
+    if (idx <= 0) return true;                      // Meadow / unknown → open
+    return stagesWon.has(STAGES[idx - 1].key);
+}
 
 // Permanent power-ups — spent at the title-screen shop with 💰 coins.
 // Effects apply on every future run via recomputeMultipliers. Caps at
@@ -2437,6 +2662,7 @@ function loadMetaState()
     bestTime     = data.bestTime     ?? 0;
     firstVictory = data.firstVictory ?? false;
     curseLevel   = data.curseLevel   ?? 0;
+    stagesWon    = new Set(Array.isArray(data.stagesWon) ? data.stagesWon : []);
     if (data.powerUps)
         for (const k in powerUps)
             if (typeof data.powerUps[k] === 'number')
@@ -2445,7 +2671,8 @@ function loadMetaState()
 
 function saveMetaState()
 {
-    saveData({coins, bestTime, firstVictory, curseLevel, powerUps});
+    saveData({coins, bestTime, firstVictory, curseLevel,
+              stagesWon: Array.from(stagesWon), powerUps});
 }
 
 function applyHero(hero)
@@ -2456,21 +2683,37 @@ function applyHero(hero)
     currentHero = hero;
 }
 
-function startRun(hero)
+// Hero-picked → either go to stage select (if 2+ stages unlocked) or
+// jump straight into the Meadow. Keeps the new-player flow one tap shorter.
+function onHeroPicked(hero)
+{
+    currentHero = hero;
+    const anyOther = STAGES.some((s, i) => i > 0 && isStageUnlocked(s.key));
+    if (anyOther) pushMenu('stageSelect');
+    else          startRun(hero, STAGES[0]);
+}
+
+function startRun(hero, stage)
 {
     applyHero(hero);
+    currentStage = stage || currentStage || STAGES[0];
+    // Floor colour swaps per stage; gameRender already clears with
+    // canvasClearColor every frame so this picks up immediately.
+    canvasClearColor = currentStage.floorColor;
     // Fresh run state — same teardown that restartGame uses, but starts
     // with the hero's chosen weapon instead of the default fireball.
     for (const e of enemies.slice()) e.destroy();
     enemies.length = 0;
     breakables.length = 0;
+    lavaPatches.length = 0;
     for (const obj of engineObjects.slice())
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
             obj instanceof Pickup || obj instanceof Bomb ||
             obj instanceof Chest || obj instanceof StarToss ||
             obj instanceof CometProjectile || obj instanceof NukeBomb ||
-            obj instanceof NukeField || obj instanceof Breakable)
+            obj instanceof NukeField || obj instanceof Breakable ||
+            obj instanceof LavaPatch)
             obj.destroy();
     }
     chainFlashes.length = 0;
@@ -2486,7 +2729,7 @@ function startRun(hero)
     gameOverFrameCount = 0;
     bossesSpawned.clear();
     activeBoss = null;
-    reaperSpawned = false;
+    finalBossSpawned = false;
     runVictory = false;
 
     player = new Player();
@@ -2499,6 +2742,9 @@ function startRun(hero)
     // after player creation (so the safe-radius check has a player at
     // origin to keep away from).
     preSpawnBreakables();
+    // Stage-specific terrain hazards — for now only the volcano has lava.
+    if (currentStage.lavaPatchCount)
+        spawnLavaPatches(currentStage.lavaPatchCount);
 
     setPlaying(true);
     hideAllMenus();
@@ -2677,12 +2923,31 @@ showAtlasOverlay()
     sprites.crate     = drawToTexture(48, paintEmoji('📦'), 'a wooden crate');
     sprites.barrel    = drawToTexture(49, paintEmoji('🛢️'), 'an oil barrel');
 
-    // ground / decor 32-35 — trees scattered across the arena, mountains line the edges
+    // Meadow backdrop + border — also re-used by other stages where the
+    // glyph fits (e.g. the frozen pine tree2 doubles as frost-trim).
     sprites.tree1     = drawToTexture(32, paintEmoji('🌳'), 'a deciduous tree');
     sprites.tree2     = drawToTexture(33, paintEmoji('🌲'), 'an evergreen pine tree');
     sprites.tree3     = drawToTexture(34, paintEmoji('🌴'), 'a palm tree');
     sprites.wall      = drawToTexture(35, paintEmoji('⛰️'), 'a rocky mountain peak');
 
+    // New stages — backdrop scatter, border tile, signature enemies, bosses.
+    sprites.graveStone = drawToTexture(50, paintEmoji('🪦'), 'a stone grave marker');
+    sprites.candle     = drawToTexture(51, paintEmoji('🕯️'), 'a lit candle');
+    sprites.brick      = drawToTexture(52, paintEmoji('🧱'), 'a red brick block');
+    sprites.shell      = drawToTexture(53, paintEmoji('🐚'), 'a spiral seashell');
+    sprites.snowman    = drawToTexture(54, paintEmoji('☃️'), 'a smiling snowman');
+    sprites.boulder    = drawToTexture(55, paintEmoji('🪨'), 'a grey boulder');
+    sprites.volcano    = drawToTexture(56, paintEmoji('🌋'), 'an erupting volcano');
+    sprites.skeleton   = drawToTexture(57, paintEmoji('🦴'), 'a single white bone');
+    sprites.crab       = drawToTexture(58, paintEmoji('🦀'), 'a red crab');
+    sprites.octopus    = drawToTexture(59, paintEmoji('🐙'), 'a purple octopus');
+    sprites.penguin    = drawToTexture(60, paintEmoji('🐧'), 'a black-and-white penguin');
+    sprites.ogre       = drawToTexture(61, paintEmoji('👹'), 'a red ogre face');
+    sprites.dragon     = drawToTexture(62, paintEmoji('🐉'), 'a green dragon');
+    sprites.snowflake  = drawToTexture(63, paintEmoji('❄️'), 'a six-pointed snowflake');
+
+    // Floor color is set per-stage in startRun; default to the Meadow tint
+    // so the title backdrop looks right before any run starts.
     canvasClearColor = hsl(.3, .35, .18);  // mossy grass green
 
     inputWASDEmulateDirection = true;
@@ -2846,7 +3111,8 @@ showAtlasOverlay()
         ],
     });
 
-    // Hero select — picks one and starts a run.
+    // Hero select — picks one, then either starts a run on the Meadow (if
+    // no other stage is unlocked yet) or surfaces the stage-select menu.
     createMenu({
         id: 'heroSelect',
         title: 'PICK YOUR HERO',
@@ -2860,10 +3126,45 @@ showAtlasOverlay()
             type: 'button',
             label: h.emoji + '  ' + h.name + ' — ' + h.blurb,
             title: 'Starts with ' + h.weapon,
-            onClick: () => startRun(h),
+            onClick: () => onHeroPicked(h),
         })).concat([
             {type: 'separator'},
             {type: 'button', label: 'BACK', onClick: () => hideMenu('heroSelect')},
+        ]),
+    });
+
+    // Stage select — only surfaces after a second stage is unlocked, per
+    // the design doc ("don't show a one-option choose-your-stage menu").
+    // Each row mirrors a STAGES entry; locked rows are disabled and labelled.
+    createMenu({
+        id: 'stageSelect',
+        title: 'CHOOSE STAGE',
+        dismissable: true,
+        onShow: () =>
+        {
+            const m = getMenu('stageSelect');
+            if (!m) return;
+            for (const s of STAGES)
+            {
+                const item = m.getItem('stage-' + s.key);
+                if (!item) continue;
+                const unlocked = isStageUnlocked(s.key);
+                const won      = stagesWon.has(s.key);
+                const wonMark  = won      ? ' 🏆' : '';
+                const lockMark = unlocked ? ''   : ' 🔒';
+                item.setLabel(s.emoji + '  ' + s.name + wonMark + lockMark);
+                item.setDisabled(!unlocked);
+            }
+        },
+        onHide: () => { if (!isPlaying()) popMenu(); },
+        items: STAGES.map(s => ({
+            type: 'button',
+            id: 'stage-' + s.key,
+            label: s.emoji + '  ' + s.name,
+            onClick: () => startRun(currentHero, s),
+        })).concat([
+            {type: 'separator'},
+            {type: 'button', label: 'BACK', onClick: () => hideMenu('stageSelect')},
         ]),
     });
 
@@ -3055,11 +3356,72 @@ function buildUpgradeChoices()
 }
 
 // Per-level-up state. Reroll counter scales cost; banish-mode flag turns the
-// three choice rows into "tap to remove" targets. Both reset when a fresh
+// three choice rows into "tap to remove" targets; limitBreak flips the menu
+// into Limit Break mode where only the choices are shown (no reroll / skip /
+// banish — there's nothing left to thin or skip). All reset when a fresh
 // level-up enters showLevelUpMenu (not on rebuild).
-let levelUpRerolls   = 0;
+let levelUpRerolls    = 0;
 let levelUpBanishMode = false;
+let levelUpLimitBreak = false;
 let levelUpChoices    = [];
+
+// Max-build detector — the design's trigger for Limit Break: every weapon
+// slot and every passive slot full, every entry at Lv 5.
+function isMaxBuild()
+{
+    if (!player || !player.weapons || !player.passives) return false;
+    if (player.weapons.length  < 5) return false;
+    if (player.passives.length < 5) return false;
+    for (const w of player.weapons)  if (w.level < 5) return false;
+    for (const p of player.passives) if (p.level < 5) return false;
+    return true;
+}
+
+// Apply a Limit Break pick to a weapon: non-evolved weapons keep leveling
+// past 5 (formula scales freely); evolved weapons gain a +8% damage stack.
+function limitBreakWeapon(w)
+{
+    if (w.evolved) w.lbBonus = (w.lbBonus || 1) * 1.08;
+    else           w.level++;
+}
+
+// Build three random "push this maxed weapon" picks plus the "+10 coins"
+// option. Player owns 5 weapons at this point so the shuffle distinguishes
+// which three get offered each level-up.
+function buildLimitBreakChoices()
+{
+    const choices = [];
+    const pool = player.weapons.slice();
+    for (let i = pool.length - 1; i > 0; --i)
+    {
+        const j = randInt(i + 1);
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const picks = pool.slice(0, 3);
+    for (const w of picks)
+    {
+        const baseKey = w.constructor.name.replace(/Weapon$/, '');
+        const label = w.evolved
+            ? '✨ ' + emojiForWeapon(baseKey) + '  ' + w.name + ' — Limit Break (+8% dmg)'
+            : '✨ ' + emojiForWeapon(baseKey) + '  ' + w.name + ' — Limit Break (Lv ' + (w.level + 1) + ')';
+        choices.push({
+            key: 'lb:' + baseKey + ':' + (w.lbBonus || w.level),
+            label,
+            apply: () => limitBreakWeapon(w),
+        });
+    }
+    choices.push({
+        key: 'lb:coins',
+        label: '💰 Take 10 coins',
+        apply: () =>
+        {
+            coins    += 10;
+            coinsRun += 10;
+            saveMetaState();
+        },
+    });
+    return choices;
+}
 
 const REROLL_BASE_COST  = 10;
 const BANISH_COST       = 20;
@@ -3074,6 +3436,7 @@ function finishLevelUp()
     const m = getMenu('levelup');
     if (m) { hideMenu('levelup'); m.destroy(); }
     levelUpBanishMode = false;
+    levelUpLimitBreak = false;
     player.pendingLevelUps--;
     if (player.pendingLevelUps > 0)
         requestAnimationFrame(showLevelUpMenu);
@@ -3097,6 +3460,17 @@ function showLevelUpMenu()
 {
     levelUpRerolls = 0;
     levelUpBanishMode = false;
+    levelUpLimitBreak = false;
+    // Once the build is fully maxed every level-up turns into a Limit Break
+    // pick — there's nothing left to upgrade normally and a flat reward
+    // would waste the moment.
+    if (isMaxBuild())
+    {
+        levelUpLimitBreak = true;
+        levelUpChoices = buildLimitBreakChoices();
+        rebuildLevelUpMenu();
+        return;
+    }
     levelUpChoices = buildUpgradeChoices();
     if (levelUpChoices.length === 0)
     {
@@ -3114,10 +3488,13 @@ function rebuildLevelUpMenu()
     const existing = getMenu('levelup');
     if (existing) existing.destroy();
 
+    const title = levelUpLimitBreak ? '✨ LIMIT BREAK' : 'LEVEL UP';
     const subtitleBase = 'Lv ' + player.level + '   💰 ' + coins;
-    const subtitle = levelUpBanishMode
-        ? subtitleBase + '\n🚫 Pick which choice to banish'
-        : subtitleBase;
+    let subtitle = subtitleBase;
+    if (levelUpLimitBreak)
+        subtitle = subtitleBase + '\nMax build — push a maxed weapon further';
+    else if (levelUpBanishMode)
+        subtitle = subtitleBase + '\n🚫 Pick which choice to banish';
 
     const choiceItems = levelUpChoices.map((c, i) => ({
         type: 'button',
@@ -3126,32 +3503,37 @@ function rebuildLevelUpMenu()
         onClick: () => onLevelUpChoiceClick(i),
     }));
 
-    const rerollCost = levelUpRerollCost();
-    const rerollLabel = '🔄 Reroll  ' + rerollCost + '💰';
-    const banishLabel = levelUpBanishMode
-        ? '🚫 CANCEL BANISH'
-        : '🚫 Banish  ' + BANISH_COST + '💰';
-    const skipLabel = '⏭️  Skip  (+20% XP)';
+    // Limit Break mode shows ONLY the choice rows — reroll/banish/skip would
+    // have nothing to act on once the build is maxed.
+    const tailItems = levelUpLimitBreak ? [] : [
+        {type: 'separator'},
+        {type: 'button', id: 'reroll',
+            label: '🔄 Reroll  ' + levelUpRerollCost() + '💰',
+            onClick: onLevelUpReroll},
+        {type: 'button', id: 'banish',
+            label: levelUpBanishMode
+                ? '🚫 CANCEL BANISH'
+                : '🚫 Banish  ' + BANISH_COST + '💰',
+            onClick: onLevelUpBanish},
+        {type: 'button', id: 'skip',
+            label: '⏭️  Skip  (+20% XP)',
+            onClick: onLevelUpSkip},
+    ];
 
     createMenu({
         id: 'levelup',
-        title: 'LEVEL UP',
+        title,
         subtitle,
         dismissable: false,
-        items: [
-            ...choiceItems,
-            {type: 'separator'},
-            {type: 'button', id: 'reroll', label: rerollLabel, onClick: onLevelUpReroll},
-            {type: 'button', id: 'banish', label: banishLabel, onClick: onLevelUpBanish},
-            {type: 'button', id: 'skip',   label: skipLabel,   onClick: onLevelUpSkip},
-        ],
+        items: [...choiceItems, ...tailItems],
     });
 
     // Disable affordance gates — reroll/banish grey out when you can't pay.
     // Skip is always free, banish-cancel doesn't cost anything either.
     const m = getMenu('levelup');
-    if (m)
+    if (m && !levelUpLimitBreak)
     {
+        const rerollCost = levelUpRerollCost();
         const r = m.getItem('reroll');
         if (r) r.setDisabled(coins < rerollCost || levelUpBanishMode);
         const b = m.getItem('banish');
@@ -3251,13 +3633,13 @@ function cycleCurse()
 
 function restartGame()
 {
-    // restart with the same hero — startRun handles the teardown
+    // restart with the same hero and stage — startRun handles the teardown
     for (const id of ['gameover', 'victory'])
     {
         const m = getMenu(id);
         if (m) { hideMenu(id); m.destroy(); }
     }
-    startRun(currentHero);
+    startRun(currentHero, currentStage);
 }
 
 function goToTitle()
@@ -3267,13 +3649,15 @@ function goToTitle()
     for (const e of enemies.slice()) e.destroy();
     enemies.length = 0;
     breakables.length = 0;
+    lavaPatches.length = 0;
     for (const obj of engineObjects.slice())
     {
         if (obj === player || obj instanceof Enemy || obj instanceof Projectile ||
             obj instanceof Pickup || obj instanceof Bomb ||
             obj instanceof Chest || obj instanceof StarToss ||
             obj instanceof CometProjectile || obj instanceof NukeBomb ||
-            obj instanceof NukeField || obj instanceof Breakable)
+            obj instanceof NukeField || obj instanceof Breakable ||
+            obj instanceof LavaPatch)
             obj.destroy();
     }
     chainFlashes.length = 0;
@@ -3282,15 +3666,17 @@ function goToTitle()
     timeSlowTimer = 0;
     bossesSpawned.clear();
     activeBoss = null;
-    reaperSpawned = false;
+    finalBossSpawned = false;
     runVictory = false;
     gameOver = false;
     gameOverFrameCount = 0;
     elapsedTime = 0;
     setPlaying(false);
 
-    // Reset the title backdrop to the default wizard hero.
+    // Reset the title backdrop to the default wizard hero on the Meadow.
     currentHero = HEROES[0];
+    currentStage = STAGES[0];
+    canvasClearColor = currentStage.floorColor;
     player = new Player();
     player.weapons = [];
     player.passives = [];
@@ -3328,12 +3714,21 @@ function showGameOverMenu()
 function showVictoryMenu()
 {
     endRun();
-    // First Reaper kill ever — unlock Curse Mode on the title screen.
+    // Mark the stage as cleared so the next stage on the spine unlocks.
+    // First-ever Reaper kill also flips firstVictory, which exposes the
+    // Curse Mode cycle button on the title screen.
+    let changed = false;
+    if (currentStage && !stagesWon.has(currentStage.key))
+    {
+        stagesWon.add(currentStage.key);
+        changed = true;
+    }
     if (!firstVictory)
     {
         firstVictory = true;
-        saveMetaState();
+        changed = true;
     }
+    if (changed) saveMetaState();
     if (sounds.victory && sounds.victory.play) sounds.victory.play();
     const existing = getMenu('victory');
     if (existing) existing.destroy();
@@ -3369,12 +3764,21 @@ function gameUpdate()
         if (playerAI)
         {
             // pick a random offered choice for each queued level-up;
-            // max-build queues drain into the consolation reward.
+            // max-build queues land on a Limit Break pick instead of the
+            // consolation reward so the AI keeps stacking damage.
             while (player.pendingLevelUps > 0)
             {
-                const choices = buildUpgradeChoices();
-                if (choices.length === 0) grantMaxBuildReward();
-                else choices[randInt(choices.length)].apply();
+                if (isMaxBuild())
+                {
+                    const choices = buildLimitBreakChoices();
+                    choices[randInt(choices.length)].apply();
+                }
+                else
+                {
+                    const choices = buildUpgradeChoices();
+                    if (choices.length === 0) grantMaxBuildReward();
+                    else choices[randInt(choices.length)].apply();
+                }
                 player.pendingLevelUps--;
             }
         }
@@ -3409,7 +3813,12 @@ function cellHash(x, y)
 
 function drawGround()
 {
-    const groundSprites = [sprites.tree1, sprites.tree2, sprites.tree3];
+    // Backdrop set comes from the current stage so swapping arenas is
+    // just data. Resolves sprite keys at draw time so a hot-loaded stage
+    // (theoretically) wouldn't need cached refs.
+    const keys = currentStage.backdropKeys;
+    const groundSprites = keys.map(k => sprites[k]).filter(s => s);
+    if (groundSprites.length === 0) return;
     const cam = cameraPos;
     const half = getCameraSize().scale(.5);
     const minX = max(Math.floor(cam.x - half.x), ARENA_MIN_X);
@@ -3423,7 +3832,7 @@ function drawGround()
         // ~1 tile per 9 cells (12% density) — keeps the floor sparse
         if ((h & 7) !== 0) continue;
         const which = (h >>> 3) % groundSprites.length;
-        // faint alpha so the forest reads as backdrop rather than competing
+        // faint alpha so the scatter reads as backdrop rather than competing
         // with gameplay sprites in front of it
         drawTile(vec2(x + .5, y + .5), vec2(1.4), groundSprites[which],
                  new Color(.75, .85, .75, .18), 0, false, undefined, undefined);
@@ -3458,7 +3867,8 @@ function drawWalls()
     }
     // higher y first → drawn first → lower screen rows draw on top
     positions.sort((a, b) => b.y - a.y);
-    for (const p of positions) drawTile(p, size, sprites.wall);
+    const borderSprite = sprites[currentStage.borderKey] || sprites.wall;
+    for (const p of positions) drawTile(p, size, borderSprite);
 }
 
 function drawWeaponVisuals()
@@ -3521,7 +3931,7 @@ function drawHUD()
     const remaining = max(0, runDuration - elapsedTime);
     const timerColor = remaining < 60 ? new Color(1, .3, .3) : WHITE;
     const rowY = pad + hpH + 22;
-    if (remaining > 0 && remaining < 10 && !reaperSpawned)
+    if (remaining > 0 && remaining < 10 && !finalBossSpawned)
     {
         const flash = sin(time * 12) > 0;
         drawTextScreen('☠️ REAPER ' + Math.ceil(remaining),
@@ -3554,12 +3964,63 @@ function drawHUD()
                    20, WHITE, 3, BLACK);
 }
 
+// Edge-of-screen indicators — needed once the camera can't show the whole
+// arena. Active boss / dropped chests / nearest gold barrel get an emoji
+// pinned to the screen edge in their direction so the player can hunt
+// them down. Skipped while a menu is up so it doesn't clutter pause/level-up.
+function drawOffScreenIndicators()
+{
+    if (isMenuVisible()) return;
+    const cs = mainCanvasSize;
+    const cx = cs.x / 2, cy = cs.y / 2;
+    const pad = 50;
+    const targets = [];
+    if (activeBoss && !activeBoss.destroyed)
+        targets.push({pos: activeBoss.pos, icon: '⚠️',
+                      color: new Color(1, .35, .35, 1)});
+    for (const obj of engineObjects)
+        if (obj instanceof Chest && !obj.destroyed)
+            targets.push({pos: obj.pos, icon: '🎁',
+                          color: new Color(1, .9, .35, 1)});
+    // Nearest barrel only — showing all ~12 at once would just be noise.
+    let nearestBarrel = null, nearestD2 = Infinity;
+    for (const b of breakables)
+    {
+        if (!b.isBarrel) continue;
+        const d = player.pos.distanceSquared(b.pos);
+        if (d < nearestD2) { nearestD2 = d; nearestBarrel = b; }
+    }
+    if (nearestBarrel)
+        targets.push({pos: nearestBarrel.pos, icon: '🛢️',
+                      color: new Color(1, .85, .25, 1)});
+
+    for (const t of targets)
+    {
+        const screen = worldToScreen(t.pos);
+        if (screen.x >= pad && screen.x <= cs.x - pad &&
+            screen.y >= pad && screen.y <= cs.y - pad) continue;
+        // Off-screen — project onto the inner rect edge along the
+        // center-to-target ray.
+        const dx = screen.x - cx;
+        const dy = screen.y - cy;
+        if (abs(dx) < .01 && abs(dy) < .01) continue;
+        const halfW = cs.x / 2 - pad;
+        const halfH = cs.y / 2 - pad;
+        const scale = min(halfW / max(abs(dx), .01),
+                          halfH / max(abs(dy), .01));
+        const ex = cx + dx * scale;
+        const ey = cy + dy * scale;
+        drawTextScreen(t.icon, vec2(ex, ey), 36, t.color, 4, BLACK);
+    }
+}
+
 function gameRenderPost()
 {
     if (gameOver) gameOverFrameCount++;
     else          gameOverFrameCount = 0;
 
     drawHUD();
+    drawOffScreenIndicators();
 
     if (playerAI)
     {
@@ -3571,6 +4032,31 @@ function gameRenderPost()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Debug helpers — call from the browser DevTools console. Both persist
+// immediately via saveMetaState() so a reload picks them up.
+window.giveCoins = function(amount)
+{
+    const n = (typeof amount === 'number' && amount > 0) ? Math.floor(amount) : 1000;
+    coins    += n;
+    coinsRun += n;
+    saveMetaState();
+    console.log('💰 +' + n + ' coins. Total: ' + coins);
+    return coins;
+};
+
+window.unlockAll = function()
+{
+    firstVictory = true;
+    // Every stage in the spine flips to "won" so every stage is unlocked
+    // (isStageUnlocked checks the prior stage's win).
+    for (const s of STAGES) stagesWon.add(s.key);
+    // Curse is a setting, not an unlock — leave it at the player's chosen
+    // tier rather than forcing it on.
+    saveMetaState();
+    console.log('🔓 All stages unlocked, Curse Mode available.');
+    return Array.from(stagesWon);
+};
+
 engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
 
 </script></body></html>
