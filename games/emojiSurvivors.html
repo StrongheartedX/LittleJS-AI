@@ -1717,7 +1717,7 @@ class DaggerSlashWeapon
         proj.size = vec2(1.2);
         // Mirror the sprite for left-facing throws so the dagger's blade
         // visually points the way it's flying instead of always up-right.
-        proj.mirror = this.facing > 0;
+        proj.mirror = this.facing < 0;
         // angleVelocity is PER-FRAME in LittleJS (engine line
         // `angle += angleVelocity *= angleDamping`), so 2 turns/sec at 60fps
         // is 4π / 60 rad/frame ≈ .209. Sign mirrors the throw direction so
@@ -2227,7 +2227,7 @@ class AxeWeapon
         // so straight-up and straight-down throws still get a consistent
         // sign. Default: no mirror (right-facing).
         const sign = this.facing.x !== 0 ? this.facing.x : this.facing.y;
-        proj.mirror = sign > 0;
+        proj.mirror = sign < 0;
         // Spin like the dagger — sign mirrors the throw direction so a
         // right/up throw spins clockwise and a left/down throw counter-
         // clockwise. angleVelocity is PER-FRAME, so 2 turns/sec = 4π / 60.
