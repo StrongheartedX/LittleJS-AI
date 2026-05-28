@@ -12,9 +12,9 @@
 'use strict';
 
 // debug settings
-const DEBUG_SPRITES = 0;
-const DEBUG_AUTOSTART = 0;
-const DEBUG_GOD_MODE_DEFAULT = 0;
+const DEBUG_SPRITES = 1;
+const DEBUG_AUTOSTART = 1;
+const DEBUG_GOD_MODE_DEFAULT = 1;
 
 // engine settings, do not remove
 debugWatermark = false;
@@ -72,6 +72,12 @@ function setupKinematicProp(obj)
     obj.angle         = 0;
     obj.setCollision(false, false, false, false);
 }
+
+// World-y of a ground-touching sprite's BASE — where the shadow sits, not
+// the sprite's center. Use this (not pos.y) for renderOrder on grounded
+// entities so big sprites like trees layer correctly against smaller ones
+// at the same world-y. Mirrors the .45 offset in drawShadows().
+function baseY(obj) { return obj.pos.y - obj.size.y * .45; }
 
 let player;
 
@@ -134,7 +140,7 @@ class Player extends EngineObject
         this.pos.x = clamp(this.pos.x, ARENA_MIN_X + .6, ARENA_MAX_X - .6);
         this.pos.y = clamp(this.pos.y, ARENA_MIN_Y + .6, ARENA_MAX_Y - .6);
 
-        this.renderOrder = -this.pos.y;
+        this.renderOrder = -baseY(this);
 
         if (playerAI && this.hp < 1) this.hp = 1;
 
@@ -244,7 +250,17 @@ const STAGES = [
         name: 'Meadow',
         emoji: '🌳',
         floorColor: hsl(.3, .35, .18),
-        backdropKeys: ['tree1', 'tree2', 'tree3'],
+        // groundPalette: [base, accent1, accent2] painted per cell as 1×1
+        // colored rects; roadColor overlays a few wiggling strips per run.
+        groundPalette: [hsl(.30, .35, .18), hsl(.32, .50, .24), hsl(.08, .35, .25)],
+        roadColor: hsl(.10, .25, .32),
+        // backdropProps: per-sprite size multiplier on propSize. Each key
+        // is picked with equal probability; the value scales propSize so a
+        // candle (mult .3) is small and a tree (mult 1.0) is full size.
+        backdropProps: {tree1: 1.0, tree2: 1.0},
+        // BackdropProps — y-sorted, ~3× the old scatter, ~1/10 the count.
+        propCount: 700,
+        propSize: 3.5,
         borderKey: 'wall',
         // Meadow keeps the original elapsed-time ramp; later stages are
         // mostly static. Keeps existing balance for the default stage.
@@ -260,7 +276,11 @@ const STAGES = [
         name: 'Graveyard',
         emoji: '⚰️',
         floorColor: hsl(.65, .04, .14),    // muted stone-blue
-        backdropKeys: ['graveStone', 'candle', 'tree2'],
+        groundPalette: [hsl(.65, .04, .14), hsl(.30, .22, .20), hsl(.65, .04, .09)],
+        roadColor: hsl(.10, .04, .28),     // pale cobble path
+        backdropProps: {deadFlower: .4, candle: .4, tree2: 1.0},
+        propCount: 550,
+        propSize: 3.5,
         borderKey: 'brick',
         mixFn: () => ({zombie:.22, skull:.18, ghost:.20, skeleton:.20,
                        bat:.10, ant:.05, snail:.05}),
@@ -275,7 +295,11 @@ const STAGES = [
         name: 'Beach',
         emoji: '🏖️',
         floorColor: hsl(.12, .35, .55),    // sand
-        backdropKeys: ['tree3', 'shell'],
+        groundPalette: [hsl(.12, .35, .55), hsl(.55, .35, .42), hsl(.12, .25, .68)],
+        roadColor: hsl(.08, .35, .35),     // wooden boardwalk
+        backdropProps: {tree3: 1.0, shell: .4},
+        propCount: 500,
+        propSize: 3.5,
         borderKey: 'tsunami',
         mixFn: () => ({duck:.18, crab:.20, octopus:.15, bat:.12,
                        clown:.10, ghost:.08, ant:.10, zombie:.07}),
@@ -290,7 +314,11 @@ const STAGES = [
         name: 'Frozen',
         emoji: '❄️',
         floorColor: hsl(.55, .25, .58),    // pale blue ice
-        backdropKeys: ['snowman', 'tree2'],
+        groundPalette: [hsl(.55, .25, .58), hsl(.55, .45, .72), hsl(.55, .15, .48)],
+        roadColor: hsl(.55, .10, .38),     // slush/ice trail
+        backdropProps: {snowman: .6, tree2: 1.0},
+        propCount: 500,
+        propSize: 3.5,
         borderKey: 'snowflake',
         mixFn: () => ({penguin:.22, iceImp:.20, bat:.15, ghost:.10,
                        skull:.10, zombie:.10, ant:.08, snail:.05}),
@@ -305,7 +333,11 @@ const STAGES = [
         name: 'Volcano',
         emoji: '🌋',
         floorColor: hsl(.02, .35, .15),   // charred obsidian-red
-        backdropKeys: ['volcano', 'boulder'],
+        groundPalette: [hsl(.02, .35, .15), hsl(.05, .75, .32), hsl(.0, 0, .07)],
+        roadColor: hsl(.06, .15, .25),     // dark stone path through the lava field
+        backdropProps: {volcano: .5, boulder: .5},
+        propCount: 450,
+        propSize: 3.5,
         borderKey: 'boulder',
         mixFn: () => ({fireImp:.30, skull:.15, clown:.10, snail:.08,
                        zombie:.10, bat:.12, ant:.05, ghost:.10}),
@@ -336,7 +368,7 @@ class Chest extends EngineObject
     update()
     {
         super.update();
-        this.renderOrder = -this.pos.y + 100;   // float above ground entities
+        this.renderOrder = -baseY(this) + 100;   // float above ground entities
         // bobbing wiggle so the chest catches the eye in a busy screen
         const age = time - this.spawnTime;
         this.angle = Math.sin(age * 4) * .12;
@@ -635,7 +667,7 @@ class Enemy extends EngineObject
         if (this.revivingTimer > 0)
         {
             this.revivingTimer -= 1 / 60;
-            this.renderOrder = -this.pos.y;
+            this.renderOrder = -baseY(this);
             return;
         }
         // tick status effects — priority order: freeze > burn > slow > none.
@@ -721,7 +753,7 @@ class Enemy extends EngineObject
 
         super.update();
 
-        this.renderOrder = -this.pos.y;
+        this.renderOrder = -baseY(this);
 
         // rolling integrator — advances with velocity.x so rolling enemies
         // (skulls) rotate clockwise when moving right, CCW when moving left.
@@ -1190,7 +1222,7 @@ class Pickup extends EngineObject
         {
             this.pickupTimer -= 1 / 60;
             super.update();
-            this.renderOrder = -this.pos.y;
+            this.renderOrder = -baseY(this);
             return;
         }
         // magnet — scaled by player.magnetMult passive
@@ -1206,7 +1238,7 @@ class Pickup extends EngineObject
 
         super.update();
 
-        this.renderOrder = -this.pos.y;
+        this.renderOrder = -baseY(this);
 
         // pickup
         if (dist < .8)
@@ -1517,7 +1549,8 @@ function drawShadows()
             obj instanceof Enemy ||
             obj instanceof Pickup ||
             obj instanceof Bomb ||
-            obj instanceof Chest;
+            obj instanceof Chest ||
+            obj instanceof BackdropProp;
         if (!isShadowed) continue;
         if (!isOnScreen(obj.pos, obj.size.scale(1.6))) continue;
         // shadow center sits at the bottom of the sprite
@@ -2419,7 +2452,7 @@ class Bomb extends EngineObject
     update()
     {
         super.update();
-        this.renderOrder = -this.pos.y;
+        this.renderOrder = -baseY(this);
 
         this.fuse -= 1 / 60;
         // pulse faster as the fuse runs out
@@ -2475,7 +2508,7 @@ class Breakable extends EngineObject
     update()
     {
         super.update();
-        this.renderOrder = -this.pos.y;
+        this.renderOrder = -baseY(this);
         // Breakables no longer chip on player contact in normal play —
         // only weapons damage them. The one exception is AI test mode:
         // the AI can't aim at a specific crate, so it would just clip
@@ -3017,7 +3050,7 @@ function tearDownRun()
             obj instanceof Chest || obj instanceof StarToss ||
             obj instanceof CometProjectile || obj instanceof NukeBomb ||
             obj instanceof NukeField || obj instanceof Breakable ||
-            obj instanceof LavaPatch)
+            obj instanceof LavaPatch || obj instanceof BackdropProp)
             obj.destroy();
     }
     chainFlashes.length = 0;
@@ -3062,6 +3095,10 @@ function startRun(hero, stage)
     // Stage-specific terrain hazards — for now only the volcano has lava.
     if (currentStage.lavaPatchCount)
         spawnLavaPatches(currentStage.lavaPatchCount);
+    // Reroll road layout per run and spawn the y-sorted backdrop props
+    // (trees / headstones / etc.) randomly across the arena.
+    rebuildRoadStrips();
+    spawnBackdropProps();
 
     setPlaying(true);
     hideAllMenus();
@@ -3277,7 +3314,7 @@ async function gameInit()
     sprites.tree2      = drawTextToTexture(57, '🌲', {description: 'an evergreen pine tree'});
     sprites.tree3      = drawTextToTexture(58, '🌴', {description: 'a palm tree'});
     sprites.wall       = drawTextToTexture(59, '⛰️', {description: 'a rocky mountain peak'});
-    sprites.graveStone = drawTextToTexture(60, '⚰️', {description: 'a brown coffin'});
+    sprites.deadFlower = drawTextToTexture(60, '🥀', {description: 'a dead flower'});
     sprites.candle     = drawTextToTexture(61, '🕯️', {description: 'a lit candle'});
     sprites.brick      = drawTextToTexture(62, '🧱', {description: 'a red brick block'});
     sprites.shell      = drawTextToTexture(63, '🐚', {description: 'a spiral seashell'});
@@ -3300,7 +3337,7 @@ async function gameInit()
     sounds.hurt      = new SoundGenerator({frequency: 120,  release: .18, noise: .35, volume: .55});
     sounds.bossSpawn = new SoundGenerator({frequency: 60,   release: 1.2, noise: .25, slide: -8, volume: .6});
     sounds.chest     = new SoundGenerator({frequency: 660,  release: .5,  pitchJump: 880, pitchJumpTime: .15, volume: .55});
-    sounds.gameOver  = new SoundGenerator({frequency: 220,  release: .9,  slide: -80, volume: .6});
+    sounds.gameOver  = new Sound([.7,,528,,.2,.6,,2.3,9,,-99,,.1,,,,,.92,.1,.16,112]);
     sounds.victory   = new SoundGenerator({frequency: 523,  release: .9,  pitchJump: 784, pitchJumpTime: .25, volume: .6});
 
     loadMetaState();
@@ -3311,6 +3348,10 @@ async function gameInit()
     player.weapons = [];
     player.passives = [];
     recomputeMultipliers();
+    // Seed the title-screen backdrop with road strips + props on the
+    // default stage. startRun rebuilds both when a real run begins.
+    rebuildRoadStrips();
+    spawnBackdropProps();
 
     // Title screen — stats refresh each time it's shown.
     createMenu({
@@ -4129,6 +4170,8 @@ function goToTitle()
     player.weapons = [];
     player.passives = [];
     recomputeMultipliers();
+    rebuildRoadStrips();
+    spawnBackdropProps();
 
     for (const id of ['gameover', 'victory'])
     {
@@ -4312,31 +4355,134 @@ function cellHash(x, y)
     return (x * 73856093 ^ y * 19349663) >>> 0;
 }
 
+// Y-sorted background prop (tree, snowman, etc.). Replaces the
+// per-cell scatter — fewer, larger, and walks behind via renderOrder so the
+// player and enemies can pass in front of / behind them like 2.5D depth.
+class BackdropProp extends EngineObject
+{
+    constructor(pos, sprite, size)
+    {
+        super(pos, vec2(size), sprite);
+        setupKinematicProp(this);
+        // Static prop — set order once, never moves. Use the base (where
+        // the shadow sits) so a big tree's canopy doesn't sort like it's
+        // hovering above shorter sprites at the same world-y.
+        this.renderOrder = -baseY(this);
+    }
+    render()
+    {
+        // Hundreds of props across the arena; only render the on-screen
+        // few. Pad the cull by the prop's own size since they're large.
+        if (!isOnScreen(this.pos, this.size.scale(1.2))) return;
+        drawEmoji(this.pos, this.size, this.tileInfo);
+    }
+}
+
+// Roads / paths painted over the ground palette. Rebuilt once per run in
+// startRun so each level has its own layout but it stays stable while
+// playing. Each strip is a wiggling band (horizontal or vertical).
+let roadStrips = [];
+function rebuildRoadStrips()
+{
+    roadStrips = [];
+    // 1–2 horizontal roads, sometimes a vertical one too.
+    const horizCount = randInt(1, 3);
+    for (let i = 0; i < horizCount; ++i)
+        roadStrips.push({
+            axis: 'h',
+            center: randInt(ARENA_MIN_Y + 15, ARENA_MAX_Y - 15),
+            halfWidth: randInt(2, 4),
+            wiggleAmp: rand(.5, 2.5),
+            wigglePhase: rand(2 * PI),
+        });
+    if (rand() < .6)
+        roadStrips.push({
+            axis: 'v',
+            center: randInt(ARENA_MIN_X + 20, ARENA_MAX_X - 20),
+            halfWidth: randInt(2, 4),
+            wiggleAmp: rand(.5, 3),
+            wigglePhase: rand(2 * PI),
+        });
+}
+function cellInRoad(x, y)
+{
+    for (const r of roadStrips)
+    {
+        if (r.axis === 'h')
+        {
+            const yC = r.center + sin(x * .15 + r.wigglePhase) * r.wiggleAmp;
+            if (abs(y - yC) <= r.halfWidth) return true;
+        }
+        else
+        {
+            const xC = r.center + sin(y * .15 + r.wigglePhase) * r.wiggleAmp;
+            if (abs(x - xC) <= r.halfWidth) return true;
+        }
+    }
+    return false;
+}
+
+// Spawn the stage's backdrop props (trees, headstones, etc.) at random
+// positions across the whole arena. Called once at run start.
+function spawnBackdropProps()
+{
+    const propMap = currentStage.backdropProps;
+    if (!propMap) return;
+    // Resolve sprite keys to [{sprite, sizeMult}] entries. Equal pick odds.
+    const entries = [];
+    for (const k in propMap)
+        if (sprites[k]) entries.push({sprite: sprites[k], sizeMult: propMap[k]});
+    if (!entries.length) return;
+    const count = currentStage.propCount || 500;
+    const baseSize = currentStage.propSize || 4.0;
+    const safeR2 = 25;     // keep a 5wu clearing around the player spawn
+    for (let i = 0; i < count; ++i)
+    {
+        let pos;
+        for (let attempt = 0; attempt < 4; ++attempt)
+        {
+            pos = vec2(rand(ARENA_MIN_X + 1, ARENA_MAX_X - 1),
+                       rand(ARENA_MIN_Y + 1, ARENA_MAX_Y - 1));
+            if (pos.lengthSquared() > safeR2) break;
+        }
+        const e = entries[randInt(entries.length)];
+        const size = baseSize * e.sizeMult * rand(.85, 1.2);
+        new BackdropProp(pos, e.sprite, size);
+    }
+}
+
 function drawGround()
 {
-    // Backdrop set comes from the current stage so swapping arenas is
-    // just data. Resolves sprite keys at draw time so a hot-loaded stage
-    // (theoretically) wouldn't need cached refs.
-    const keys = currentStage.backdropKeys;
-    const groundSprites = keys.map(k => sprites[k]).filter(s => s);
-    if (groundSprites.length === 0) return;
+    // Paint the visible arena cells as solid-color 1×1 rects from the
+    // stage's groundPalette. A coarse patch hash makes adjacent cells share
+    // a color so accents read as clumpy patches; road strips (rebuilt once
+    // per run) overlay a different color along wiggling bands.
+    const palette = currentStage.groundPalette;
+    if (!palette) return;
+    const roadColor = currentStage.roadColor;
     const cam = cameraPos;
     const half = getCameraSize().scale(.5);
     const minX = max(Math.floor(cam.x - half.x), ARENA_MIN_X);
     const maxX = min(Math.ceil(cam.x + half.x), ARENA_MAX_X);
     const minY = max(Math.floor(cam.y - half.y), ARENA_MIN_Y);
     const maxY = min(Math.ceil(cam.y + half.y), ARENA_MAX_Y);
+    // 1.01 sized cells so float rounding never opens a hairline gap.
+    const cellSize = vec2(1.02);
     for (let y = minY; y <= maxY; ++y)
     for (let x = minX; x <= maxX; ++x)
     {
-        const h = cellHash(x, y);
-        // ~1 tile per 9 cells (12% density) — keeps the floor sparse
-        if ((h & 7) !== 0) continue;
-        const which = (h >>> 3) % groundSprites.length;
-        // faint alpha so the scatter reads as backdrop rather than competing
-        // with gameplay sprites in front of it
-        drawTile(vec2(x + .5, y + .5), vec2(1.4), groundSprites[which],
-                 new Color(.75, .85, .75, .18), 0, false, undefined, undefined);
+        let color;
+        if (roadColor && cellInRoad(x, y))
+            color = roadColor;
+        else
+        {
+            // patch hash — 4×2 grid of shared cells so accents form clumps
+            const ph = cellHash(x >> 2, y >> 1) % 100;
+            color = ph < 65 ? palette[0]
+                  : ph < 88 ? palette[1]
+                  :           palette[2];
+        }
+        drawRect(vec2(x + .5, y + .5), cellSize, color);
     }
 }
 
@@ -4381,10 +4527,11 @@ function drawWeaponVisuals()
 
 function gameRender()
 {
-    // Shadow pass first — sits behind ground/walls/entities so every emoji
-    // gets grounded by a soft radial shadow under its feet.
-    drawShadows();
+    // Ground first (opaque colored cells), then shadows on top of it so the
+    // soft radial shadows still read against the tinted floor; otherwise the
+    // ground paint would erase any shadows drawn underneath.
     drawGround();
+    drawShadows();
     drawWalls();
     drawWeaponVisuals();
     drawChainFlashes();
