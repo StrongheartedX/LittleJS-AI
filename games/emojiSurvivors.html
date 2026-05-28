@@ -11,6 +11,8 @@
 <script>
 'use strict';
 
+const debugSprites = 1;
+
 // engine settings, do not remove
 debugWatermark = false;
 showEngineVersion = false;
@@ -2826,6 +2828,7 @@ async function gameInit()
 {
     saveDataInit('emojiSurvivors');
     initDrawToTexture(8);
+    debugSprites && showAtlasOverlay();
 
     // hero sprites — painted once at startup; HEROES[*].spriteKey selects
     // which one the player uses. Avoids any mid-game atlas re-upload.
@@ -2905,7 +2908,7 @@ async function gameInit()
     sprites.nuke        = drawToTexture(43, paintEmoji('☢️'), 'a radioactive trefoil');
     sprites.tsunami     = drawToTexture(44, paintEmoji('🌊'), 'a cresting blue wave');
     sprites.heartSpiral = drawToTexture(45, paintEmoji('💖'), 'a sparkling pink heart');
-showAtlasOverlay()
+
     // Tiered XP gems — same 💎 glyph baked at three hues so big gems pop in
     // a crowded field. The base 💎 (sprites.gem) stays as the small tier.
     sprites.gemMedium = drawToTexture(46, ctx =>
@@ -2931,12 +2934,15 @@ showAtlasOverlay()
     sprites.wall      = drawToTexture(35, paintEmoji('⛰️'), 'a rocky mountain peak');
 
     // New stages — backdrop scatter, border tile, signature enemies, bosses.
-    sprites.graveStone = drawToTexture(50, paintEmoji('🪦'), 'a stone grave marker');
+    // 🪦 headstone and 🪨 boulder are both Unicode 13.0 and don't render in
+    // older Windows emoji fonts — swapped to ⚰️ coffin and 🗻 stone hill so
+    // the atlas never bakes a blank cell.
+    sprites.graveStone = drawToTexture(50, paintEmoji('⚰️'), 'a brown coffin');
     sprites.candle     = drawToTexture(51, paintEmoji('🕯️'), 'a lit candle');
     sprites.brick      = drawToTexture(52, paintEmoji('🧱'), 'a red brick block');
     sprites.shell      = drawToTexture(53, paintEmoji('🐚'), 'a spiral seashell');
     sprites.snowman    = drawToTexture(54, paintEmoji('☃️'), 'a smiling snowman');
-    sprites.boulder    = drawToTexture(55, paintEmoji('🪨'), 'a grey boulder');
+    sprites.boulder    = drawToTexture(55, paintEmoji('🗻'), 'a stone hill');
     sprites.volcano    = drawToTexture(56, paintEmoji('🌋'), 'an erupting volcano');
     sprites.skeleton   = drawToTexture(57, paintEmoji('🦴'), 'a single white bone');
     sprites.crab       = drawToTexture(58, paintEmoji('🦀'), 'a red crab');
