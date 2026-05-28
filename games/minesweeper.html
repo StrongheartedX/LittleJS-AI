@@ -47,18 +47,18 @@ let endTime = 0;
 let isPlaying = false;
 let newBest = false;
 
-// Best-time storage — one literal localStorage key per tracked difficulty,
-// value is seconds as an integer. The launcher reads these via the literal
-// scoreKey path in index.html.
-const bestTimeKey = d => `minesweeper.bestTime.${d}`;
+// Best-time storage — one entry per tracked difficulty inside the per-game
+// save blob's `bestTimes` map, value is seconds as an integer.
 function getBestTime(d)
 {
-    const v = +localStorage.getItem(bestTimeKey(d));
+    const v = +((getSaveData().bestTimes || {})[d]);
     return v > 0 ? v : 0;
 }
 function setBestTime(d, seconds)
 {
-    localStorage.setItem(bestTimeKey(d), seconds|0);
+    const bestTimes = {...(getSaveData().bestTimes || {})};
+    bestTimes[d] = seconds|0;
+    saveData({bestTimes});
 }
 
 // sounds
@@ -302,6 +302,8 @@ function runSelfTests()
 ///////////////////////////////////////////////////////////////////////////////
 async function gameInit()
 {
+    saveDataInit('minesweeper');
+
     // prevent browser right click menu
     document.addEventListener('contextmenu', e=>e.preventDefault());
 
