@@ -39,7 +39,6 @@ const arenaSize = vec2(gridSize.x + .5, gridSize.y + 2); // playable grid + scor
 
 const backgroundColor = hsl(0, 0, .12);
 const minMatchCount = 3;
-const highScoreKey = 'match3BestScore';
 
 const fitCamera = () => cameraScale =
     min(mainCanvasSize.x / arenaSize.x, mainCanvasSize.y / arenaSize.y);
@@ -204,7 +203,7 @@ async function gameInit()
     gravity = vec2(0, -.004);
     canvasClearColor = backgroundColor;
 
-    bestScore = +(localStorage[highScoreKey] || 0);
+    bestScore = getSaveData().bestScore ?? 0;
 
     // Populate the board now so the title screen has gems behind it.
     gameReset();
@@ -419,7 +418,7 @@ function gameUpdate()
     if (score > bestScore)
     {
         bestScore = score;
-        localStorage[highScoreKey] = bestScore;
+        saveData({bestScore});
     }
 
     if (keyWasPressed('KeyR'))
