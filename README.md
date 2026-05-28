@@ -42,7 +42,7 @@ Each game is one self-contained HTML file — no build step, no external assets,
 - [tweakableGame.html](templates/tweakableGame.html) — live-tweak globals via an HTML slider overlay
 - [uiGame.html](templates/uiGame.html) — canvas-drawn UI (menus, sliders, dialogs)
 
-Mix in helper scripts to add features: `menus.js` (DOM menus), `soundGenerator.js` (procedural SFX), `textureGenerator.js` (sprite painter), `tweakables.js` (live value tweaking).
+Mix in helper scripts to add features: `menus.js` (DOM menus + best score + game-over dialog + setPlaying/quitToTitle), `gameFx.js` (procedural SFX + screen shake), `textureGenerator.js` (sprite painter), `tweakables.js` (live value tweaking).
 
 ## 🕹️ Featured Games Made With AI
 
