@@ -197,16 +197,13 @@ function checkWin()
         for (let i=0; i<mines.length; i++)
             if (mines[i]) flagged[i] = 1;
 
-        // Record best time for tracked difficulties (medium + hard).
-        if (difficulty === 'medium' || difficulty === 'hard')
+        // Record best time for the completed difficulty.
+        const seconds = Math.ceil(endTime - startTime);
+        const prev = getBestTime(difficulty);
+        if (!prev || seconds < prev)
         {
-            const seconds = Math.ceil(endTime - startTime);
-            const prev = getBestTime(difficulty);
-            if (!prev || seconds < prev)
-            {
-                setBestTime(difficulty, seconds);
-                newBest = true;
-            }
+            setBestTime(difficulty, seconds);
+            newBest = true;
         }
     }
 }
@@ -330,7 +327,7 @@ async function gameInit()
     };
 
     // Format a label that shows the best time after the difficulty name when
-    // one has been recorded. EASY isn't tracked, so it stays bare.
+    // one has been recorded.
     const diffLabel = (name, d) =>
     {
         const best = getBestTime(d);
@@ -342,7 +339,7 @@ async function gameInit()
         title: 'MINESWEEPER',
         dismissable: false,
         items: [
-            {type:'button', label:'EASY',   onClick: () => startDifficulty('easy',   9,  9, 10)},
+            {type:'button', id:'easyBtn',   label:'EASY',   onClick: () => startDifficulty('easy',   9,  9, 10)},
             {type:'button', id:'mediumBtn', label:'MEDIUM', onClick: () => startDifficulty('medium', 16, 16, 40)},
             {type:'button', id:'hardBtn',   label:'HARD',   onClick: () => startDifficulty('hard',   30, 16, 99)},
             {type:'separator'},
@@ -352,6 +349,7 @@ async function gameInit()
         // record from the previous round is reflected immediately.
         onShow: () =>
         {
+            titleMenu.getItem('easyBtn')  ?.setLabel(diffLabel('EASY',   'easy'));
             titleMenu.getItem('mediumBtn')?.setLabel(diffLabel('MEDIUM', 'medium'));
             titleMenu.getItem('hardBtn')  ?.setLabel(diffLabel('HARD',   'hard'));
         },
@@ -550,17 +548,14 @@ function gameRenderPost()
         drawTextScreen('You win! Press R to play again.', vec2(mainCanvasSize.x/2, mainCanvasSize.y-60), 52,
             hsl(.33,.6,.65), 6, hsl(0,0,0));
 
-        // For tracked difficulties, surface either NEW BEST! or current best.
-        if (difficulty === 'medium' || difficulty === 'hard')
-        {
-            const seconds = Math.ceil(endTime - startTime);
-            const best = getBestTime(difficulty);
-            const line = newBest
-                ? `NEW BEST! ${seconds}s on ${difficulty.toUpperCase()}`
-                : `${seconds}s — best ${best}s`;
-            drawTextScreen(line, vec2(mainCanvasSize.x/2, mainCanvasSize.y-110), 32,
-                newBest ? hsl(.15,.9,.7) : hsl(0,0,.85), 4, hsl(0,0,0));
-        }
+        // Surface either NEW BEST! or current best.
+        const seconds = Math.ceil(endTime - startTime);
+        const best = getBestTime(difficulty);
+        const line = newBest
+            ? `NEW BEST! ${seconds}s on ${difficulty.toUpperCase()}`
+            : `${seconds}s — best ${best}s`;
+        drawTextScreen(line, vec2(mainCanvasSize.x/2, mainCanvasSize.y-110), 32,
+            newBest ? hsl(.15,.9,.7) : hsl(0,0,.85), 4, hsl(0,0,0));
     }
 }
 
