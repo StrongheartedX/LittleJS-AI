@@ -10,6 +10,9 @@
 //   tweak('skyColor');                           // Color picker
 //   tweak('gravity', {min: -.05, max: .05});    // Vector2 paired
 //   tweakEngineDefaults();                       // common engine globals
+//                                               //   (no-op unless
+//                                               //   tweakShowEngineDefaults
+//                                               //   is set true first)
 //   tweakDivider('Player');                      // visual section label
 //
 // Type is auto-detected from the global's current value (number, boolean,
@@ -27,6 +30,11 @@ let tweakRowsEl = null;
 let tweakPanelVisible = false;
 let tweakStorageKey = null;
 let tweakStoredValues = null;
+// Engine-default tweaks (gravity, cameraScale, soundVolume, glEnable,
+// paused, debugOverlay) are off by default — most games don't want them
+// cluttering the panel. Set true BEFORE calling tweakEngineDefaults() in
+// gameInit to opt in.
+let tweakShowEngineDefaults = false;
 
 function tweak(path, options = {})
 {
@@ -87,6 +95,7 @@ function tweak(path, options = {})
 
 function tweakEngineDefaults()
 {
+    if (!tweakShowEngineDefaults) return;   // opt-in per the flag above
     const before = tweakRegistry.size;
     if (getByPath('gravity') instanceof Vector2)
         tweak('gravity', {min: -.05, max: .05});
