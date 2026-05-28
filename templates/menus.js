@@ -375,6 +375,8 @@ function createTitleMenu(config)
         formatBest:    null,           // n => string; defaults to 'Best: ' + n
     }, config);
 
+    // run user onPlay first, then auto-hide so consumers don't have to call
+    // hideMenu(id) themselves in every play handler
     const playFn = () =>
     {
         if (cfg.onPlay) cfg.onPlay();
