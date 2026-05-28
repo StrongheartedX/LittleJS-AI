@@ -66,6 +66,7 @@ let finishPos, finishNormal, finishTangent, finishSide;
 let pickups = [];
 let cars = [], player;
 let raceTime = 0, countdown = 3, countdownTimer = 0;
+let bestTime = 0;                                              // custom save key — see saveData call below
 let raceStarted = false, raceFinished = false, finalPlacements = [];
 
 let sndCount, sndGo, sndLap, sndBump, sndBoost, sndWin;
@@ -550,8 +551,12 @@ class Car extends Box2dObject
                     this.finishTime = raceTime;
                     if (this.isPlayer) {
                         sndWin.play(this.pos);
-                        // Best time: lower is better. Only save if first finish or beat previous.
-                        submitBestScore(raceTime, {lowerIsBetter: true});
+                        // Custom save key: bestTime (not the unified bestScore).
+                        // Lower is better — save on first finish or new record.
+                        if (bestTime === 0 || raceTime < bestTime) {
+                            bestTime = raceTime;
+                            saveData({bestTime});
+                        }
                     }
                 }
             }
@@ -696,6 +701,7 @@ function setupRace()
 async function gameInit()
 {
     saveDataInit('microRacer');
+    bestTime = getSaveData().bestTime ?? 0;
     // setup box2d before any physics objects (top-down — engine's gravity already vec2(0,0))
     await box2dInit();
 
@@ -730,9 +736,18 @@ function buildMenus()
 
     installAutoPause();
 
+    // Custom-key best-time display: showBest:true on createTitleMenu only reads
+    // the unified `bestScore` key. Since microRacer stores its record under
+    // `bestTime` (custom key — lower is better), wire the label by hand.
+    const fmtBest = t => t > 0 ? `Best: ${t.toFixed(2)}s` : 'Best: —';
     createTitleMenu({
         title: 'MICRO RACER',
         subtitle: '',
+        itemsBefore: [{type:'label', id:'bestLabel', text: fmtBest(bestTime)}],
+        onShow: () => {
+            const lbl = getMenu('title')?.getItem('bestLabel');
+            if (lbl) lbl.setLabel(fmtBest(bestTime));
+        },
         onPlay: startGame,
         revealOnClick: false,
     });
