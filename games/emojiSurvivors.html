@@ -1100,7 +1100,7 @@ function applyRandomBuff(pos)
         () => {
             const heal = player.maxHp - player.hp;
             player.hp = player.maxHp;
-            toastBuff('❤️', 'FULL HEAL', '+' + Math.ceil(heal) + ' HP');
+            toastBuff('🍔', 'FULL MEAL', '+' + Math.ceil(heal) + ' HP');
         },
         () => {
             timeSlowTimer = 5;
@@ -1141,6 +1141,12 @@ function toastBuff(icon, title, text)
         showMenuToast({icon, title, text, duration: 2.5, position: 'bottom-right'});
 }
 
+// Brief un-grabbable window applied to newly-spawned pickups. Read once by
+// the Pickup constructor; reset to 0 by callers when they're done bracketing
+// a spawn burst. Lets crates / barrels drop their loot and have the player
+// see what fell out before sucking it all up.
+let pickupSpawnDelay = 0;
+
 class Pickup extends EngineObject
 {
     constructor(pos, sprite, kind, value, sizeMult = 1)
@@ -1153,6 +1159,9 @@ class Pickup extends EngineObject
         this.magnetting = false;
         // per-instance phase so a pile of dropped gems doesn't sparkle in sync
         this.sparklePhase = rand(2 * PI);
+        // Initial pickup-block window (0 by default). Set via the global
+        // pickupSpawnDelay hint so the spawning code can bracket-set it.
+        this.pickupTimer = pickupSpawnDelay;
     }
 
     render()
@@ -1178,6 +1187,16 @@ class Pickup extends EngineObject
 
     update()
     {
+        // Crate / barrel drops set a brief pickupTimer so the player gets
+        // a moment to see what fell out before it's vacuumed up. Skip both
+        // magnet AND pickup while it's running.
+        if (this.pickupTimer > 0)
+        {
+            this.pickupTimer -= 1 / 60;
+            super.update();
+            this.renderOrder = -this.pos.y;
+            return;
+        }
         // magnet — scaled by player.magnetMult passive
         const toPlayer = player.pos.subtract(this.pos);
         const dist = toPlayer.length();
@@ -2519,7 +2538,13 @@ class Breakable extends EngineObject
         {
             const table    = this.isBarrel ? BARREL_DROP_TABLE   : CRATE_DROP_TABLE;
             const fallback = this.isBarrel ? barrelCoinFallback  : crateCoinFallback;
+            // Brief un-grabbable window on every loot pickup spawned inside
+            // this rollDrop — Pickup's constructor reads the hint. Reset
+            // immediately after so future enemy-kill drops grab as fast as
+            // they used to (only crate/barrel loot needs the breather).
+            pickupSpawnDelay = .45;
             rollDrop(table, this.pos.copy(), this, fallback);
+            pickupSpawnDelay = 0;
             if (sounds.chest && sounds.chest.play) sounds.chest.play(this.pos);
         }
         super.destroy();
@@ -3473,7 +3498,7 @@ async function gameInit()
             label: h.emoji + '  ' + h.name + ' — ' + h.blurb,
             title: h.unlock && !isHeroUnlocked(h)
                 ? '🔒 ' + h.unlockHint
-                : 'Starts with ' + h.weapon,
+                : 'Starts with ' + displayNameForWeapon(h.weapon),
             onClick: () => onHeroPicked(h),
         })).concat([
             {type: 'separator'},
@@ -3564,16 +3589,22 @@ async function gameInit()
 // per name. Adding a weapon = one row here (plus its class) instead of
 // editing three parallel switch chains.
 const WEAPON_INFO = {
-    Fireball:       {ctor: FireballWeapon,       emoji: '🔥'},
-    FishOrbit:      {ctor: FishOrbitWeapon,      emoji: '🐟'},
-    ChainLightning: {ctor: ChainLightningWeapon, emoji: '⚡'},
-    PizzaToss:      {ctor: PizzaTossWeapon,      emoji: '🍕'},
-    IceCube:        {ctor: IceCubeWeapon,        emoji: '🧊'},
-    Bomb:           {ctor: BombWeapon,           emoji: '💣'},
-    DaggerSlash:    {ctor: DaggerSlashWeapon,    emoji: '🗡️'},
-    StarToss:       {ctor: StarTossWeapon,       emoji: '⭐'},
-    HeartDrain:     {ctor: HeartDrainWeapon,     emoji: '💓'},
+    Fireball:       {ctor: FireballWeapon,       emoji: '🔥', displayName: 'Fireball'},
+    FishOrbit:      {ctor: FishOrbitWeapon,      emoji: '🐟', displayName: 'Fish Orbit'},
+    ChainLightning: {ctor: ChainLightningWeapon, emoji: '⚡', displayName: 'Chain Lightning'},
+    PizzaToss:      {ctor: PizzaTossWeapon,      emoji: '🍕', displayName: 'Pizza Toss'},
+    IceCube:        {ctor: IceCubeWeapon,        emoji: '🧊', displayName: 'Ice Cube'},
+    Bomb:           {ctor: BombWeapon,           emoji: '💣', displayName: 'Bomb'},
+    DaggerSlash:    {ctor: DaggerSlashWeapon,    emoji: '🗡️', displayName: 'Dagger Slash'},
+    StarToss:       {ctor: StarTossWeapon,       emoji: '⭐', displayName: 'Star Toss'},
+    HeartDrain:     {ctor: HeartDrainWeapon,     emoji: '💓', displayName: 'Heart Drain'},
 };
+
+function displayNameForWeapon(name)
+{
+    const info = WEAPON_INFO[name];
+    return info && info.displayName ? info.displayName : name;
+}
 const ALL_WEAPONS = Object.keys(WEAPON_INFO);
 
 function makeWeaponByName(name)
@@ -3621,7 +3652,7 @@ const PASSIVE_DESCRIPTIONS = {
     'Sneaker':    '+10% move speed per level.',
     'Sprout':     '+12% XP gain per level.',
     'Plus One':   '+1 fan-shot projectile per level (affects 🍕 and ⭐ family).',
-    'Snack':      '+25% heart-pickup healing per level.',
+    'Snack':      '+25% food-pickup healing per level.',
 };
 
 // Fan weapons — the only ones Plus One affects. Used to gate Plus One offers
@@ -3686,7 +3717,7 @@ function buildUpgradeChoices()
             if (have.has(name)) continue;
             choices.push({
                 key: 'wnew:' + name,
-                label: emojiForWeapon(name) + ' Unlock ' + name + ' (Lv 1)',
+                label: emojiForWeapon(name) + ' Unlock ' + displayNameForWeapon(name) + ' (Lv 1)',
                 title: WEAPON_DESCRIPTIONS[name] || '',
                 apply: () => player.weapons.push(makeWeaponByName(name)),
             });
