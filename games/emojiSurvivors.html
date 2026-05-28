@@ -2659,17 +2659,17 @@ async function gameInit()
     sprites.nuke        = drawToTexture(43, paintEmoji('☢️'), 'a radioactive trefoil');
     sprites.tsunami     = drawToTexture(44, paintEmoji('🌊'), 'a cresting blue wave');
     sprites.heartSpiral = drawToTexture(45, paintEmoji('💖'), 'a sparkling pink heart');
-
+showAtlasOverlay()
     // Tiered XP gems — same 💎 glyph baked at three hues so big gems pop in
     // a crowded field. The base 💎 (sprites.gem) stays as the small tier.
     sprites.gemMedium = drawToTexture(46, ctx =>
     {
-        ctx.filter = 'hue-rotate(40deg) saturate(1.3)';
+        ctx.filter = 'hue-rotate(260deg) saturate(1.3)';
         paintEmoji('💎')(ctx);
     }, 'a warm-tinted diamond gem');
     sprites.gemLarge = drawToTexture(47, ctx =>
     {
-        ctx.filter = 'hue-rotate(180deg)';
+        ctx.filter = 'hue-rotate(160deg)';
         paintEmoji('💎')(ctx);
     }, 'a hue-shifted diamond gem');
 
