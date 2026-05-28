@@ -992,24 +992,31 @@ function bindPauseKey(opts)
 
 const TOAST_DURATION_DEFAULT = 5;
 const TOAST_SLIDE_MS = 300;
-const toastQueue = [];
-let currentToastEl = null;
-let toastTimer = 0;
+// One queue per screen corner so toasts in different corners don't block
+// each other — a bottom-left boss banner can show concurrently with a
+// bottom-right pickup toast. Each corner serializes within itself so
+// stacked entries in the same position still queue up.
+const toastQueues  = {};   // position → array of pending opts
+const toastCurrent = {};   // position → currently-showing element (or null)
+const toastTimers  = {};   // position → setTimeout handle for the active toast
 
 function showMenuToast(options)
 {
     initMenuSystem();
-    toastQueue.push(options || {});
-    if (!currentToastEl) processToastQueue();
+    const opts = options || {};
+    const position = opts.position || 'top-left';
+    if (!toastQueues[position]) toastQueues[position] = [];
+    toastQueues[position].push(opts);
+    if (!toastCurrent[position]) processToastQueue(position);
 }
 
-function processToastQueue()
+function processToastQueue(position)
 {
-    if (!toastQueue.length) { currentToastEl = null; return; }
-    const opts = toastQueue.shift();
+    const queue = toastQueues[position];
+    if (!queue || !queue.length) { toastCurrent[position] = null; return; }
+    const opts = queue.shift();
 
     const el = document.createElement('div');
-    const position = opts.position || 'top-left';
     el.className = 'ljs-toast pos-' + position;
 
     if (opts.icon)
@@ -1039,7 +1046,7 @@ function processToastQueue()
     el.appendChild(content);
 
     menuSystemRoot.appendChild(el);
-    currentToastEl = el;
+    toastCurrent[position] = el;
 
     // Force a layout flush before adding the .visible class so the slide-in
     // transition actually plays. requestAnimationFrame queues us for after
@@ -1048,14 +1055,14 @@ function processToastQueue()
     requestAnimationFrame(() => el.classList.add('visible'));
 
     const duration = (opts.duration || TOAST_DURATION_DEFAULT) * 1000;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() =>
+    clearTimeout(toastTimers[position]);
+    toastTimers[position] = setTimeout(() =>
     {
         el.classList.remove('visible');
         setTimeout(() =>
         {
             el.remove();
-            processToastQueue();
+            processToastQueue(position);
         }, TOAST_SLIDE_MS);
     }, duration);
 }

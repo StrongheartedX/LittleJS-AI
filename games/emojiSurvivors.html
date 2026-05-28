@@ -11,7 +11,10 @@
 <script>
 'use strict';
 
-const debugSprites = 1;
+// debug settings
+const DEBUG_SPRITES = 0;
+const DEBUG_AUTOSTART = 0;
+const DEBUG_GOD_MODE_DEFAULT = 0;
 
 // engine settings, do not remove
 debugWatermark = false;
@@ -29,13 +32,6 @@ canvasMaxSize = vec2(2048, 2048);
 // that direction" scheme instead of the built-in analog touch gamepad.
 // Disabled here; see touchDirection() below.
 touchGamepadEnable = false;
-
-// ─── Debug flags ────────────────────────────────────────────────────────
-// Skip the title / hero-select / stage-select flow at startup and drop
-// the player straight into a run with the first hero (🙂 Smiley) on the
-// first stage (Meadow). Useful when iterating on gameplay code so you
-// don't have to click through three menus every reload.
-const DEBUG_AUTOSTART = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 // EMOJI SURVIVORS
@@ -3079,7 +3075,7 @@ let playerAI = false;
 // takes no damage AND no contact reaction at all — same gate as the AI
 // test mode so hurt-flash, hurt-sound, and the enemy knockback bounce are
 // all skipped, not just the HP subtraction.
-let godMode = false;
+let godMode = DEBUG_GOD_MODE_DEFAULT;
 
 // Smoothed heading for the AI auto-player so a goal-switch doesn't flip
 // direction abruptly. The AI itself just chases the nearest loot; see
@@ -3160,7 +3156,7 @@ async function gameInit()
 {
     saveDataInit('emojiSurvivors');
     initDrawToTexture(8);
-    debugSprites && showAtlasOverlay();
+    DEBUG_SPRITES && showAtlasOverlay();
 
     // hero sprites — painted once at startup; HEROES[*].spriteKey selects
     // which one the player uses. Avoids any mid-game atlas re-upload.
