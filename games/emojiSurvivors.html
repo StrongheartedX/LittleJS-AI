@@ -262,7 +262,7 @@ const STAGES = [
     {
         key: 'graveyard',
         name: 'Graveyard',
-        emoji: '🪦',
+        emoji: '⚰️',
         floorColor: hsl(.65, .04, .14),    // muted stone-blue
         backdropKeys: ['graveStone', 'candle', 'tree2'],
         borderKey: 'brick',
@@ -2260,12 +2260,9 @@ class Breakable extends EngineObject
             additive = new Color(.85, .85, .85, 0);
         }
         drawEmoji(this.pos, this.size, this.tileInfo, WHITE, additive);
-        if (this.isBarrel)
-        {
-            drawSparkleRing(this.pos, this.size.x * .8,
-                            time + this.bobPhase, 1.2,
-                            new Color(.55, .95, 1, 1));
-        }
+        // Barrel sparkle ring removed 2026-05-28 — read as confusing motion
+        // around the prop. The cyan breathing additive is enough to
+        // distinguish a barrel from a chest's gold pulse + sparkle.
     }
 
     takeDamage(amount)
@@ -2401,8 +2398,8 @@ function spawnLavaPatches(count)
 
 function preSpawnBreakables()
 {
-    const totalCrates  = 30;
-    const totalBarrels = 12;
+    const totalCrates  = 18;       // tuned down 2026-05-28 — felt cluttered
+    const totalBarrels = 6;
     const playerSafeRadiusSq = 36;   // keep a 6 wu clearing around (0,0)
     for (let i = 0; i < totalCrates + totalBarrels; ++i)
     {
@@ -2642,7 +2639,7 @@ function updateSpawner()
 let magnetRadius = 3;
 let playerSpeed = 6;
 let playerMaxHp = 100;
-let enemySpawnIntervalBase = 1.0;
+let enemySpawnIntervalBase = .6;   // bumped 2026-05-28 — early game felt sparse
 let xpToNextBase = 5;
 let fireballDamage = 2;
 let pizzaSpinRate = .4;        // rad/sec tumble for PizzaToss + SpicyPizza slices
