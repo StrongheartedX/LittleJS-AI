@@ -857,6 +857,20 @@ let activeCategory = 'all'; // sidebar filter
 // Locale-aware number formatter for high-score badges ("1,234,567").
 const numFmt = new Intl.NumberFormat();
 
+// scoreKeys containing "time" (e.g. 'emojiSurvivors.bestTime',
+// 'minesweeper.bestTimes.hard') are durations in seconds — show a stopwatch
+// and format M:SS instead of a raw number with a trophy.
+const isTimeScore = g => g.scoreKey && /time/i.test(g.scoreKey);
+const scoreEmoji = g => isTimeScore(g) ? '⏱️' : '🏆';
+// Mirrors littlejs.js's formatTime (M:SS). Inlined because index.html doesn't
+// load the engine.
+function formatTime(t) {
+  const sign = t < 0 ? '-' : '';
+  t = Math.abs(t) | 0;
+  return sign + (t / 60 | 0) + ':' + (t % 60 < 10 ? '0' : '') + (t % 60);
+}
+const formatScore = (g, n) => isTimeScore(g) ? formatTime(n) : numFmt.format(n);
+
 // Read a game's high score. Supports both:
 //   scoreKey:'somegame.bestField'    → for unmigrated games, reads localStorage[scoreKey] literally
 //   scoreKey:'robotron.bestScore'    → tries the literal key first; if absent, walks dotted
@@ -925,7 +939,7 @@ function makeCard(g) {
     const body = card.querySelector('.body');
     const badge = document.createElement('div');
     badge.className = 'score-badge';
-    badge.textContent = '🏆 ' + numFmt.format(score);
+    badge.textContent = scoreEmoji(g) + ' ' + formatScore(g, score);
     body.insertBefore(badge, body.firstChild);
   }
   const chipsEl = card.querySelector('.chips');
@@ -1030,7 +1044,7 @@ function makeTile(g, index) {
   if (score != null) {
     const badge = document.createElement('div');
     badge.className = 'score-badge';
-    badge.textContent = '🏆 ' + numFmt.format(score);
+    badge.textContent = scoreEmoji(g) + ' ' + formatScore(g, score);
     const info = tile.querySelector('.info');
     info.insertBefore(badge, info.querySelector('.desc'));
   }
@@ -1147,7 +1161,7 @@ function makeScoreTile(g, score, index) {
     '</div>';
   tile.querySelector('.emoji').textContent = g.emoji || '';
   tile.querySelector('.name').textContent = g.name;
-  tile.querySelector('.score-big').textContent = numFmt.format(score);
+  tile.querySelector('.score-big').textContent = scoreEmoji(g) + ' ' + formatScore(g, score);
   const cat = catByKey[g.category];
   if (cat) tile.style.setProperty('--cat-color', cat.color);
   if (index != null) tile.style.setProperty('--i', Math.min(index, 12));
