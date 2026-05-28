@@ -1180,6 +1180,35 @@ let _gameSaveData = null;
 let _globalSaveData = null;
 const _savePreInitWarned = new Set();
 
+// ============================================================================
+// Game flow helpers — extracted from the same boilerplate that lived in
+// ~50 games as let isPlaying / function setPlaying / function quitToTitle.
+// ============================================================================
+
+let _isPlaying = false;
+
+function isPlaying() { return _isPlaying; }
+
+function setPlaying(p)
+{
+    _isPlaying = !!p;
+    // Match the boardGame.html convention: a toolbar with id 'hud' is
+    // gameplay-only and auto-hides while at title / paused / dialogs.
+    const hud = getToolbar('hud');
+    if (hud) p ? hud.show() : hud.hide();
+}
+
+// Single canonical quit-to-title flow. `onCleanup` is an optional sync
+// callback for game-specific teardown (e.g. cancel an AI search loop).
+function quitToTitle(onCleanup)
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    setPlaying(false);
+    if (typeof onCleanup === 'function') onCleanup();
+    showMenu('title');
+}
+
 function _warnPreInitOnce(key, msg)
 {
     if (_savePreInitWarned.has(key)) return;
