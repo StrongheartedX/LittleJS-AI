@@ -374,36 +374,18 @@ async function gameInit()
         onPlay: playFromTitle,
         revealOnClick: false,
         canReveal: () => !isPlaying(),
-        itemsBefore: [
-            {type:'label', id:'bestLabel', text:'Best: ' + getBestScore()},
-        ],
+        showBest: true,
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
         ],
-        onShow: () =>
-        {
-            const lbl = getMenu('title').getItem('bestLabel');
-            lbl && lbl.setLabel('Best: ' + getBestScore());
-        },
     });
 
     // ---------- Options ----------
     createOptionsMenu({
         persistKey: 'volume',
-        extraItems: [
-            {type:'separator'},
-            {type:'button', label:'RESET BEST',
-                onClick: () => showConfirmDialog({
-                    message: 'Erase your best score?',
-                    onYes: () =>
-                    {
-                        resetBestScore();
-                        const lbl = getMenu('title').getItem('bestLabel');
-                        lbl && lbl.setLabel('Best: 0');
-                    },
-                })},
-        ],
+        showResetBest: true,
+        resetBestMessage: 'Erase your best score?',
     });
 
     // ---------- About ----------

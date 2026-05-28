@@ -608,9 +608,8 @@ function quitToTitleWithCleanup()
 {
     quitToTitle(() => {
         // Reset for attract-mode rendering — a frozen world, not a black canvas.
+        // Best-label refresh is handled automatically by showBest in the title menu.
         resetGame();
-        const t = getMenu('title');
-        if (t) t.getItem('bestLabel')?.setLabel(`Best: ${getBestScore()}`);
     });
 }
 
@@ -636,9 +635,7 @@ async function gameInit()
         subtitle: 'Clear all 5 levels, then loop with rising speed',
         revealOnClick: false,
         canReveal: () => !isPlaying(),
-        itemsBefore: [
-            {type:'label', id:'bestLabel', text:`Best: ${getBestScore()}`},
-        ],
+        showBest: true,
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},

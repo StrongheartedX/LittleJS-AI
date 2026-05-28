@@ -688,10 +688,8 @@ async function gameInit() {
         revealOnClick: false,
         onPlay: () => { startGame(); },
         canReveal: () => !isPlaying(),
-        itemsBefore: [
-            { type: 'label', id: 'bestLabel', text: `BEST: ${getBestScore()}`,
-              onUpdate: el => { el.textContent = `BEST: ${getBestScore()}`; } },
-        ],
+        showBest: true,
+        formatBest: n => 'BEST: ' + n,
         items: [
             { type: 'button', label: 'OPTIONS', onClick: () => pushMenu('options') },
             { type: 'button', label: 'HOW TO PLAY', onClick: () => pushMenu('about') },

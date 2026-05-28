@@ -2408,18 +2408,12 @@ function buildMenus()
         onPlay: startGame,
         revealOnClick: false,
         canReveal: () => !isPlaying(),
-        itemsBefore: [
-            {type:'label', id:'bestLabel', text:'BEST 0'},
-        ],
+        showBest: true,
+        formatBest: n => 'BEST ' + n,
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'HOW TO PLAY', onClick: () => pushMenu('about')},
         ],
-        onShow: () =>
-        {
-            const m = getMenu('title');
-            if (m) m.getItem('bestLabel')?.setLabel(`BEST ${getBestScore()}`);
-        },
     });
 
     // Options menu (shared between title and pause)

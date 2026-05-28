@@ -391,14 +391,7 @@ async function gameInit()
         playLabel: 'PLAY',
         revealOnClick: false,
         canReveal: () => gamePhase !== 'playing',
-        itemsBefore: [
-            {type:'label', id:'bestLabel', text:`Best: ${getBestScore()}`},
-        ],
-        onShow: () =>
-        {
-            const m = getMenu('title');
-            m.getItem('bestLabel').setLabel(`Best: ${getBestScore()}`);
-        },
+        showBest: true,
         onPlay: () => startGame(),
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
@@ -409,16 +402,7 @@ async function gameInit()
     // ----- options menu -----
     createOptionsMenu({
         persistKey: 'volume',
-        extraItems: [
-            {type:'separator'},
-            {type:'button', label:'RESET BEST', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Reset best score?',
-                    onYes: () => resetBestScore(),
-                });
-            }},
-        ],
+        showResetBest: true,
     });
 
     // ----- about -----

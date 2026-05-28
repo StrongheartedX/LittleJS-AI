@@ -211,9 +211,7 @@ async function gameInit()
     createTitleMenu({
         title: 'MATCH 3',
         subtitle: 'Swap adjacent gems to line up 3+ in a row',
-        itemsBefore: [
-            {type:'label', id:'bestLabel', text:'Best: ' + getBestScore()},
-        ],
+        showBest: true,
         items: [
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'ABOUT',   onClick: () => pushMenu('about')},
@@ -221,7 +219,6 @@ async function gameInit()
         // Show the title immediately instead of waiting for a click. Audio
         // is still gated by browser policy until the first user interaction.
         revealOnClick: false,
-        onShow: () => getMenu('title').getItem('bestLabel').setLabel('Best: ' + getBestScore()),
         onPlay: () => { gameReset(); setPlaying(true); },
     });
 
