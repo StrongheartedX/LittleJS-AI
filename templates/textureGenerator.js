@@ -145,7 +145,7 @@ function showAtlasOverlay(visible = true)
         atlasCanvas.style.cssText =
             'position:fixed;top:8px;right:8px;width:25vmin;height:25vmin;' +
             'border:2px solid #f0a;pointer-events:none;z-index:9999;' +
-            'background:rgba(0,0,0,.6);image-rendering:auto;';
+            'background:rgba(128,128,128,.5);image-rendering:auto;';
         document.body.appendChild(atlasCanvas);
     }
     else if (atlasCanvas.parentNode)
