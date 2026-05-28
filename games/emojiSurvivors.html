@@ -2509,13 +2509,9 @@ function startRun(hero)
 // an automatic restart ~1.5s after death so a long balance pass loops.
 let playerAI = false;
 
-// The AI commits to a destination point and walks toward it until the next
-// retarget. This prevents per-frame fluctuations in enemy positions from
-// flipping the heading every frame (which used to show as visible jitter
-// even with EMA smoothing). Retargets fire on a timer, on arrival, or when
-// an enemy gets dangerously close.
-let aiTargetPos = null;
-let aiNextRetargetTime = 0;
+// Smoothed heading for the AI auto-player so a goal-switch doesn't flip
+// direction abruptly. The AI itself just chases the nearest loot; see
+// aiDirection() below.
 let aiSmoothedDir = vec2(1, 0);
 
 // Pointer direction — press anywhere on the canvas and the player walks
@@ -2536,93 +2532,44 @@ function touchDirection()
     return vec2(dx / len, -dy / len);
 }
 
-const AI_RETARGET_NORMAL    = .55;   // seconds between target picks in normal play
-const AI_RETARGET_EMERGENCY = .2;    // shorter window when something is very close
-const AI_EMERGENCY_DIST_SQ  = 16;    // 4 units — recompute path more often inside this radius
-const AI_ARRIVE_DIST_SQ     = 1.5 * 1.5;
-const AI_LOOKAHEAD          = 5;     // how far ahead of the player the destination sits
-
 function aiDirection()
 {
-    // Recompute the destination periodically rather than every frame.
-    let emergency = false;
-    for (const e of enemies)
+    // AI is invuln in test mode, so there's no reason to fear enemies —
+    // chasing loot keeps it moving and naturally pulls weapons through the
+    // swarm. Priority: a real Pickup > a Breakable (loot source) > the
+    // nearest enemy (so weapons have something to fire at). Falls back to
+    // origin if the arena is completely clean.
+    let goal = null;
+    let goalD2 = Infinity;
+
+    for (const obj of engineObjects)
     {
-        if (e.isBreakable) continue;   // a nearby crate is loot, not an emergency
-        if (e.pos.distanceSquared(player.pos) < AI_EMERGENCY_DIST_SQ)
-        { emergency = true; break; }
+        if (!(obj instanceof Pickup) || obj.destroyed) continue;
+        const d = player.pos.distanceSquared(obj.pos);
+        if (d < goalD2) { goalD2 = d; goal = obj.pos; }
     }
-    const arrived = aiTargetPos && aiTargetPos.distanceSquared(player.pos) < AI_ARRIVE_DIST_SQ;
-
-    if (!aiTargetPos || time >= aiNextRetargetTime || emergency || arrived)
+    if (!goal)
     {
-        aiNextRetargetTime = time + (emergency ? AI_RETARGET_EMERGENCY : AI_RETARGET_NORMAL);
-
-        let force = vec2();
-
-        // repel from enemies; weighted by threat (damage) and falloff^2
-        const dangerRange = 8;
-        let closestEnemy = null, closestEnemyDist = Infinity;
+        for (const b of breakables)
+        {
+            const d = player.pos.distanceSquared(b.pos);
+            if (d < goalD2) { goalD2 = d; goal = b.pos; }
+        }
+    }
+    if (!goal)
+    {
         for (const e of enemies)
         {
             if (e.isBreakable) continue;
-            const away = player.pos.subtract(e.pos);
-            const d = away.length();
-            if (d < closestEnemyDist) { closestEnemyDist = d; closestEnemy = e; }
-            if (d < dangerRange && d > .01)
-            {
-                const closeness = (dangerRange - d) / dangerRange;
-                const weight = 1 + e.dmg / 8;
-                force = force.add(away.normalize(closeness * closeness * weight));
-            }
+            const d = player.pos.distanceSquared(e.pos);
+            if (d < goalD2) { goalD2 = d; goal = e.pos; }
         }
-
-        // attract to nearby gems and hearts
-        const lureRange = 12;
-        for (const obj of engineObjects)
-        {
-            if (!(obj instanceof Pickup)) continue;
-            const toward = obj.pos.subtract(player.pos);
-            const d = toward.length();
-            if (d < lureRange && d > .01)
-            {
-                const pull = .35 * (lureRange - d) / lureRange;
-                force = force.add(toward.normalize(pull));
-            }
-        }
-
-        // arena wall repulsion so the AI doesn't trap itself in a corner
-        const wallBuf = 5;
-        const dxMin = player.pos.x - ARENA_MIN_X;
-        const dxMax = ARENA_MAX_X - player.pos.x;
-        const dyMin = player.pos.y - ARENA_MIN_Y;
-        const dyMax = ARENA_MAX_Y - player.pos.y;
-        if (dxMin < wallBuf) force = force.add(vec2((wallBuf - dxMin) / wallBuf, 0));
-        if (dxMax < wallBuf) force = force.add(vec2(-(wallBuf - dxMax) / wallBuf, 0));
-        if (dyMin < wallBuf) force = force.add(vec2(0, (wallBuf - dyMin) / wallBuf));
-        if (dyMax < wallBuf) force = force.add(vec2(0, -(wallBuf - dyMax) / wallBuf));
-
-        // when no immediate forces apply, seek the nearest enemy so the AI
-        // keeps moving instead of standing still
-        if (force.length() < .05)
-        {
-            if (closestEnemy)
-                force = closestEnemy.pos.subtract(player.pos);
-            else
-                force = vec2(1, 0);
-        }
-
-        // Commit to a destination point. Clamped inside the arena so the AI
-        // doesn't try to walk into a wall it can never reach.
-        const dir = force.normalize();
-        aiTargetPos = player.pos.add(dir.scale(AI_LOOKAHEAD));
-        aiTargetPos.x = clamp(aiTargetPos.x, ARENA_MIN_X + 1, ARENA_MAX_X - 1);
-        aiTargetPos.y = clamp(aiTargetPos.y, ARENA_MIN_Y + 1, ARENA_MAX_Y - 1);
     }
+    if (!goal) goal = vec2(0, 0);
 
-    // Walk toward the cached destination. Light EMA smoothing just to ease
-    // the visible heading when a retarget swings to the opposite side.
-    const heading = aiTargetPos.subtract(player.pos);
+    // EMA-smooth the heading so a goal switch doesn't flip direction
+    // mid-frame and look like a teleport.
+    const heading = goal.subtract(player.pos);
     const target = heading.length() > .01 ? heading.normalize() : vec2(1, 0);
     aiSmoothedDir = aiSmoothedDir.scale(.85).add(target.scale(.15));
     return aiSmoothedDir.length() > .01 ? aiSmoothedDir.normalize() : target;
