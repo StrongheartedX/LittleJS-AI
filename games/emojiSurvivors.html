@@ -874,40 +874,36 @@ function nearestEnemy(fromPos, maxDist)
     return best;
 }
 
-class OrbitingStarWeapon
+class FishOrbitWeapon
 {
     constructor()
     {
         this.level = 1;
-        this.name = 'Orbiting Star';
+        this.name = 'Fish Orbit';
         this.angle = 0;
-        this.hitMap = new Map();   // enemy -> next-allowed-hit time
+        this.hitMap = new Map();
     }
     levelUp() { this.level = min(this.level + 1, 5); }
     damage()  { return 1 + this.level; }
 
     update()
     {
-        this.angle += 4 * player.cooldownMult / 60;  // faster spin with Stopwatch
+        this.angle += 4 * player.cooldownMult / 60;
 
         const radius = 2.5 * player.areaMult;
-        const starSize = .7 * player.areaMult;
+        const orbSize = .7 * player.areaMult;
         const dmg = this.damage() * player.dmgMult;
         const now = time;
-        // tick hitMap — purge stale entries
         for (const [e, t] of this.hitMap)
             if (!e.parent && (e.destroyed || t < now - 5)) this.hitMap.delete(e);
 
-        // damage check only — drawing moved to draw() because update() runs
-        // during gameUpdate (before render). drawTile from update batches GL
-        // vertices that the next frame's enginePreRender then asserts on.
         for (let i = 0; i < this.level; ++i)
         {
             const a = this.angle + i * 2 * PI / this.level;
             const pos = player.pos.add(vec2().setAngle(a, radius));
             for (const e of enemies)
             {
-                if (!isOverlapping(pos, vec2(starSize), e.pos, e.size)) continue;
+                if (!isOverlapping(pos, vec2(orbSize), e.pos, e.size)) continue;
                 const next = this.hitMap.get(e) || 0;
                 if (now < next) continue;
                 e.takeDamage(dmg);
@@ -919,12 +915,12 @@ class OrbitingStarWeapon
     draw()
     {
         const radius = 2.5 * player.areaMult;
-        const starSize = .7 * player.areaMult;
+        const orbSize = .7 * player.areaMult;
         for (let i = 0; i < this.level; ++i)
         {
             const a = this.angle + i * 2 * PI / this.level;
             const pos = player.pos.add(vec2().setAngle(a, radius));
-            drawTile(pos, vec2(starSize), sprites.star, WHITE, a + time);
+            drawTile(pos, vec2(orbSize), sprites.fish, WHITE, a + time);
         }
     }
 }
@@ -1257,11 +1253,11 @@ class SpicyPizzaWeapon
     }
 }
 
-class StarStormWeapon
+class FishStormWeapon
 {
     constructor()
     {
-        this.level = 5; this.evolved = true; this.name = 'Star Storm';
+        this.level = 5; this.evolved = true; this.name = 'Fish Storm';
         this.angle = 0; this.hitMap = new Map();
     }
     levelUp() {}
@@ -1271,7 +1267,7 @@ class StarStormWeapon
     {
         this.angle += 6 * player.cooldownMult / 60;
         const radius = 4 * player.areaMult;
-        const starSize = 1.1 * player.areaMult;
+        const orbSize = 1.1 * player.areaMult;
         const dmg = this.damage() * player.dmgMult;
         const now = time;
         for (const [e, t] of this.hitMap)
@@ -1284,7 +1280,7 @@ class StarStormWeapon
             const pos = player.pos.add(vec2().setAngle(a, radius));
             for (const e of enemies)
             {
-                if (!isOverlapping(pos, vec2(starSize), e.pos, e.size)) continue;
+                if (!isOverlapping(pos, vec2(orbSize), e.pos, e.size)) continue;
                 const next = this.hitMap.get(e) || 0;
                 if (now < next) continue;
                 e.takeDamage(dmg);
@@ -1296,13 +1292,13 @@ class StarStormWeapon
     draw()
     {
         const radius = 4 * player.areaMult;
-        const starSize = 1.1 * player.areaMult;
+        const orbSize = 1.1 * player.areaMult;
         const orbits = 7;
         for (let i = 0; i < orbits; ++i)
         {
             const a = this.angle + i * 2 * PI / orbits;
             const pos = player.pos.add(vec2().setAngle(a, radius));
-            drawTile(pos, vec2(starSize), sprites.star, WHITE, a + time);
+            drawTile(pos, vec2(orbSize), sprites.fish, WHITE, a + time);
         }
     }
 }
@@ -1397,8 +1393,8 @@ class BlizzardWeapon
 const EVOLUTIONS = {
     PizzaToss:      {passive: 'Flex',      name: 'Spicy Pizza',  emoji: '🌶️',
                      ctor: () => new SpicyPizzaWeapon()},
-    OrbitingStar:   {passive: 'Magnifier', name: 'Star Storm',   emoji: '🌠',
-                     ctor: () => new StarStormWeapon()},
+    FishOrbit:      {passive: 'Magnifier', name: 'Fish Storm',   emoji: '🐟',
+                     ctor: () => new FishStormWeapon()},
     ChainLightning: {passive: 'Stopwatch', name: 'Thunderstorm', emoji: '🌩️',
                      ctor: () => new ThunderstormWeapon()},
     IceCube:        {passive: 'Stopwatch', name: 'Blizzard',     emoji: '❄️',
@@ -1701,7 +1697,7 @@ const HEROES = [
     {key:'smiley', emoji:'🙂', name:'Smiley',  weapon:'PizzaToss',
         spriteKey:'heroSmiley', stats:{},
         blurb:'Pizza ace, all-rounder'},
-    {key:'cat',    emoji:'🐱', name:'Cat',     weapon:'OrbitingStar',
+    {key:'cat',    emoji:'🐱', name:'Cat',     weapon:'FishOrbit',
         spriteKey:'heroCat',    stats:{moveSpeedMult: 1.2, maxHpMult: .85},
         blurb:'Quick on its paws, fragile'},
     {key:'bot',    emoji:'🤖', name:'Bot',     weapon:'ChainLightning',
@@ -2217,13 +2213,13 @@ async function gameInit()
 }
 
 // All available weapons by name. Names match the constructor classes below.
-const ALL_WEAPONS = ['Fireball', 'OrbitingStar', 'ChainLightning',
+const ALL_WEAPONS = ['Fireball', 'FishOrbit', 'ChainLightning',
                      'PizzaToss', 'IceCube', 'Bomb', 'WaterSplash', 'StarToss'];
 
 function makeWeaponByName(name)
 {
     if (name === 'Fireball')       return new FireballWeapon();
-    if (name === 'OrbitingStar')   return new OrbitingStarWeapon();
+    if (name === 'FishOrbit')      return new FishOrbitWeapon();
     if (name === 'ChainLightning') return new ChainLightningWeapon();
     if (name === 'PizzaToss')      return new PizzaTossWeapon();
     if (name === 'IceCube')        return new IceCubeWeapon();
@@ -2236,7 +2232,7 @@ function makeWeaponByName(name)
 function emojiForWeapon(name)
 {
     if (name === 'Fireball')       return '🔥';
-    if (name === 'OrbitingStar')   return '🌟';
+    if (name === 'FishOrbit')      return '🐟';
     if (name === 'ChainLightning') return '⚡';
     if (name === 'PizzaToss')      return '🍕';
     if (name === 'IceCube')        return '🧊';
