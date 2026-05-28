@@ -1010,7 +1010,7 @@ class FishOrbitWeapon
                 const next = this.hitMap.get(e) || 0;
                 if (now < next) continue;
                 e.takeDamage(dmg);
-                this.hitMap.set(e, now + 1);
+                this.hitMap.set(e, now + .5);
             }
         }
     }
