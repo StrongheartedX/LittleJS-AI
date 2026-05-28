@@ -730,7 +730,7 @@ function spawnClearParticles(cellX, cellY, colorIndex)
      }
 
      // falling
-     const softDrop = keyIsDown('ArrowDown');
+     const softDrop = keyDirection().y < 0;
      const interval = softDrop ? 2 : fallInterval();
      fallCounter++;
      if (fallCounter >= interval)

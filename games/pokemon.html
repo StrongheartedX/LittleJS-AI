@@ -458,9 +458,7 @@ function gameUpdate()
     const run = keyIsDown('ShiftLeft') || keyIsDown('ShiftRight');
     const speed = playerSpeed * (run ? 1.5 : 1);
 
-    const x = (keyIsDown('ArrowRight')||keyIsDown('KeyD')) - (keyIsDown('ArrowLeft')||keyIsDown('KeyA'));
-    const y = (keyIsDown('ArrowUp')||keyIsDown('KeyW'))    - (keyIsDown('ArrowDown')||keyIsDown('KeyS'));
-    let move = vec2(x, y);
+    let move = keyDirection();
     if (move.lengthSquared() > 1)
         move = move.normalize();
 

@@ -458,12 +458,7 @@
       update()
       {
           // movement: keyboard 8-dir, OR analog stick (gamepad/touch), OR mouse-follow
-          const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
-          const left  = keyIsDown('ArrowLeft')  || keyIsDown('KeyA');
-          const up    = keyIsDown('ArrowUp')    || keyIsDown('KeyW');
-          const down  = keyIsDown('ArrowDown')  || keyIsDown('KeyS');
-
-          let move = vec2((right?1:0) - (left?1:0), (up?1:0) - (down?1:0));
+          let move = keyDirection();
 
           // Stick adds in — preserves analog magnitude so a half-pushed stick
           // moves at half speed.

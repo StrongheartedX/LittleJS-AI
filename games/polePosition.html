@@ -206,10 +206,8 @@ function gameUpdate()
     }
 
     // input
-    const up    = keyIsDown('ArrowUp')   || keyIsDown('KeyW');
-    const down  = keyIsDown('ArrowDown') || keyIsDown('KeyS');
-    const left  = keyIsDown('ArrowLeft') || keyIsDown('KeyA');
-    const right = keyIsDown('ArrowRight')|| keyIsDown('KeyD');
+    const dir = keyDirection();
+    const up = dir.y > 0, down = dir.y < 0;
 
     // pointer steering. On a mouse, cursor x-position always steers (no
     // button required); on touch, only an active touch counts (because the
@@ -245,7 +243,7 @@ function gameUpdate()
     // Mouse takes priority when active so a pointer input doesn't fight the
     // keyboard; keyboard arrows still work when the cursor is centered or on
     // touch devices not currently being touched.
-    const kbSteer = (right?1:0) - (left?1:0);
+    const kbSteer = dir.x;
     const rawSteer = mouseSteerActive ? mouseSteer : kbSteer;
     // need to be moving forward to steer at all — ramps from 0 (stopped) to
     // full at MIN_STEER_SPEED, then stays at full. Prevents the car from

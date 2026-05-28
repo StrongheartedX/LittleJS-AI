@@ -271,17 +271,16 @@ function gameUpdate()
         return;
 
     // speed control
-    if (keyIsDown('ArrowUp') || keyIsDown('KeyW'))
+    const dir = keyDirection();
+    if (dir.y > 0)
         speed = clamp(speed + .004, SPEED_MIN, SPEED_MAX);
-    else if (keyIsDown('ArrowDown') || keyIsDown('KeyS'))
+    else if (dir.y < 0)
         speed = clamp(speed - .004, SPEED_MIN, SPEED_MAX);
     else
         speed = lerp(speed, SPEED_BASE, .03);
 
     // lateral control
-    let dx = 0;
-    if (keyIsDown('ArrowLeft') || keyIsDown('KeyA')) dx -= PLAYER_X_SPEED;
-    if (keyIsDown('ArrowRight') || keyIsDown('KeyD')) dx += PLAYER_X_SPEED;
+    const dx = dir.x * PLAYER_X_SPEED;
 
     playerVelX = lerp(playerVelX, dx, .25);
     playerPos.x += playerVelX;

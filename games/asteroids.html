@@ -314,18 +314,14 @@ class Ship extends EngineObject
 
         // analog stick (touch or physical gamepad merged into the same API)
         const stick = gamepadStick(0);
+        const kbd = keyDirection();
 
         // rotation: keyboard arrows/AD, D-pad, or left-stick X-axis
-        let rot = 0;
-        if (keyIsDown('ArrowLeft')  || keyIsDown('KeyA')) rot -= 1;
-        if (keyIsDown('ArrowRight') || keyIsDown('KeyD')) rot += 1;
-        rot += stick.x;                                        // analog: -1..1
-        rot = clamp(rot, -1, 1);
+        const rot = clamp(kbd.x + stick.x, -1, 1);
         this.angle += SHIP_TURN_SPEED * rot;
 
         // thrust: keyboard up/W, stick forward (Y > 0 in LittleJS), A button (0)
-        const thrust = keyIsDown('ArrowUp') || keyIsDown('KeyW')
-            || stick.y > .35 || gamepadIsDown(0);
+        const thrust = kbd.y > 0 || stick.y > .35 || gamepadIsDown(0);
         if (thrust)
         {
             const dir = angleToVec(this.angle);

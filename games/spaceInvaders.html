@@ -430,7 +430,8 @@ class Player extends RectObject
         // counts as keyboard-mode (uses the same "compute X delta" path).
         const stick = gamepadStick(0);
         const stickActive = abs(stick.x) > .3;
-        if (keyIsDown('ArrowLeft') || keyIsDown('ArrowRight') || keyIsDown('KeyA') || keyIsDown('KeyD') || stickActive)
+        const kbdX = keyDirection().x;
+        if (kbdX || stickActive)
             inputMode = 'keyboard';
 
         // Switch to mouse mode if mouse clicked
@@ -440,11 +441,8 @@ class Player extends RectObject
         if (inputMode === 'keyboard')
         {
             // Keyboard / gamepad: integrate per-frame horizontal velocity
-            let move = 0;
-            if (keyIsDown('ArrowLeft') || keyIsDown('KeyA')) move -= 1;
-            if (keyIsDown('ArrowRight') || keyIsDown('KeyD')) move += 1;
             // Analog stick adds in; clamp to [-1, 1] so combined isn't faster than max.
-            move = clamp(move + stick.x, -1, 1);
+            const move = clamp(kbdX + stick.x, -1, 1);
             this.pos.x += move * .55;
         }
         else

@@ -913,10 +913,9 @@ class PlayerCar extends EngineObject
             return;
         }
 
-        // speed control (W/S only)
-        const accel = (keyIsDown('ArrowUp') || keyIsDown('KeyW')) ? 1 : 0;
-        const brake = (keyIsDown('ArrowDown') || keyIsDown('KeyS')) ? 1 : 0;
-        this.speed += (accel - brake) * PLAYER_ACCEL * timeDelta;
+        // speed control
+        const dir = keyDirection();
+        this.speed += dir.y * PLAYER_ACCEL * timeDelta;
         this.speed = lerp(this.speed, PLAYER_CRUISE, .02);
         // min-speed floor doesn't apply until the player has reached cruising speed at least once
         if (this.speed >= PLAYER_MIN_SPEED) this.passedMinSpeed = true;
@@ -928,10 +927,8 @@ class PlayerCar extends EngineObject
 
         // steering — mouse drives target; A/D nudges target as fallback
         let targetX = clampToRoad(mousePos.x, this.size.x/2, this.pos.y);
-        const left  = (keyIsDown('ArrowLeft')  || keyIsDown('KeyA')) ? 1 : 0;
-        const right = (keyIsDown('ArrowRight') || keyIsDown('KeyD')) ? 1 : 0;
-        if (left || right)
-            targetX = clampToRoad(this.pos.x + (right - left) * KEY_STEER_TARGET_OFFSET, this.size.x/2, this.pos.y);
+        if (dir.x)
+            targetX = clampToRoad(this.pos.x + dir.x * KEY_STEER_TARGET_OFFSET, this.size.x/2, this.pos.y);
 
         // tight tracking
         this.pos.x = lerp(this.pos.x, targetX, STEER_TIGHTNESS);

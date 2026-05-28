@@ -2010,12 +2010,8 @@ class Player extends EngineObject
             if (this.invuln > 0 && respawnTimer === 0) this.invuln--;
             return;
         }
-        // MOVEMENT: keyboard WASD + gamepad/touch left stick
-        let move = vec2(0);
-        if (keyIsDown('KeyW')) move.y += 1;
-        if (keyIsDown('KeyS')) move.y -= 1;
-        if (keyIsDown('KeyD')) move.x += 1;
-        if (keyIsDown('KeyA')) move.x -= 1;
+        // MOVEMENT: keyboard WASD/arrows + gamepad/touch left stick
+        let move = keyDirection();
         const leftStick = (typeof gamepadStick === 'function') ? gamepadStick(0) : vec2(0);
         if (leftStick.lengthSquared() > .04) move = move.add(leftStick);
         if (move.lengthSquared() > 0) move = move.normalize(1);

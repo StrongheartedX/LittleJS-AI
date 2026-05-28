@@ -685,8 +685,9 @@ function gameUpdate()
 
     // horizontal DAS/ARR
     const stick = gamepadStick(0);
-    const leftDown  = keyIsDown('ArrowLeft')  || keyIsDown('KeyA') || stick.x < -.3;
-    const rightDown = keyIsDown('ArrowRight') || keyIsDown('KeyD') || stick.x >  .3;
+    const dir = keyDirection();
+    const leftDown  = dir.x < 0 || stick.x < -.3;
+    const rightDown = dir.x > 0 || stick.x >  .3;
     const newDir = rightDown && !leftDown ? 1 : leftDown && !rightDown ? -1 : 0;
 
     if (newDir !== moveDir)
@@ -715,7 +716,7 @@ function gameUpdate()
     }
 
     // gravity (with soft drop)
-    const soft = keyIsDown('ArrowDown') || keyIsDown('KeyS') || stick.y > .3;
+    const soft = dir.y < 0 || stick.y > .3;
     const cps = currentGravityCps() * (soft ? SOFT_DROP_MULT : 1);
     fallAcc += cps * timeDelta;
     while (fallAcc >= 1)

@@ -705,9 +705,7 @@ function gameUpdate()
         advanceLevel();
 
     // paddle controls (keyboard overrides mouse)
-    const left  = keyIsDown('ArrowLeft') || keyIsDown('KeyA');
-    const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
-    const dir = (right ? 1 : 0) - (left ? 1 : 0);
+    const dir = keyDirection().x;
 
     if (dir)
         paddlePos.x += dir * 24 * dt;

@@ -204,16 +204,12 @@ class Player
             return;
         }
 
-        const up    = keyIsDown('ArrowUp')    || keyIsDown('KeyW');
-        const down  = keyIsDown('ArrowDown')  || keyIsDown('KeyS');
-        const right = keyIsDown('ArrowRight') || keyIsDown('KeyD');
-        const left  = keyIsDown('ArrowLeft')  || keyIsDown('KeyA');
-
-        if (up)   this.velocity.y += .05;
-        if (down) this.velocity.y -= .05;
+        const dir = keyDirection();
+        if (dir.y > 0) this.velocity.y += .05;
+        if (dir.y < 0) this.velocity.y -= .05;
         this.thrusting = false;
-        if (right) { this.facing = 1;  this.velocity.x += .05; this.thrusting = true; }
-        if (left)  { this.facing = -1; this.velocity.x -= .05; this.thrusting = true; }
+        if (dir.x > 0) { this.facing = 1;  this.velocity.x += .05; this.thrusting = true; }
+        if (dir.x < 0) { this.facing = -1; this.velocity.x -= .05; this.thrusting = true; }
 
         this.velocity.y *= .93;
         if (!this.thrusting) this.velocity.x *= .985;

@@ -1150,8 +1150,7 @@ class Player extends EngineObject
         const kbd = keyDirection();
         const left  = kbd.x < 0 || stick.x < -.3 || gamepadIsDown(14);
         const right = kbd.x > 0 || stick.x >  .3 || gamepadIsDown(15);
-        const down  = kbd.y < 0 || stick.y < -.5 || gamepadIsDown(13)
-                   || keyIsDown('ArrowDown') || keyIsDown('KeyS');
+        const down  = kbd.y < 0 || stick.y < -.5 || gamepadIsDown(13);
         const run   = keyIsDown('ShiftLeft') || keyIsDown('ShiftRight') || keyIsDown('KeyX')
                    || gamepadIsDown(1)   // B / Circle (SMB run button)
                    || gamepadIsDown(2);  // X / Square (also accepted)

@@ -666,8 +666,7 @@ function gameUpdate()
             player.flap();
         
         // Horizontal movement
-        const moveDir = (keyIsDown('ArrowRight') || keyIsDown('KeyD') ? 1 : 0) - 
-                       (keyIsDown('ArrowLeft') || keyIsDown('KeyA') ? 1 : 0);
+        const moveDir = keyDirection().x;
         if (moveDir !== 0)
             player.moveHorizontal(moveDir);
     }
