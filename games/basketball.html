@@ -45,14 +45,17 @@ const LEVEL_LEFT   = -11;
 const LEVEL_RIGHT  = 11;
 const LEVEL_TOP    = 8;
 
-const BALL_RADIUS  = 0.55;
+const BALL_RADIUS       = 0.55;
+const GRAB_RADIUS       = BALL_RADIUS * 1.4;   // forgiving click radius around the ball
+const MAX_DRAG          = BALL_RADIUS * 10;    // drag beyond this auto-launches
+const VEL_WINDOW        = 0.08;                // seconds of mouse history used for release velocity
+const MAX_LAUNCH_SPEED  = 40;                  // cap on flick velocity, world units per second
 
 const TIME_LIMIT       = 60;
-const CHARGE_TIME      = 0.85;    // seconds to fill power meter
 const RACK_TRANSIT     = 0.35;    // seconds for next ball to fly in onto the pedestal
 const RACK_START_POS   = vec2(-14, -4.5);  // off-screen-left feed position
 const SCORE_BASE       = 2;
-const SCORE_SWISH      = 3;
+const SCORE_SWISH      = 3;   // bonus for a clean shot (no rim/board touch)
 const STREAK_FOR_FIRE  = 3;
 
 const COLOR_BG       = new Color().setHex('#101a30');
@@ -88,8 +91,10 @@ let timeLeft     = TIME_LIMIT;
 let streak       = 0;
 let onFire       = false;
 let balls        = [];
-let aiming       = false;
-let chargeT      = 0;
+let dragging     = false;
+let dragPos      = SPAWN_POS.copy();
+let grabOffset   = vec2();  // ball-center minus mouse at grab time, so the click point stays under the cursor
+let mouseTrail   = [];     // [{pos, t}, ...] for computing release velocity
 let rackAnim     = null;   // {t} while a ball is animating onto the pedestal; null = ball is resting on pedestal
 let hoopOffsetX  = 0;
 // Standalone accumulator for the hoop's sin-wave phase. Mirrors elapsed game
@@ -106,35 +111,28 @@ function getRightPeg()   { const h = getHoopCenter(); return vec2(h.x + RIM_HALF
 function getBoardPos()   { const h = getHoopCenter(); return vec2(h.x + BOARD_OFFSET.x, h.y + BOARD_OFFSET.y); }
 
 //------------------------------------------------------------------------------
-// ballistic launch: solve for initial velocity that lands at aimPos with
-// arc peak proportional to power. aimPos = mouse world position.
+// Drag-to-throw launch: the player grabs the ball, drags it with the mouse,
+// and on release the ball flies with whatever velocity the mouse had over the
+// last VEL_WINDOW seconds. Drag beyond MAX_DRAG and it auto-launches.
 
-function computeLaunchVelocity(aimPos, power)
+function launchBall(pos, vel)
 {
-    // Power scales how far the ball travels toward the aim point. At max power
-    // it lands at the cursor; at zero power it only reaches MIN_REACH of the way.
-    const MIN_REACH = 0.2;
-    const reach = MIN_REACH + power * (1 - MIN_REACH);
-    const target = SPAWN_POS.lerp(aimPos, reach);
-
-    const dx = target.x - SPAWN_POS.x;
-    const baseH = max(SPAWN_POS.y, target.y);
-    const arcH = 1.0 + power * 4.5;
-    const yPeak = baseH + arcH;
-    const g = abs(gravity.y);
-    const t1 = Math.sqrt(2 * max(0.01, yPeak - SPAWN_POS.y) / g);
-    const t2 = Math.sqrt(2 * max(0.01, yPeak - target.y) / g);
-    const T = t1 + t2;
-    const vx = dx / T;
-    const vy = g * t1;
-    return vec2(vx, vy);
+    balls.push(new Ball(pos, vel));
+    sThrow.play();
 }
 
-function shootBall(aimPos, power)
+// Velocity computed across the recorded mouse trail — averages out jitter
+// while still capturing a sharp flick at release. Capped at MAX_LAUNCH_SPEED
+// so frantic flicks don't fly off-screen.
+function getMouseVelocity()
 {
-    const v = computeLaunchVelocity(aimPos, power);
-    balls.push(new Ball(SPAWN_POS, v));
-    sThrow.play();
+    if (mouseTrail.length < 2) return vec2();
+    const a = mouseTrail[0], b = mouseTrail[mouseTrail.length - 1];
+    const dt = b.t - a.t;
+    if (dt < .001) return vec2();
+    const v = b.pos.subtract(a.pos).scale(1/dt);
+    const speed = v.length();
+    return speed > MAX_LAUNCH_SPEED ? v.scale(MAX_LAUNCH_SPEED / speed) : v;
 }
 
 // Compute where the rack ball should be drawn (animating in from off-screen,
@@ -321,8 +319,9 @@ function startGame()
     streak = 0;
     onFire = false;
     balls.length = 0;
-    aiming = false;
-    chargeT = 0;
+    dragging = false;
+    dragPos = SPAWN_POS.copy();
+    mouseTrail = [];
     rackAnim = null;
     hoopOffsetX = 0;
 }
@@ -330,8 +329,7 @@ function startGame()
 function endGame()
 {
     gamePhase = 'gameover';
-    aiming = false;
-    chargeT = 0;
+    dragging = false;
     submitBestScore(score);
     // surface game-over menu (refresh its labels first)
     const m = getMenu('gameover');
@@ -411,9 +409,9 @@ async function gameInit()
         title: 'HOW TO PLAY',
         onHide: popMenu,
         items: [
-            {type:'text', text:'Aim with the mouse. Click and HOLD to charge power, '+
-                'release to shoot. Stronger power = higher arc.\n\n'+
-                'Make = 2 pts. Swish = 3 pts. 3 in a row lights you up — +1 per shot until you miss.\n\n'+
+            {type:'text', text:'Click the ball and DRAG it like a slingshot. Release to throw — '+
+                'the ball flies with the velocity you flicked. Drag too far and it auto-launches.\n\n'+
+                'Make = 2 pts. Swish (no rim, no board) = 3 pts. 3 in a row lights you up — +1 per shot until you miss.\n\n'+
                 'The hoop never stops moving — it just gets faster as the clock runs down.'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
@@ -488,8 +486,7 @@ function gameUpdate()
         if (timeLeft <= 0)
         {
             sBuzzer.play();
-            aiming = false;
-            chargeT = 0;
+            dragging = false;
             rackAnim = null;
             // If a shot is still in the air, give it a chance to land
             // (buzzer-beater rule). Otherwise end immediately.
@@ -505,30 +502,49 @@ function gameUpdate()
             if (rackAnim.t >= RACK_TRANSIT) rackAnim = null;
         }
 
-        // aim / charge / release — pressing to aim snaps any in-flight rack ball onto the pedestal
-        if (!aiming && mouseWasPressed(0))
+        // record mouse trail (for release velocity)
+        mouseTrail.push({pos: mousePos.copy(), t: time});
+        while (mouseTrail.length > 0 && time - mouseTrail[0].t > VEL_WINDOW) mouseTrail.shift();
+
+        // grab / drag / release
+        if (!dragging && mouseWasPressed(0))
         {
-            rackAnim = null;
-            aiming = true;
-            chargeT = 0;
+            const ballNow = rackAnim ? getRackBallPose().pos : SPAWN_POS;
+            if (mousePos.distance(ballNow) < GRAB_RADIUS)
+            {
+                dragging = true;
+                rackAnim = null;
+                grabOffset = ballNow.subtract(mousePos);   // keep grab point under the cursor
+                dragPos = ballNow.copy();
+                mouseTrail = [{pos: mousePos.copy(), t: time}];
+            }
         }
-        if (aiming && mouseIsDown(0))
+        if (dragging)
         {
-            chargeT = min(chargeT + timeDelta, CHARGE_TIME);
-        }
-        if (aiming && mouseWasReleased(0))
-        {
-            const power = clamp(chargeT / CHARGE_TIME, 0, 1);
-            shootBall(mousePos, power);
-            aiming = false;
-            chargeT = 0;
-            rackAnim = { t: 0 };
+            dragPos = mousePos.add(grabOffset);
+            const offset = dragPos.subtract(SPAWN_POS);
+            const dist = offset.length();
+
+            if (dist > MAX_DRAG)
+            {
+                // ripped past the limit — auto-launch from the ring with current flick velocity
+                const launchPos = SPAWN_POS.add(offset.normalize(MAX_DRAG));
+                launchBall(launchPos, getMouseVelocity());
+                dragging = false;
+                rackAnim = { t: 0 };
+            }
+            else if (mouseWasReleased(0))
+            {
+                // any release counts as a launch — even a zero-velocity drop
+                launchBall(dragPos, getMouseVelocity());
+                dragging = false;
+                rackAnim = { t: 0 };
+            }
         }
     }
     else
     {
-        aiming = false;
-        chargeT = 0;
+        dragging = false;
         rackAnim = null;
     }
 }
@@ -645,34 +661,11 @@ function drawBasketball(pos, rot)
     }
 }
 
-function drawAimReticleAndArc()
-{
-    if (gamePhase !== 'playing') return;
-    if (!aiming) return;
-
-    const power = clamp(chargeT / CHARGE_TIME, 0, 1);
-    const v = computeLaunchVelocity(mousePos, power);
-
-    // dotted arc preview
-    const N = 22;
-    for (let i = 1; i <= N; i++)
-    {
-        const t = i * 0.06;
-        const x = SPAWN_POS.x + v.x * t;
-        const y = SPAWN_POS.y + v.y * t + 0.5 * gravity.y * t * t;
-        if (y < FLOOR_Y - 1) break;
-        const alpha = 1 - i / (N + 4);
-        drawCircle(vec2(x, y), .14, hsl(.12, .9, .65, alpha * .55));
-    }
-
-    // reticle at mouse
-    const pulse = .9 + .25 * Math.sin(time * 10);
-    drawCircle(mousePos, pulse, hsl(0,0,0,0), .07, COLOR_RETICLE);
-    drawCircle(mousePos, .18, COLOR_RETICLE);
-}
-
 function gameRender()
 {
+    // soft radial glow marking the drag zone (radius = MAX_DRAG)
+    drawCircleGradient(SPAWN_POS, MAX_DRAG * 2, hsl(.6, .5, .6, .35), hsl(.6, .5, .6, 0));
+
     drawCourt();
     drawHoopAssembly();
 
@@ -680,41 +673,26 @@ function gameRender()
     drawPedestal();
     if (gamePhase === 'playing')
     {
-        const pose = getRackBallPose();
-        drawBasketball(pose.pos, pose.rot);
+        if (dragging)
+        {
+            drawBasketball(dragPos, 0);
+        }
+        else
+        {
+            const pose = getRackBallPose();
+            drawBasketball(pose.pos, pose.rot);
+        }
     }
     else
     {
         drawBasketball(SPAWN_POS, 0);
     }
 
-    drawAimReticleAndArc();
-
     for (const b of balls) b.render();
 }
 
 //------------------------------------------------------------------------------
 // HUD
-
-function drawPowerMeter()
-{
-    if (gamePhase !== 'playing' || !aiming) return;
-
-    const c = mainCanvasSize;
-    const barW = 28, barH = 220;
-    const cx = c.x - 60, cy = c.y / 2;
-    // bg
-    drawRect(vec2(cx, cy), vec2(barW, barH), hsl(0,0,0,.55), 0, false, true);
-    // fill
-    const p = clamp(chargeT / CHARGE_TIME, 0, 1);
-    const fillH = (barH - 6) * p;
-    const fillColor = hsl(.16 - p * .16, .95, .55);
-    drawRect(vec2(cx, cy + (barH - 6)/2 - fillH/2), vec2(barW - 6, fillH), fillColor, 0, false, true);
-    // top cap (max marker)
-    drawRect(vec2(cx, cy - barH/2 - 8), vec2(barW + 8, 3), hsl(.02, .9, .6), 0, false, true);
-
-    drawTextScreen('PWR', vec2(cx, cy + barH/2 + 22), 16, hsl(0,0,1), 2, hsl(0,0,0));
-}
 
 function gameRenderPost()
 {
@@ -738,8 +716,6 @@ function gameRenderPost()
             drawTextScreen(label, vec2(80, 56), 32, col, 3, hsl(0,0,0));
         }
 
-        // Power meter only while you can still shoot — hide it during buzzer.
-        if (gamePhase === 'playing') drawPowerMeter();
     }
     else if (gamePhase === 'title')
     {
