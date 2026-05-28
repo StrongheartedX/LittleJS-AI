@@ -162,13 +162,14 @@ class Ball
         this.spin = -vel.x * .35;
         this.touchedRimOrBoard = false;
         this.scored = false;
-        this.life = 0;
+        // Per-ball floor: drops one notch on every bounce so the ball sinks
+        // through the ground over successive bounces instead of resting.
+        this.floorY = FLOOR_Y;
         this.dead = false;
     }
 
     update()
     {
-        this.life += timeDelta;
         const prevY = this.pos.y;
 
         // integrate
@@ -176,14 +177,15 @@ class Ball
         this.pos = this.pos.add(this.vel.scale(timeDelta));
         this.rot += this.spin * timeDelta;
 
-        // floor
-        if (this.pos.y - BALL_RADIUS < FLOOR_Y)
+        // floor — bounce against the per-ball floorY, then sink it for next time
+        if (this.pos.y - BALL_RADIUS < this.floorY)
         {
-            this.pos.y = FLOOR_Y + BALL_RADIUS;
+            this.pos.y = this.floorY + BALL_RADIUS;
             this.vel.y = -this.vel.y * .55;
             this.vel.x *= .82;
             this.spin = -this.vel.x * .35;
             if (abs(this.vel.y) < 1) this.vel.y = 0;
+            this.floorY -= 1;
         }
 
         // side walls
@@ -260,9 +262,11 @@ class Ball
             }
         }
 
-        // cleanup: well off-screen, very stale, or come to rest
-        const atRest = this.pos.y < FLOOR_Y + BALL_RADIUS + .05 && abs(this.vel.x) < .4 && abs(this.vel.y) < .4;
-        if (this.life > 6 || atRest || this.pos.y < FLOOR_Y - 4 || this.pos.x < LEVEL_LEFT - 4 || this.pos.x > LEVEL_RIGHT + 4)
+        // cleanup: only when the ball has sunk past the bottom of the screen
+        // (or left the level horizontally). The sinking-floor handles the
+        // "come to rest" case by dragging the ball down through the world.
+        const screenBottom = cameraPos.y - mainCanvasSize.y / cameraScale / 2;
+        if (this.pos.y + BALL_RADIUS < screenBottom || this.pos.x < LEVEL_LEFT - 4 || this.pos.x > LEVEL_RIGHT + 4)
             this.dead = true;
     }
 
@@ -667,6 +671,8 @@ function drawBasketball(pos, rot)
 
 function gameRender()
 {
+    drawRectGradient(vec2(0, FLOOR_Y + 10), vec2(40,20), hsl(0,0,1,.5), CLEAR_BLACK);
+
     // soft radial glow marking the drag zone (radius = MAX_DRAG)
     drawCircleGradient(DRAG_CENTER, MAX_DRAG * 2, hsl(.6, .5, .6, .35), hsl(.6, .5, .6, 0));
 
