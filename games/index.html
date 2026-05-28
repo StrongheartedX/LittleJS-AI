@@ -477,11 +477,15 @@
   .tile .chips { margin-top: 8px; }
   .tiles.top .tile .emoji { font-size: 44px; }
 
-  /* Top picks — larger tiles with a gradient face */
+  /* Top picks — larger tiles with a gradient face. Hue is tinted by the
+     game's category color via color-mix; darkness is kept consistent so the
+     row reads as a set rather than a rainbow. */
   .tiles.top .tile {
     width: 220px;
     min-height: 140px;
-    background: linear-gradient(135deg, #1a2f4d 0%, #2d1a3e 100%);
+    background: linear-gradient(135deg,
+      color-mix(in srgb, var(--cat-color, #58a6ff) 20%, #0d1117) 0%,
+      color-mix(in srgb, var(--cat-color, #58a6ff) 9%, #0d1117) 100%);
     border-color: #3a4862;
   }
   .tiles.top .tile .name { font-size: 16px; }
