@@ -174,8 +174,11 @@ const ENEMY_TYPES = [
                                       splitInto: 'ant', splitCount: 3},
     {key:'duck',    sprite:'duck',    hp: 2,  dmg: 6,  speed: 2.2, xpDrop: 1, size: .85},
     {key:'ghost',   sprite:'ghost',   hp: 3,  dmg: 8,  speed: 1.6, xpDrop: 1, size: .9},
-    {key:'fireImp', sprite:'fireImp', hp: 4,  dmg: 8,  speed: 1.6, xpDrop: 2, size: .85},
-    {key:'iceImp',  sprite:'iceImp',  hp: 4,  dmg: 8,  speed: 1.2, xpDrop: 2, size: .85},
+    // Imps reuse the weapon sprites (same 🔥 and 🧊 emojis) — saves two
+    // atlas slots and the entities still read correctly. type.key stays
+    // 'fireImp'/'iceImp' so the per-type wobble code still triggers.
+    {key:'fireImp', sprite:'fireball', hp: 4,  dmg: 8,  speed: 1.6, xpDrop: 2, size: .85},
+    {key:'iceImp',  sprite:'ice',      hp: 4,  dmg: 8,  speed: 1.2, xpDrop: 2, size: .85},
     // Graveyard signature — collapses to bones on first kill, stands back up
     // at half HP after ~4 s. Revival logic lives in Enemy.takeDamage/update.
     {key:'skeleton', sprite:'skeleton', hp: 5,  dmg: 8,  speed: 1.3, xpDrop: 2, size: .9,
@@ -3049,7 +3052,7 @@ async function gameInit()
     sprites.bomb      = drawTextToTexture(20, '💣', {description: 'a black bomb with fuse'});
     sprites.ice       = drawTextToTexture(21, '🧊', {description: 'a clear ice cube'});
     sprites.starToss  = drawTextToTexture(22, '⭐', {description: 'a yellow five-pointed star'});
-    sprites.fireImp   = drawTextToTexture(23, '🔥', {description: 'a small fire imp'});
+    // slot 23: free (fireImp removed — enemy reuses sprites.fireball)
 
     // pickups 24-26
     sprites.gem       = drawTextToTexture(24, '💎', {description: 'a cyan diamond gem'});
@@ -3088,7 +3091,7 @@ async function gameInit()
     sprites.clover    = drawTextToTexture(30, '🍀', {description: 'a green four-leaf clover'});
     sprites.dagger    = drawTextToTexture(31, '🗡️', {description: 'a small dagger'});
 
-    sprites.iceImp      = drawTextToTexture(36, '🧊', {description: 'a small ice imp'});
+    // slot 36: free (iceImp removed — enemy reuses sprites.ice)
     // 180° hue rotation — same baking trick as the large gem. Flips the
     // player wizard's purple robes to the opposite hue (yellow-green) so
     // the evil version reads as a clearly different mage at a glance, no
