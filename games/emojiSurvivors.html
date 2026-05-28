@@ -109,7 +109,7 @@ class Player extends EngineObject
         this.moveSpeedMult  = 1;
         this.xpGainMult     = 1;
         this.extraProjectiles = 0;
-        this.heartMult        = 1;
+        this.foodMult        = 1;
         this.coinGainMult     = 1;
         // Run-scoped set of choice keys the player has banished. Filtered
         // out of buildUpgradeChoices so banished options never reappear.
@@ -839,7 +839,7 @@ class Enemy extends EngineObject
                 }
                 else
                 {
-                    // regular bosses drop a 🎁 chest instead of a gem/heart
+                    // regular bosses drop a 🎁 chest instead of the usual gem/food
                     new Chest(this.pos.copy());
                 }
                 // bosses always drop a chunky coin pile
@@ -1177,7 +1177,7 @@ class Pickup extends EngineObject
     constructor(pos, sprite, kind, value, sizeMult = 1)
     {
         super(pos, vec2(.6 * sizeMult), sprite);
-        this.kind  = kind;   // 'gem', 'heart', or 'coin'
+        this.kind  = kind;   // 'gem', 'food', or 'coin'
         this.value = value;
         setupKinematicProp(this);
         this.damping = .98;            // soft float toward magnet
@@ -1198,7 +1198,7 @@ class Pickup extends EngineObject
         const pulse = .25 + .25 * sin(t);
         let additive = null;
         if (this.kind === 'gem')        additive = new Color(.1 * pulse, pulse, pulse, 0);
-        else if (this.kind === 'heart') additive = new Color(pulse, .15 * pulse, .25 * pulse, 0);
+        else if (this.kind === 'food') additive = new Color(pulse, .15 * pulse, .25 * pulse, 0);
         else if (this.kind === 'coin')  additive = new Color(pulse, pulse * .8, .1 * pulse, 0);
         else if (this.kind === 'mystery')
         {
@@ -1252,10 +1252,10 @@ class Pickup extends EngineObject
                     if (sounds.levelUp && sounds.levelUp.play) sounds.levelUp.play();
                 }
             }
-            else if (this.kind === 'heart')
+            else if (this.kind === 'food')
             {
-                player.hp = min(player.maxHp, player.hp + this.value * player.heartMult);
-                if (sounds.heart && sounds.heart.play) sounds.heart.play(this.pos);
+                player.hp = min(player.maxHp, player.hp + this.value * player.foodMult);
+                if (sounds.food && sounds.food.play) sounds.food.play(this.pos);
             }
             else if (this.kind === 'coin')
             {
@@ -1338,15 +1338,15 @@ function rollDrop(table, pos, ctx, fallback)
 const ENEMY_DROP_TABLE = [
     {chance: .005, spawn: pos      => new Pickup(pos, sprites.clover, 'mystery', 0)},
     {chance: .03, spawn: pos      => new Pickup(pos, sprites.coin,   'coin', 1)},
-    {chance: .02, spawn: pos      => new Pickup(pos, sprites.heart,  'heart', 20)},
+    {chance: .02, spawn: pos      => new Pickup(pos, sprites.food,  'food', 20, 1.6)},
     {chance: .25, spawn: (pos, e) => dropGem(pos, e.xpDrop, e.isElite)},
 ];
 
-// 📦 Crate. Explicit rolls are mystery (.04) + heart (.14) = 18 %; the
+// 📦 Crate. Explicit rolls are mystery (.04) + food (.14) = 18 %; the
 // remaining 82 % falls into the coin-pile fallback.
 const CRATE_DROP_TABLE = [
     {chance: .04, spawn: pos => new Pickup(pos, sprites.clover, 'mystery', 0)},
-    {chance: .14, spawn: pos => new Pickup(pos, sprites.heart,  'heart', 20)},
+    {chance: .14, spawn: pos => new Pickup(pos, sprites.food,  'food', 20, 1.6)},
 ];
 function crateCoinFallback(pos)
 {
@@ -2632,7 +2632,7 @@ class HeartPassive      extends Passive { constructor(){ super('Heart',       '�
 class SneakerPassive    extends Passive { constructor(){ super('Sneaker',     '👟'); } apply(){ player.moveSpeedMult  *= 1 + this.level * .10; } }
 class SproutPassive     extends Passive { constructor(){ super('Sprout',      '🌱'); } apply(){ player.xpGainMult     *= 1 + this.level * .12; } }
 class PlusOnePassive    extends Passive { constructor(){ super('Plus One',    '➕'); } apply(){ player.extraProjectiles += this.level; } }
-class SnackPassive      extends Passive { constructor(){ super('Snack',       '🍗'); } apply(){ player.heartMult      *= 1 + this.level * .25; } }
+class SnackPassive      extends Passive { constructor(){ super('Snack',       '🍗'); } apply(){ player.foodMult      *= 1 + this.level * .25; } }
 
 // Single source of truth for which passives exist + how to spawn one. The
 // order of keys here is the order they show up in ALL_PASSIVES below.
@@ -2664,7 +2664,7 @@ function recomputeMultipliers()
     player.projSpeedMult = player.magnetMult = 1;
     player.maxHpMult = player.moveSpeedMult = player.xpGainMult = 1;
     player.extraProjectiles = 0;
-    player.heartMult = 1;
+    player.foodMult = 1;
     player.coinGainMult = 1;
     for (const p of player.passives) p.apply();
     // hero bonuses applied on top of passives
@@ -2687,7 +2687,9 @@ function recomputeMultipliers()
     player.coinGainMult *= curseFactor;
     // mystery-pickup temporary damage boost (decays in Player.update)
     if (player.damageBoostTimer > 0) player.dmgMult *= 2;
-    // grant the player any new max HP from a fresh Heart pickup
+    // if maxHpMult grew (Vigor level-up, hero swap, shop), top up current
+    // HP by the delta so the bar visibly grows instead of just exposing
+    // empty space at the right end.
     const newMaxHp = playerMaxHp * player.maxHpMult;
     if (newMaxHp > prevMaxHp) player.hp += (newMaxHp - prevMaxHp);
     player.maxHp = newMaxHp;
@@ -2875,7 +2877,7 @@ const HEROES = [
         spriteKey:'heroBot',    stats:{fireRateMult: 1.15, projSpeedMult: 1.15},
         blurb:'Rapid fire trigger'},
     {key:'vamp',   emoji:'🧛', name:'Vamp',    weapon:'HeartDrain',
-        spriteKey:'heroVamp',   stats:{maxHpMult: 1.10, heartMult: 1.25},
+        spriteKey:'heroVamp',   stats:{maxHpMult: 1.10, foodMult: 1.25},
         blurb:'Lifesteal hunter',
         unlock: 'survive10', unlockHint: 'Survive 10 minutes on any stage'},
 ];
@@ -3223,7 +3225,7 @@ async function gameInit()
          description: 'a green emerald gem'});
     sprites.gemLarge  = drawTextToTexture(50, '💎',
         {hueShift: 160, description: 'a red ruby gem'});
-    sprites.heart     = drawTextToTexture(51, '🍔', {description: 'a hamburger'});
+    sprites.food     = drawTextToTexture(51, '🍔', {description: 'a hamburger'});
     sprites.coin      = drawTextToTexture(52, '💰', {description: 'a gold coin or money bag'});
     sprites.clover    = drawTextToTexture(53, '🍀', {description: 'a green four-leaf clover'});
     sprites.chest     = drawTextToTexture(54, '🎁', {description: 'a wrapped gift box with bow'});
@@ -3253,7 +3255,7 @@ async function gameInit()
     // intentionally low because they layer with weapon fire / hit flashes a lot.
     sounds.pickup    = new SoundGenerator({frequency: 880,  release: .08, pitchJump: 240, pitchJumpTime: .03, volume: .25});
     sounds.coin      = new SoundGenerator({frequency: 1320, release: .15, pitchJump: 660, pitchJumpTime: .05, volume: .35});
-    sounds.heart     = new SoundGenerator({frequency: 660,  release: .25, pitchJump: 330, pitchJumpTime: .08, volume: .4});
+    sounds.food     = new SoundGenerator({frequency: 660,  release: .25, pitchJump: 330, pitchJumpTime: .08, volume: .4});
     sounds.levelUp   = new SoundGenerator({frequency: 523,  release: .4,  pitchJump: 392, pitchJumpTime: .12, volume: .5});
     sounds.hurt      = new SoundGenerator({frequency: 120,  release: .18, noise: .35, volume: .55});
     sounds.bossSpawn = new SoundGenerator({frequency: 60,   release: 1.2, noise: .25, slide: -8, volume: .6});
