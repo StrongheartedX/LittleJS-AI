@@ -796,9 +796,9 @@ async function gameInit()
     createOptionsMenu({
         persistKey: 'volume',
         extraItems: [
-            {type: 'slider',   id: 'sens', label: 'LOOK SPEED',  value: 1.0, min: .25, max: 4,
+            {type: 'slider',   id: 'sens', label: 'LOOK SPEED',  value: 1.0, min: .25, max: 2,
                 persist: 'sens',
-                onChange: v => mouseSensitivity = v * .004},
+                onChange: v => mouseSensitivity = v * mouseSensitivityDefault},
             {type: 'checkbox', id: 'invert', label: 'INVERT X',  value: false,
                 persist: 'invertX',
                 onChange: v => invertX = v},
@@ -869,7 +869,8 @@ async function gameInit()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-let mouseSensitivity = .01;      // radians per screen-pixel of mouse movement
+let mouseSensitivityDefault = .002; 
+let mouseSensitivity = mouseSensitivityDefault;      // radians per screen-pixel of mouse movement
 let invertX = false;
 let bobPhase = 0, bobAmount = 0;
 const GAMEPAD_LOOK_SPEED = .045; // rad per frame at full right-stick deflection
