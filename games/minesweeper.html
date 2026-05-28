@@ -29,6 +29,8 @@ const nowTime = ()=> performance.now() * 0.001;
 let boardW = 16;
 let boardH = 16;
 let mineCount = 40;
+// 'easy' | 'medium' | 'hard' — only medium and hard track a best time.
+let difficulty = 'medium';
 
 // cell size in world units
 const cellSize = 1;
@@ -43,6 +45,21 @@ let revealedCount = 0;
 let startTime = 0;
 let endTime = 0;
 let isPlaying = false;
+let newBest = false;
+
+// Best-time storage — one literal localStorage key per tracked difficulty,
+// value is seconds as an integer. The launcher reads these via the literal
+// scoreKey path in index.html.
+const bestTimeKey = d => `minesweeper.bestTime.${d}`;
+function getBestTime(d)
+{
+    const v = +localStorage.getItem(bestTimeKey(d));
+    return v > 0 ? v : 0;
+}
+function setBestTime(d, seconds)
+{
+    localStorage.setItem(bestTimeKey(d), seconds|0);
+}
 
 // sounds
 let sReveal, sFlag, sUnflag, sBoom, sWin;
@@ -77,6 +94,7 @@ function resetGame()
     revealedCount = 0;
     startTime = nowTime();
     endTime = startTime;
+    newBest = false;
 }
 
 function placeMines(safeX, safeY)
@@ -178,6 +196,18 @@ function checkWin()
         // auto-flag all mines
         for (let i=0; i<mines.length; i++)
             if (mines[i]) flagged[i] = 1;
+
+        // Record best time for tracked difficulties (medium + hard).
+        if (difficulty === 'medium' || difficulty === 'hard')
+        {
+            const seconds = Math.ceil(endTime - startTime);
+            const prev = getBestTime(difficulty);
+            if (!prev || seconds < prev)
+            {
+                setBestTime(difficulty, seconds);
+                newBest = true;
+            }
+        }
     }
 }
 
@@ -288,25 +318,41 @@ async function gameInit()
     // pause the engine whenever any menu (including dialogs) is visible
     installAutoPause();
 
-    const startDifficulty = (w, h, m) =>
+    const startDifficulty = (id, w, h, m) =>
     {
+        difficulty = id;
         setDifficulty(w, h, m);
         resetGame();
         isPlaying = true;
         hideMenu('title');
     };
 
-    createMenu({
+    // Format a label that shows the best time after the difficulty name when
+    // one has been recorded. EASY isn't tracked, so it stays bare.
+    const diffLabel = (name, d) =>
+    {
+        const best = getBestTime(d);
+        return best ? `${name}   BEST ${best}s` : name;
+    };
+
+    const titleMenu = createMenu({
         id: 'title',
         title: 'MINESWEEPER',
         dismissable: false,
         items: [
-            {type:'button', label:'EASY',   onClick: () => startDifficulty(9, 9, 10)},
-            {type:'button', label:'MEDIUM', onClick: () => startDifficulty(16, 16, 40)},
-            {type:'button', label:'HARD',   onClick: () => startDifficulty(30, 16, 99)},
+            {type:'button', label:'EASY',   onClick: () => startDifficulty('easy',   9,  9, 10)},
+            {type:'button', id:'mediumBtn', label:'MEDIUM', onClick: () => startDifficulty('medium', 16, 16, 40)},
+            {type:'button', id:'hardBtn',   label:'HARD',   onClick: () => startDifficulty('hard',   30, 16, 99)},
             {type:'separator'},
             {type:'button', label:'ABOUT',  onClick: () => pushMenu('about')},
         ],
+        // Refresh best-time labels every time the title appears so a fresh
+        // record from the previous round is reflected immediately.
+        onShow: () =>
+        {
+            titleMenu.getItem('mediumBtn')?.setLabel(diffLabel('MEDIUM', 'medium'));
+            titleMenu.getItem('hardBtn')  ?.setLabel(diffLabel('HARD',   'hard'));
+        },
     });
 
     createMenu({
@@ -498,8 +544,22 @@ function gameRenderPost()
             hsl(0,.75,.65), 6, hsl(0,0,0));
 
     if (gameWon)
+    {
         drawTextScreen('You win! Press R to play again.', vec2(mainCanvasSize.x/2, mainCanvasSize.y-60), 52,
             hsl(.33,.6,.65), 6, hsl(0,0,0));
+
+        // For tracked difficulties, surface either NEW BEST! or current best.
+        if (difficulty === 'medium' || difficulty === 'hard')
+        {
+            const seconds = Math.ceil(endTime - startTime);
+            const best = getBestTime(difficulty);
+            const line = newBest
+                ? `NEW BEST! ${seconds}s on ${difficulty.toUpperCase()}`
+                : `${seconds}s — best ${best}s`;
+            drawTextScreen(line, vec2(mainCanvasSize.x/2, mainCanvasSize.y-110), 32,
+                newBest ? hsl(.15,.9,.7) : hsl(0,0,.85), 4, hsl(0,0,0));
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
