@@ -68,6 +68,15 @@
   // the road instead of straddling the lane line.
   const CAR_LIFT      = .35;
 
+  // ---- Log 3-slice ----  Logs vary in width, so the single atlas tile is
+  // baked at a reference width then drawn as fixed end caps + a stretched
+  // middle (so the round end caps never smear). See paintLog / drawLog.
+  const LOG_BAKE_W   = 4.0;                          // world width the tile is baked at
+  const LOG_CAP_FRAC = .2;                           // each end cap = this fraction of the tile
+  const LOG_CAP_PX   = Math.round(500 * LOG_CAP_FRAC); // cap width in tile pixels
+  const LOG_CAP_W    = LOG_BAKE_W * LOG_CAP_FRAC;    // cap width in world units (drawn fixed)
+  let logCapTile, logMidTile;                        // sub-regions of atlas tile 13
+
   // ---- Wheel placement ----  (one place to tweak where tires sit)
   // Fractions are of the relevant body's render size; tweak + reload.
   const WHEEL = {
@@ -773,18 +782,6 @@
     ctx.fillStyle = '#5a5a5a'; ctx.beginPath(); ctx.arc(250, 250, 36, 0, Math.PI*2); ctx.fill();
   }
 
-  function paintLog(ctx) {
-    ctx.lineJoin = 'round';
-    const g = ctx.createLinearGradient(0, 80, 0, 420);
-    g.addColorStop(0, '#a9743f'); g.addColorStop(.5, '#8a5a2c'); g.addColorStop(1, '#5f3c1c');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.roundRect(18, 90, 464, 320, 44); ctx.fill();
-    ctx.strokeStyle = '#4a2e15'; ctx.lineWidth = 12; ctx.stroke();
-    // bark grooves
-    ctx.strokeStyle = 'rgba(60,38,18,.5)'; ctx.lineWidth = 9;
-    for (const gx of [165, 250, 335]) { ctx.beginPath(); ctx.moveTo(gx, 104); ctx.lineTo(gx, 396); ctx.stroke(); }
-  }
-
   function paintFrog(ctx) {
     // painted facing UP (head at small y); rotated by facing at draw time
     ctx.lineJoin = 'round';
@@ -830,6 +827,43 @@
     }
   }
 
+  // Log baked at a reference width (LOG_BAKE_W × .85), drawn world-local and
+  // centred so 1px in the cap regions maps 1:1 to world when the caps are blit
+  // at LOG_CAP_W. The middle (grooves/knot/bands) is the part that stretches.
+  function paintLog(ctx) {
+    const W = LOG_BAKE_W, h = .85;
+    ctx.save();
+    ctx.translate(250, 250);            // composes with the tile's draw origin
+    ctx.scale(500/W, -500/h);           // world-local → tile px, +y up
+    const rect = (cx,cy,sx,sy,c) => { ctx.fillStyle = c.toString(); ctx.fillRect(cx-sx/2, cy-sy/2, sx, sy); };
+    const elli = (cx,cy,dx,dy,c) => { ctx.fillStyle = c.toString(); ctx.beginPath(); ctx.ellipse(cx,cy,dx/2,dy/2,0,0,Math.PI*2); ctx.fill(); };
+    const circ = (cx,cy,d,c)    => { ctx.fillStyle = c.toString(); ctx.beginPath(); ctx.arc(cx,cy,d/2,0,Math.PI*2); ctx.fill(); };
+
+    const cs = .9; // center scale
+    const co = (1 - cs) / 2; // center offset to keep the scaled middle centred in the tile
+    rect(co, 0,     cs*W,     h,     hsl(28/360,.55,.34));   // body
+    rect(co, h*.22, cs*W*.98, h*.18, hsl(28/360,.55,.46));   // top highlight band
+    rect(co,-h*.30, cs*W*.98, h*.15, hsl(28/360,.5, .20));   // bottom shadow band
+    const ringColors = [
+      hsl(28/360,.45,.22), hsl(28/360,.5,.32), hsl(28/360,.55,.42), hsl(28/360,.55,.55),
+    ];
+    for (const side of [-1, 1]) {                        // concentric end caps (inset from edge)
+      const ex = side*(W/2 - .2);
+      elli(ex,0, .35, h*.98, ringColors[0]);
+      elli(ex,0, .25, h*.7,  ringColors[1]);
+      elli(ex,0, .16, h*.45, ringColors[2]);
+      elli(ex,0, .07, h*.20, ringColors[3]);
+    }
+    // grooves + knot kept within |x|<1 so they land in the stretchable middle
+    for (let i=0; i<3; i++) {
+      const ox = (((i*97+37)%100)/100 - .5) * 2.0;
+      rect(ox, .02, .06, h*.65, hsl(28/360,.5,.22));
+    }
+    circ(.05,.05, .14, hsl(28/360,.6,.18));
+    circ(.05,.05, .07, hsl(28/360,.5,.30));
+    ctx.restore();
+  }
+
   function buildAtlas() {
     initDrawToTexture();
     sprites.sedanBase     = drawToTexture(0,  paintSedanBase,     'white sedan body, side view, tintable');
@@ -845,9 +879,15 @@
     sprites.busBase       = drawToTexture(10, paintBusBase,       'white tall bus body, tintable');
     sprites.busDetail     = drawToTexture(11, paintBusDetail,     'bus window row, door, stripe, headlight overlay');
     sprites.tire          = drawToTexture(12, paintTire,          'black rubber tire with gray hub, top wheel');
-    sprites.log           = drawToTexture(13, paintLog,           'brown floating log with bark grooves');
+    sprites.log           = drawToTexture(13, paintLog,           'brown log: ringed cut ends + banded body (3-slice)');
     sprites.frog          = drawToTexture(14, paintFrog,          'green cartoon frog from above, big eyes, facing up');
     sprites.lily          = drawToTexture(15, paintLily,          'green lily pad with notch, top view');
+
+    // Sub-regions of the log tile for 3-slice drawing: left cap, stretchable
+    // middle, right cap (the right cap reuses the left, mirrored).
+    const lp = sprites.log.pos, ltex = sprites.log.textureInfo;
+    logCapTile = new TileInfo(vec2(lp.x, lp.y),              vec2(LOG_CAP_PX, 500),        ltex, 0, 0);
+    logMidTile = new TileInfo(vec2(lp.x + LOG_CAP_PX, lp.y), vec2(500 - 2*LOG_CAP_PX, 500), ltex, 0, 0);
   }
 
   // ------------------------------------------------------------
@@ -1024,11 +1064,14 @@
   }
 
   function drawLog(l) {
-    const bumpY = logBumpY(l);
-    const w = l.size.x, x = l.pos.x, y = l.pos.y + bumpY;
-
-    // no shadow — logs float on the water
-    drawTile(vec2(x, y), vec2(w, .98), sprites.log, WHITE);
+    // 3-slice the atlas log tile: fixed-size end caps (never smear) + a middle
+    // stretched to this log's width. No shadow — it floats on the water.
+    const w = l.size.x, h = l.size.y;
+    const x = l.pos.x, y = l.pos.y + logBumpY(l);
+    const capW = LOG_CAP_W, edge = w/2 - capW/2;
+    drawTile(vec2(x, y),        vec2(w - capW*2, h), logMidTile, WHITE);
+    drawTile(vec2(x - edge, y), vec2(capW, h),       logCapTile, WHITE);            // left cap
+    drawTile(vec2(x + edge, y), vec2(capW, h),       logCapTile, WHITE, 0, true);   // right cap (mirrored)
   }
 
   function drawFrog(basePos = frog.pos, facing = frog.facing, hopAnimT = frog.hopAnim, breathPhase = 0) {
