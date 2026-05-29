@@ -356,6 +356,16 @@
       if (dy !== 0)          return tryMove(0, sign(-dy)); // screen-y is down-positive; world-y is up
     }
 
+    // Mouse (non-touch): click hops one step in the direction of the cursor
+    // RELATIVE TO THE FROG. mousePos and frog.pos are both world-space (y-up),
+    // so no y flip is needed here.
+    if (!isTouchDevice && mouseWasPressed(0) && !isMenuVisible()) {
+      const dx = mousePos.x - frog.pos.x;
+      const dy = mousePos.y - frog.pos.y;
+      if (abs(dx) > abs(dy)) return tryMove(sign(dx), 0);
+      if (dy !== 0)          return tryMove(0, sign(dy));
+    }
+
     // Stick (analog only — touch gamepad is disabled): pick dominant cardinal,
     // but only hop on the
     // frame the stick crosses INTO that direction. Returning to neutral arms
