@@ -276,22 +276,68 @@ class Machine extends EngineObject
         this.assignedDemon = null;
         this.reels = [];                 // current displayed symbols (objects from BALANCE.symbols)
         for (let i=0;i<BALANCE.reelCount;++i) this.reels.push(rollSymbol());
-        this.spinTimer = new Timer();    // used by demon-driven spins (later task)
         this.flash = 0;                  // win flash amount (0..1)
+        // reel-spin animation state
+        this.spinning = false;
+        this.finalReels = [];            // decided result, revealed as reels stop
+        this.reelStop = [];              // per-reel stop Timers (staggered L->R)
+        this.reelStopped = [];           // per-reel locked flag
+        this.cycleClock = 0;             // throttles the blur symbol-swap
+        this.spinSilent = false;         // demon auto-spins are silent; manual clicks tick
     }
     update()
     {
         if (this.flash > 0) this.flash = max(0, this.flash - timeDelta*3);
+        if (this.spinning) this.updateSpin();
         super.update();
     }
-    spin()
+    // Start a spin: decide the result up front, then animate the reels cycling
+    // and stopping staggered left-to-right. silent=true for demon auto-spins so
+    // continuous auto-play doesn't machine-gun the sfx; manual clicks tick.
+    spin(silent = false)
     {
+        if (this.spinning) return;   // ignore re-triggers mid-spin
         const wildChance = this.wildCount * BALANCE.wildChancePerWild;
-        for (let i=0;i<this.reels.length;++i)
+        this.finalReels = [];
+        for (let i=0;i<BALANCE.reelCount;++i)
+            this.finalReels.push(rand() < wildChance ? '__WILD__' : rollSymbol());
+        this.spinning = true;
+        this.spinSilent = silent;
+        this.cycleClock = 0;
+        this.reelStop = [];
+        this.reelStopped = [];
+        for (let i=0;i<BALANCE.reelCount;++i)
         {
-            if (rand() < wildChance) this.reels[i] = '__WILD__';
-            else this.reels[i] = rollSymbol();
+            this.reelStop.push(new Timer(0.35 + i*0.18));   // staggered stop
+            this.reelStopped.push(false);
         }
+        if (!silent) sfxSpin.play(this.pos);   // spin-start whir
+    }
+    updateSpin()
+    {
+        this.cycleClock += timeDelta;
+        const cycle = this.cycleClock >= 0.05;   // ~20Hz blur swap
+        if (cycle) this.cycleClock = 0;
+        let allStopped = true;
+        for (let i=0;i<BALANCE.reelCount;++i)
+        {
+            if (this.reelStopped[i]) continue;
+            if (this.reelStop[i].elapsed())
+            {
+                this.reelStopped[i] = true;
+                this.reels[i] = this.finalReels[i];        // lock to result
+                if (!this.spinSilent) sfxSpin.play(this.pos, 0.5);   // reel-stop tick
+            }
+            else
+            {
+                allStopped = false;
+                if (cycle) this.reels[i] = rollSymbol();   // cycling blur
+            }
+        }
+        if (allStopped) { this.spinning = false; this.resolveWin(); }
+    }
+    resolveWin()
+    {
         // win = all non-wild reels share one symbol (wilds match anything); all-wild = top jackpot
         const real = this.reels.filter(r => r !== '__WILD__');
         let win = null;
@@ -358,7 +404,7 @@ class Demon extends EngineObject
         if (this.energy > 0)
         {
             this.spinClock += timeDelta * this.energy * def.speedMult;
-            if (this.spinClock >= BALANCE.spinInterval) { this.spinClock = 0; this.machine.spin(); }
+            if (this.spinClock >= BALANCE.spinInterval) { this.spinClock = 0; this.machine.spin(true); }
         }
         super.update();
     }
@@ -521,21 +567,94 @@ function buyDemon(type)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// MENU SYSTEM TEMPLATE
-// Demonstrates createMenu() and createToolbar() from menus.js.
+// DOCKED SHOP PANEL (HTML/CSS, anchored top-right)
+// An always-visible DOM panel — deliberately NOT a menus.js menu — so it never
+// pauses the game: demons keep draining and machines keep spinning while you
+// shop. Buttons mirror the economy fns; refreshShopPanel() updates live $costs
+// and disabled state every frame (called from gameRenderPost, which runs even
+// when a modal menu has paused gameUpdate). The pointerOverShop flag gates
+// canvas input so clicks on the panel don't also spin/pan the board behind it.
+
+let shopPanel = null, shopButtons = [], pointerOverShop = false;
+
+function buildShopPanel()
+{
+    const style = document.createElement('style');
+    style.textContent =
+        '#slot-shop{position:fixed;top:58px;right:8px;width:212px;max-height:calc(100vh - 70px);' +
+        'overflow-y:auto;box-sizing:border-box;padding:10px;background:rgba(20,0,16,.92);' +
+        'border:2px solid #f0a;border-radius:12px;font-family:sans-serif;color:#fff;z-index:5;' +
+        'user-select:none;display:none;flex-direction:column;gap:6px;box-shadow:0 0 16px #000;}' +
+        '#slot-shop .shop-title{font-weight:bold;text-align:center;letter-spacing:2px;color:#f0a;' +
+        'font-size:18px;margin-bottom:2px;}' +
+        '#slot-shop .shop-div{height:1px;background:rgba(255,0,170,.3);margin:3px 0;}' +
+        '#slot-shop button{display:block;width:100%;box-sizing:border-box;padding:8px 6px;' +
+        'background:#3a0a2e;color:#fff;border:1px solid rgba(255,0,170,.4);border-radius:8px;' +
+        'font:inherit;font-size:13px;cursor:pointer;text-align:left;}' +
+        '#slot-shop button:hover:not(:disabled){background:#5a1046;}' +
+        '#slot-shop button:disabled{opacity:.4;cursor:default;}';
+    document.head.appendChild(style);
+
+    shopPanel = document.createElement('div');
+    shopPanel.id = 'slot-shop';
+    const title = document.createElement('div');
+    title.className = 'shop-title';
+    title.textContent = 'SHOP';
+    shopPanel.appendChild(title);
+
+    // entry: {label, cost(): number|null, act(), disabled?(): bool} or {div:true}
+    const entries = [
+        { label:'Buy Machine',   cost:() => machineCost(), act: buyMachine },
+        { label:'Expand Pit +5', cost:() => pitCost(),     act: expandPit },
+        { div:true },
+        ...Object.keys(DEMON_TYPES).map(key => ({
+            label:'Buy ' + DEMON_TYPES[key].name, cost:() => demonCost(key), act:() => buyDemon(key) })),
+        { div:true },
+        { label:'Level Up', cost:() => { const m = cheapestLevelMachine(); return m ? levelCost(m) : null; }, act: levelUpMachine },
+        { label:'Buy Wild', cost:() => { const m = cheapestWildMachine(); return m ? wildCost(m) : null; }, act: buyWild },
+        { label:'Sell Machine (50%)', cost:() => null, act: sellMachine, disabled:() => machines.length <= 1 },
+    ];
+
+    shopButtons = [];
+    for (const e of entries)
+    {
+        if (e.div) { const d = document.createElement('div'); d.className = 'shop-div'; shopPanel.appendChild(d); continue; }
+        const btn = document.createElement('button');
+        btn.addEventListener('click', () => { e.act(); refreshShopPanel(); });
+        shopPanel.appendChild(btn);
+        shopButtons.push({ btn, e });
+    }
+
+    // Keep panel interaction from leaking to the canvas (spin/pan): pointerOverShop
+    // (checked in gameUpdate) is the reliable guard; stopPropagation is a belt-and-
+    // suspenders backstop for any document-level listeners.
+    shopPanel.addEventListener('pointerenter', () => pointerOverShop = true);
+    shopPanel.addEventListener('pointerleave', () => pointerOverShop = false);
+    shopPanel.addEventListener('pointerdown', e => e.stopPropagation());
+    document.body.appendChild(shopPanel);
+}
+
+function refreshShopPanel()
+{
+    if (!shopPanel) return;
+    // Visible only during active play and when no modal menu (options/title/
+    // dialog) is up — modals pause the game and would overlap the panel.
+    const show = isPlaying() && !isMenuVisible();
+    shopPanel.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+    for (const { btn, e } of shopButtons)
+    {
+        const c = e.cost ? e.cost() : null;
+        btn.textContent = c == null ? e.label : `${e.label} ($${c})`;
+        btn.disabled = e.disabled ? e.disabled() : (c == null || !canAfford(c));
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
-// Pause the engine whenever any menu (including alert/confirm dialogs) is
-// visible. setMenuVisibilityCallback fires for every show/hide, so we don't
-// have to wire onShow/onHide on each individual menu — and we can't miss
-// dialogs created internally by showAlertDialog / showConfirmDialog. Without
-// this, alert dialogs leave paused=false, letting gameUpdate run on the same
-// frame as a menu Esc and re-open pause on top of the surfaced menu.
-
-// Gameplay code in gameUpdate / gameRender gates on isPlaying() from menus.js
-// (replaces the old per-game let isPlaying / setPlaying boilerplate). The
-// toolbar is always visible — installDefaultToolbar grays the hamburger
-// when the title menu is on top.
+// setMenuVisibilityCallback drives `paused` for every menus.js menu (title,
+// options, medals, about, dialogs), so opening any of those freezes the world.
+// The docked shop panel is plain DOM, NOT a menu, so it does NOT pause the game.
+// Gameplay code gates on isPlaying() from menus.js.
 
 async function gameInit()
 {
@@ -646,6 +765,12 @@ async function gameInit()
                 onChange: v => setScreenShakeEnabled(v)},
             {type:'button',   label:'FULLSCREEN', onClick: toggleFullscreen},
             {type:'separator'},
+            // Return to the title screen. Idle game: quitting KEEPS progress
+            // (save first); the existing pit stays as the frozen backdrop.
+            {type:'button',   label:'QUIT TO TITLE', onClick: () => showConfirmDialog({
+                message:'Quit to title? Your progress is kept.', title:'QUIT',
+                onYes: () => { saveGame(); clearSubmenuStack(); quitToTitle(); } })},
+            {type:'separator'},
             // Explicit progress wipe (QUIT keeps the save; this is the only
             // path that erases it). newGame() resets state, saveGame() persists
             // the fresh state over the old blob.
@@ -673,86 +798,23 @@ async function gameInit()
         ],
     });
 
-    // ----- pause menu (initialItemId defaults selection to RESUME) -----
-    createMenu({
-        id: 'pause',
-        title: 'PAUSED',
-        initialItemId: 'resume',
-        items: [
-            {type:'button', id:'resume',  label:'RESUME',        onClick: () => hideMenu('pause')},
-            {type:'button', id:'options', label:'OPTIONS',       onClick: () => pushMenu('options')},
-            {type:'button', id:'quit',    label:'QUIT TO TITLE', onClick: () =>
-            {
-                showConfirmDialog({
-                    message: 'Quit to title?',
-                    // Idle game: quitting KEEPS progress. Save first, then quit
-                    // to title — the existing pit stays as the frozen backdrop.
-                    onYes: () => { saveGame(); quitToTitle(); },
-                });
-            }},
-        ],
-    });
+    // ----- docked shop panel (HTML/CSS, anchored top-right, ALWAYS visible
+    // during play). It's a DOM panel rather than a menus.js menu so it does NOT
+    // pause the game — demons keep draining and machines keep spinning while you
+    // shop. Built/refreshed by buildShopPanel()/refreshShopPanel(). -----
+    buildShopPanel();
 
-    // ----- shop menu (buy machines / demons / upgrades; full economy) -----
-    // While any menu is visible the engine is paused (setMenuVisibilityCallback
-    // above), so the pit freezes while shopping — intended.
-    //
-    // liveItem builds a button whose label shows a live "$cost" and which
-    // disables (feedback only) when unaffordable. costFn returns null when the
-    // action is unavailable (e.g. no machine to level up / buy wild for), in
-    // which case we show the bare base label and disable the button. The buy
-    // functions themselves already no-op when unaffordable.
-    const liveItem = (id, baseLabel, costFn, onClick) => ({
-        type:'button', id, label:baseLabel, onClick,
-        onUpdate: () =>
-        {
-            const it = shopMenu.getItem(id);
-            const c = costFn();
-            it.setLabel(c == null ? baseLabel : `${baseLabel} ($${c})`);
-            it.setDisabled(c == null || !canAfford(c));
-        },
-    });
-
-    const demonItems = Object.keys(DEMON_TYPES).map(key =>
-        liveItem('buy_' + key, 'Buy ' + DEMON_TYPES[key].name,
-            () => demonCost(key), () => buyDemon(key)));
-
-    const shopMenu = createMenu({
-        id: 'shop',
-        title: 'SHOP',
-        dismissable: true,
-        items: [
-            liveItem('buyMachine', 'Buy Machine', () => machineCost(), buyMachine),
-            liveItem('expandPit',  'Expand Pit +5', () => pitCost(), expandPit),
-            {type:'separator'},
-            ...demonItems,
-            {type:'separator'},
-            liveItem('levelUp', 'Level Up',
-                () => { const m = cheapestLevelMachine(); return m ? levelCost(m) : null; },
-                levelUpMachine),
-            liveItem('buyWild', 'Buy Wild',
-                () => { const m = cheapestWildMachine(); return m ? wildCost(m) : null; },
-                buyWild),
-            // Sell Machine has no cost; disable it when only one machine
-            // remains (sellMachine keeps >= 1). Uses the public item API.
-            {type:'button', id:'sellMachine', label:'Sell Machine (50%)', onClick: sellMachine,
-                onUpdate: () => shopMenu.getItem('sellMachine').setDisabled(machines.length <= 1)},
-            {type:'separator'},
-            {type:'button', label:'CLOSE', onClick: () => hideMenu('shop')},
-        ],
-    });
-
-    // ----- toolbar (always visible, including over the title menu) -----
-    // installDefaultToolbar gives the standard mute / fullscreen / hamburger
-    // trio, with built-in title-aware hamburger graying so the player can't
-    // try to open the pause menu from on top of the title menu. We insert a
-    // SHOP button before the trio so it sits alongside mute/fullscreen/menu;
-    // the hamburger (☰) still opens the pause menu, so pause stays reachable.
+    // ----- toolbar (mute / fullscreen / menu, top-right) -----
+    // No pause menu — an idle game has no reason to pause. The ☰ button opens
+    // OPTIONS (settings: volume, shake, quit, reset) during play instead of a
+    // pause menu, and closes any open menu when one is up. mute + fullscreen are
+    // the standard helpers. The button is auto-grayed while the title is on top.
     installDefaultToolbar({
-        extraItemsBefore: [
-            {type:'button', id:'shop', label:'🛒', title:'Shop',
-                onClick: () => { if (isPlaying()) showMenu('shop'); }},
-        ],
+        onHamburger: () =>
+        {
+            if (isMenuVisible()) { clearSubmenuStack(); hideAllMenus(); }
+            else if (isPlaying()) showMenu('options');
+        },
     });
 
     // Restore saved progress (or start fresh if there's no save) so the pit
@@ -786,10 +848,7 @@ async function gameInit()
 ///////////////////////////////////////////////////////////////////////////////
 function gameUpdate()
 {
-    // Esc / gamepad Start opens the pause menu while playing. bindPauseKey
-    // (menus.js) polls every frame, guards on isMenuVisible(), plays the
-    // activate sound, and swallows the press. Early-return when it fires.
-    if (bindPauseKey({ when: () => isPlaying() })) return;
+    // No pause: an idle game has no reason to pause, so there's no pause key.
     if (!isPlaying()) return;
 
     // Press/hold/release: a click (spin/refresh) vs a drag (pan camera).
@@ -797,7 +856,9 @@ function gameUpdate()
     // drag threshold. screenToWorldDelta flips Y (x/scale, y/-scale), so the
     // formula cameraPos = startCam - worldDelta moves the board WITH the cursor
     // on both axes — verified, no per-axis adjustment needed.
-    if (mouseWasPressed(0) && !isMenuVisible())
+    // pointerOverShop guard: don't arm a spin/pan when the press lands on the
+    // docked DOM shop panel (its buttons handle their own clicks).
+    if (mouseWasPressed(0) && !isMenuVisible() && !pointerOverShop)
     {
         panStartMouse = mousePosScreen.copy();
         panStartCam = cameraPos.copy();
@@ -822,7 +883,7 @@ function gameUpdate()
         {
             const d = demonAtPos(mousePos);
             if (d) d.refresh();
-            else { const m = machineAtPos(mousePos); if (m && !m.assignedDemon) { m.spin(); sfxSpin.play(m.pos); } }
+            else { const m = machineAtPos(mousePos); if (m && !m.assignedDemon) m.spin(); }   // spin() plays its own sfx
         }
         panStartMouse = null;
     }
@@ -856,6 +917,11 @@ function gameRender()
 
 function gameRenderPost()
 {
+    // Refresh the docked DOM shop panel (live costs / disabled state / show-hide).
+    // Done here (not gameUpdate) so it stays correct even while a modal menu has
+    // paused gameUpdate — gameRenderPost runs every frame regardless of pause.
+    refreshShopPanel();
+
     // Cash HUD — always visible during play. Drawn here (screen pixels)
     // rather than via a toolbar onUpdate: menus.js's per-frame onUpdate loop
     // only ticks menu items, not toolbar items, so a toolbar label would not
