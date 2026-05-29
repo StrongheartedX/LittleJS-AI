@@ -38,11 +38,12 @@ const PEG_COLS_TOP   = 4;          // pegs in top row
 const PEG_RADIUS     = 0.32;
 const PEG_SPACING    = 1.9;        // distance between peg centers
 const SLOT_COUNT     = 9;
+const BALL_LIMIT     = 100;        // balls per run
 const BALL_RADIUS    = 0.55;
 const DROP_LINE_Y    = BOARD_HEIGHT/2 - 1.5;
 const FLOOR_Y        = -BOARD_HEIGHT/2;
 const SLOT_TOP_Y     = FLOOR_Y + 4;
-const SLOT_VALUES    = [100, 50, 20, 10, 5, 10, 20, 50, 100]; // edges = high
+const SLOT_VALUES    = [5, 10, 20, 50, 100, 50, 20, 10, 5]; // center = high
 const SLOT_COLORS    = SLOT_VALUES.map(v =>
     hsl(percent(v, 5, 100) * .12 + .55, .9, .55));
 const BALL_COLORS    = [
@@ -54,6 +55,7 @@ const BALL_COLORS    = [
 // Game state
 let score          = 0;
 let dropCount      = 0;
+let runOver        = false;
 let aimX           = 0;
 let dropCooldown   = new Timer();
 let pegs           = [];          // Box2dStaticObject[]
@@ -224,6 +226,7 @@ function buildBoard()
 function dropBall()
 {
     if (dropCooldown.active()) return;
+    if (dropCount >= BALL_LIMIT) return; // out of balls
     dropCooldown.set(.12);
 
     const x = clamp(aimX, -BOARD_WIDTH/2 + 1, BOARD_WIDTH/2 - 1);
@@ -245,10 +248,9 @@ function checkScoring()
     {
         const b = balls[i];
         if (b.destroyed) { balls.splice(i, 1); continue; }
-        if (b.scored) continue;
 
-        // ball reached the bottom — find which slot it landed in
-        if (b.pos.y < SLOT_TOP_Y - 1.5)
+        // ball reached the bottom — score it ONCE, find which slot it landed in
+        if (!b.scored && b.pos.y < SLOT_TOP_Y - 1.5)
         {
             const slotWidth = BOARD_WIDTH / SLOT_COUNT;
             const idx = clamp(
@@ -258,6 +260,7 @@ function checkScoring()
             score += slot.value;
             slot.flashTimer.set(.6);
             b.scored = true;
+            b.scoreColor = slot.color;
 
             // popup text
             scorePops.push({
@@ -276,13 +279,15 @@ function checkScoring()
             else
                 sndScore.play(b.pos, .55, .85 + (slot.value/100) * .5);
 
-            // mark for cleanup after a short visible settle
-            b.cleanupTimer = new Timer(.4);
+            // flagged to explode — pops within the next second
+            b.cleanupTimer = new Timer(rand(.4, .9));
         }
 
-        // remove balls that finished settling, or that fell off the world
+        // fuse burned out — explode, shove nearby balls, and remove it
         if (b.cleanupTimer && b.cleanupTimer.elapsed())
         {
+            spawnExplosion(b.pos, b.scoreColor || hsl(.13, .9, .6));
+            pushNearbyBalls(b.pos, b);
             if (!b.destroyed) b.destroy();
             balls.splice(i, 1);
         }
@@ -294,8 +299,66 @@ function checkScoring()
         }
     }
 
+    // run ends once every ball is used and the board has cleared
+    if (dropCount >= BALL_LIMIT && balls.length === 0 && !runOver && isPlaying())
+    {
+        runOver = true;
+        showGameOverDialog({ score, onContinue: endRunToTitle });
+    }
+
     // best score persistence
     submitBestScore(score);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Burst of sparks + an expanding ring when a scored ball pops.
+function spawnExplosion(pos, color)
+{
+    sndScore.play(pos, .35, 1.4);
+    scorePops.push({
+        pos: pos.copy(), value: '', ring: true,
+        life: .4, maxLife: .4, vel: vec2(), color, size: 4,
+    });
+    for (let i = 14; i--;)
+    {
+        const l = rand(.3, .6);
+        scorePops.push({
+            pos:   pos.copy(),
+            value: '',
+            life:  l,
+            maxLife: l,
+            vel:   randVec2(rand(.1, .35)),
+            color: color.copy(),
+            size:  rand(.2, .45),
+        });
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Give nearby balls a tiny outward shove when one explodes.
+function pushNearbyBalls(pos, exploder)
+{
+    const R = 3.5; // push radius in world units
+    for (const o of balls)
+    {
+        if (o === exploder || o.destroyed) continue;
+        const d = o.pos.subtract(pos);
+        const dist = d.length();
+        if (dist > R || dist < .01) continue;
+        const strength = (1 - dist / R) * 5; // wu/sec, gentle nudge
+        o.setLinearVelocity(o.getLinearVelocity().add(d.normalize(strength)));
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Tear down the current run and return to the title.
+function endRunToTitle()
+{
+    clearSubmenuStack();
+    hideAllMenus();
+    setPlaying(false);
+    resetGame();
+    showMenu('title');
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -316,7 +379,13 @@ function drawPops()
     scorePops.forEach(p =>
     {
         const a = clamp(p.life / p.maxLife, 0, 1);
-        if (p.value)
+        if (p.ring)
+        {
+            const t = 1 - a;                 // expand as it fades
+            const c = p.color.copy(); c.a = a;
+            drawCircle(p.pos, p.size * (.3 + t), hsl(0, 0, 0, 0), .2, c);
+        }
+        else if (p.value)
         {
             const c = p.color.copy(); c.a = a;
             const oc = hsl(0,0,0,a);
@@ -339,6 +408,7 @@ function resetGame()
     scorePops = [];
     score = 0;
     dropCount = 0;
+    runOver = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -396,8 +466,8 @@ async function gameInit()
         items: [
             {type:'text', text:
                 'Move the aimer with the MOUSE or LEFT/RIGHT (A/D) keys.\n\n' +
-                'CLICK or press SPACE to drop a ball. Multiple balls allowed!\n\n' +
-                'Edge slots score 100, center scores 5. Stack up the score.\n\n' +
+                'CLICK or press SPACE to drop a ball — you get 100 per run.\n\n' +
+                'Center slot scores 100, edges score 5. Stack up the score.\n\n' +
                 'ESC or START to pause.'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
@@ -522,7 +592,7 @@ function gameRenderPost()
         drawTextScreen('BEST  ' + getBestScore(),
             vec2(mainCanvasSize.x/2, 95), 24,
             hsl(0, 0, .85), 3, hsl(0, 0, 0));
-        drawTextScreen('BALLS  ' + dropCount,
+        drawTextScreen('BALLS  ' + (BALL_LIMIT - dropCount),
             vec2(mainCanvasSize.x/2, 125), 20,
             hsl(0, 0, .7), 2, hsl(0, 0, 0));
     }
