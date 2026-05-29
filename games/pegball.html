@@ -362,18 +362,32 @@ function addScorePop(pos, text, hue, big)
 
 function updateInput()
 {
-    // Always update the aim direction so the cannon tracks the mouse,
-    // but only shoot while actually playing.
-    const toMouse = mousePos.subtract(cannonPos);
-    if (toMouse.length() > .01) aimDir = toMouse.normalize();
-
+    // Aim follows the most recently used device (like the bubble shooter):
+    //  - mouse: cannon points straight at the cursor
+    //  - gamepad / keyboard: left/right (left stick, d-pad, or arrows/A-D)
+    //    sweeps the aim by fixed increments; idle holds the current angle so it
+    //    never snaps back to the mouse.
     const minAng = -PI * .95, maxAng = -PI * .05;
     let ang = Math.atan2(aimDir.y, aimDir.x);
+    if (usingMouseInput())
+    {
+        const toMouse = mousePos.subtract(cannonPos);
+        if (toMouse.length() > .01) ang = Math.atan2(toMouse.y, toMouse.x);
+    }
+    else
+    {
+        const adj = clamp(gamepadStick(0).x + keyDirection().x, -1, 1); // +1 = sweep right
+        if (adj)
+        {
+            const AIM_SWEEP = 2.0; // radians per second
+            ang += adj * AIM_SWEEP * timeDelta; // ang grows toward maxAng (right) within the arc
+        }
+    }
     ang = clamp(ang, minAng, maxAng);
     aimDir = vec2(Math.cos(ang), Math.sin(ang));
 
     if (!isPlaying() || gameOver) return;
-    if ((mouseWasPressed(0) || keyWasPressed('Space')) && !activeBall && ballsRemaining > 0)
+    if ((mouseWasPressed(0) || keyWasPressed('Space') || gamepadWasPressed(0)) && !activeBall && ballsRemaining > 0)
         shootBall();
 }
 
