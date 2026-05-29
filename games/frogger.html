@@ -832,22 +832,24 @@
       const cabX = x + dir * (total/2 - TRUCK_CAB.x/2);
       const trX  = x - dir * (total/2 - TRUCK_TRAILER.x/2);
       const wy   = y - .50;
-      drawTire(cabX + dir*TRUCK_CAB.x*.20, wy);   // cab front axle
-      drawTire(trX  - dir*TRUCK_TRAILER.x*.30, wy); // trailer rear axle
-      drawTire(trX  + dir*TRUCK_TRAILER.x*.10, wy); // trailer mid axle
       drawTile(vec2(trX, y),  TRUCK_TRAILER, sprites.trailerBase,   c.color, 0, mir);
       drawTile(vec2(trX, y),  TRUCK_TRAILER, sprites.trailerDetail, WHITE,   0, mir);
       drawTile(vec2(cabX, y), TRUCK_CAB,     sprites.cabBase,       c.color, 0, mir);
       drawTile(vec2(cabX, y), TRUCK_CAB,     sprites.cabDetail,     WHITE,   0, mir);
+      // wheels drawn on top of the body
+      drawTire(cabX + dir*TRUCK_CAB.x*.20, wy);   // cab front axle
+      drawTire(trX  - dir*TRUCK_TRAILER.x*.30, wy); // trailer rear axle
+      drawTire(trX  + dir*TRUCK_TRAILER.x*.10, wy); // trailer mid axle
       return;
     }
 
     const r = carRender[c.kind];
     const wy = y - r.y*.42;
-    drawTire(x - r.x*.30, wy);
-    drawTire(x + r.x*.30, wy);
     drawTile(vec2(x, y), r, sprites[c.kind + 'Base'],   c.color, 0, mir);
     drawTile(vec2(x, y), r, sprites[c.kind + 'Detail'], WHITE,   0, mir);
+    // wheels drawn on top of the body
+    drawTire(x - r.x*.30, wy);
+    drawTire(x + r.x*.30, wy);
   }
 
   function drawLog(l) {
@@ -878,8 +880,11 @@
 
   function gameRender() {
     drawLaneBackground();
-    for (const l of logs) drawLog(l);
-    for (const c of cars) drawCar(c);
+    // Draw back-to-front: higher-y (further back) first so lower-y obstacles
+    // overlap and read as nearer the viewer.
+    const byDepth = (a, b) => b.pos.y - a.pos.y;
+    for (const l of [...logs].sort(byDepth)) drawLog(l);
+    for (const c of [...cars].sort(byDepth)) drawCar(c);
 
     // Alive player frog — disappears on death (particles play instead) and on title.
     if (isPlaying() && !gameOver && !respawnTimer.active()) {
