@@ -58,16 +58,14 @@ const sunCore   = hsl(.12,.85,.62);
 const sunRim    = hsl(.12,.75,.72);
 const rayColor  = hsl(.12,.65,.95, 0); // unused (kept for compatibility)
 
-const tinyBirdColor = hsl(0,0,0,.35);
-
 const grassFarA = hsl(.28,.45,.40,.65);
 const grassFarB = hsl(.28,.55,.30,.65);
 const grassNearA= hsl(.26,.55,.35,.85);
 const grassNearB= hsl(.26,.65,.28,.85);
 
-// clouds (opaque)
+// clouds (opaque white body with a soft blue-grey underside shadow)
 const cloudMain  = hsl(0,0,1);
-const cloudShade = hsl(.55,.25,.85);
+const cloudShade = hsl(.60,.30,.86);
 
 const farMount   = hsl(.60,.25,.62);
 const farMount2  = hsl(.60,.22,.55);
@@ -83,13 +81,10 @@ const mountFog    = hsl(.55,.35,.92,.14);
 const snowColor   = hsl(0,0,1,.55);
 const snowShade   = hsl(.55,.20,.90,.30);
 
-// pipe colors (fake gradients using layered stripes)
+// pipe colors (base + light highlight + dark shadow for a tube look)
 const pipeBase   = hsl(.33,.70,.35);
 const pipeDark   = hsl(.33,.80,.22);
-const pipeLight  = hsl(.33,.65,.45);
-const pipeSpec   = hsl(.33,.25,.95,.35);
-const pipeRim    = hsl(.33,.72,.38);
-const pipeRimDk  = hsl(.33,.80,.20);
+const pipeLight  = hsl(.33,.60,.50);
 
 const groundColor = hsl(.1,.55,.35);
 const groundTop = hsl(.12,.55,.45);
@@ -132,7 +127,6 @@ let particleTimer;
 let bgScrollX;
 let clouds;
 let mountainLayers;
-let tinyBirds;
 let grassLayers;
 
 // sfx
@@ -306,34 +300,17 @@ function initScenery()
     // clouds (two parallax layers)
     clouds = [];
     const wrap = 80;
-    for (let i=0; i<12; ++i)
+    for (let i=0; i<9; ++i)
     {
-        const layer = i < 7 ? 0 : 1;
-        const parallax = layer ? .16 : .10;
-        const y = rand(floorY + 6.5, ceilY - 2.0) + (layer ? 0 : 1.0);
+        const layer = i < 5 ? 0 : 1;
+        const parallax = layer ? .18 : .11;
+        const y = rand(floorY + 7.0, ceilY - 1.5) + (layer ? 0 : 1.0);
         clouds.push({
             wrap,
             parallax,
             x: rand(-wrap/2, wrap/2),
             y,
-            r: rand(.85, 1.65) * (layer ? 1.05 : .95),
-        });
-    }
-
-    // tiny distant birds (silhouettes)
-    tinyBirds = [];
-    const birdWrap = 90;
-    for (let i=0; i<18; ++i)
-    {
-        const parallax = rand(.06, .16);
-        tinyBirds.push({
-            wrap: birdWrap,
-            parallax,
-            x: rand(-birdWrap/2, birdWrap/2),
-            y: rand(floorY + 7.5, ceilY - 2.5),
-            s: rand(.16, .34),
-            spd: rand(1.2, 3.2),
-            ph: rand(PI*2),
+            r: rand(.95, 1.8) * (layer ? 1.1 : .9),
         });
     }
 
@@ -410,24 +387,31 @@ function buildMountainField(o)
 function drawMountainField(F)
 {
     const off = -wrapOffset(bgScrollX * F.parallax, F.wrap);
+    const [vMin, vMax] = viewBoundsX(2);
 
     // draw 3 copies to cover view
     for (let k=-1; k<=1; ++k)
     {
-        const layerOffset = vec2(off + k*F.wrap, 0);
+        const shift = off + k*F.wrap;
+
+        // skip copies that fall entirely outside the view
+        if (shift + F.wrap/2 < vMin || shift - F.wrap/2 > vMax) continue;
+
+        const layerOffset = vec2(shift, 0);
 
         // fill the base so there are no gaps between separate mountains
         const baseH = F.bottomY - floorY;
         if (baseH > 0)
-            drawRect(vec2(layerOffset.x, floorY + baseH/2), vec2(F.wrap, baseH), F.colorA);
+            drawRect(vec2(shift, floorY + baseH/2), vec2(F.wrap, baseH), F.colorA);
 
         for (const m of F.mountains)
         {
-            // each mountain is ONE separate drawPoly
-            const pts = m.pts;
+            // cull individual peaks that are offscreen
+            const wx = m.cx + shift;
+            if (wx + m.w/2 < vMin || wx - m.w/2 > vMax) continue;
 
-            // simple fill
-            drawPoly(pts, F.colorA, 0, undefined, layerOffset);
+            // each mountain is ONE separate drawPoly
+            drawPoly(m.pts, F.colorA, 0, undefined, layerOffset);
         }
     }
 }
@@ -440,36 +424,31 @@ function wrapOffset(x, wrap)
     return x;
 }
 
-function drawCloud(pos, r, shade=0)
+// horizontal view bounds (with margin) for culling offscreen scenery
+function viewBoundsX(margin=0)
 {
-    // simple blobby cloud (opaque)
-    const s = r;
-    const p = pos;
-    const main = cloudMain;
-    const sh = shade ? cloudShade : hsl(.55,.25,.9);
-
-    drawCircle(p.add(vec2(-.55*s, 0)), (s*1.05)*2, main);
-    drawCircle(p.add(vec2(0, .25*s)), (s*1.25)*2, main);
-    drawCircle(p.add(vec2(.65*s, 0)), (s*0.95)*2, main);
-    drawCircle(p.add(vec2(.15*s, -.15*s)), (s*1.05)*2, main);
-
-    // subtle bottom tint (still opaque)
-    drawCircle(p.add(vec2(0, -.35*s)), (s*1.18)*2, sh);
+    const half = getCameraSize().x/2 + margin;
+    return [cameraPos.x - half, cameraPos.x + half];
 }
 
-function drawTinyBird(pos, s, phase)
+// puff layout shared by every cloud (offsets are in radius units)
+const cloudPuffs = [
+    [vec2(-1.05, -.10), .80],
+    [vec2(-.45,  .12), 1.15],
+    [vec2( .25,  .18), 1.25],
+    [vec2( .95, -.05), .95],
+    [vec2(-.10, -.20), 1.05],
+];
+
+function drawCloud(pos, r)
 {
-    // a little "m" silhouette made of two lines
-    const flap = .35 + .65*(.5 + .5*Math.sin(phase));
-    const wingSpan = s*1.25;
-    const wingUp = s*(.55 + flap*.55);
+    // soft blue-grey shadow, offset down, sits behind the white body
+    for (const [o, s] of cloudPuffs)
+        drawCircle(pos.add(o.scale(r)).add(vec2(0, -.22*r)), s*r*2, cloudShade);
 
-    const leftTip  = pos.add(vec2(-wingSpan, 0));
-    const rightTip = pos.add(vec2( wingSpan, 0));
-    const mid = pos.add(vec2(0, wingUp));
-
-    drawLine(leftTip, mid, .10*s, tinyBirdColor);
-    drawLine(mid, rightTip, .10*s, tinyBirdColor);
+    // fluffy white body
+    for (const [o, s] of cloudPuffs)
+        drawCircle(pos.add(o.scale(r)), s*r*2, cloudMain);
 }
 
 function buildGrassLayer(o)
@@ -484,6 +463,7 @@ function buildGrassLayer(o)
 function drawGrass()
 {
     // draw after ground so it feels like a foreground edge
+    const [vMin, vMax] = viewBoundsX(1);
     for (const L of grassLayers)
     {
         const off = -wrapOffset(bgScrollX * L.parallax, L.wrap);
@@ -492,6 +472,7 @@ function drawGrass()
             for (let k=-1; k<=1; ++k)
             {
                 const x = t.x + off + k*L.wrap;
+                if (x < vMin || x > vMax) continue; // cull offscreen tufts
                 const base = vec2(x, L.y);
 
                 // sway a little
@@ -517,17 +498,19 @@ function drawScenery()
     drawCircle(sunPos, 2.55, sunCore);
 
 
-    // clouds (behind mountains)
+    // clouds (behind mountains, cull offscreen copies)
     {
         const wrap = 80;
+        const [vMin, vMax] = viewBoundsX(3);
         for (const c of clouds)
         {
             const off = -wrapOffset(bgScrollX * c.parallax, wrap);
             // tile across view
             for (let k=-1; k<=1; ++k)
             {
-                const p = vec2(c.x + off + k*wrap, c.y);
-                drawCloud(p, c.r, c.parallax > .12);
+                const x = c.x + off + k*wrap;
+                if (x < vMin || x > vMax) continue;
+                drawCloud(vec2(x, c.y), c.r);
             }
         }
     }
@@ -535,23 +518,6 @@ function drawScenery()
     // mountains (back to front)
     for (let li=0; li<mountainLayers.length; ++li)
         drawMountainField(mountainLayers[li]);
-
-    // tiny birds (in front of mountains)
-    {
-        for (const b of tinyBirds)
-        {
-            // birds drift left independent of scroll
-            const x = b.x - bgScrollX*b.parallax;
-            // tile across view
-            const wrap = b.wrap;
-            const base = -wrapOffset(x, wrap);
-            for (let k=-1; k<=1; ++k)
-            {
-                const p = vec2(base + k*wrap, b.y);
-                drawTinyBird(p, b.s, time*12 + b.ph);
-            }
-        }
-    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -635,16 +601,6 @@ function gameUpdate()
     if (state === STATE_PLAY)
         bgScrollX += pipeSpeed * dt;
 
-    // update tiny birds
-    if (state === STATE_PLAY && tinyBirds)
-    {
-        for (const b of tinyBirds)
-        {
-            b.x -= b.spd * dt; // drift left
-            if (b.x < -b.wrap/2) b.x += b.wrap;
-        }
-    }
-
     // update particles
     if (particles.length)
     {
@@ -684,10 +640,11 @@ function gameUpdate()
     {
         if (state === STATE_READY)
         {
-            // start run
-            resetRun(false);
-            spawnPipe();
+            // begin the run WITHOUT resetting the level: keep the preview
+            // pipe in place so the first tap just starts the bird flying
+            state = STATE_PLAY;
             pipeTimer = pipeInterval;
+            // fall through to apply the flap on this same tap
         }
 
         if (state === STATE_PLAY)
@@ -804,63 +761,35 @@ function drawPipe(p)
     const gapTop = p.gapY + gapSize/2;
     const gapBot = p.gapY - gapSize/2;
 
-    // helper: draw a "gradient" pipe section with stripes + specular
-    function drawPipeSection(centerPos, size)
+    // a simple shaded tube: base + light highlight band + shadow band
+    function drawPipeBody(centerPos, size)
     {
-        // base
         drawRect(centerPos, size, pipeBase);
-
-        // dark left stripe
-        drawRect(centerPos.add(vec2(-size.x*.22, 0)), vec2(size.x*.55, size.y), pipeDark);
-
-        // light right stripe
-        drawRect(centerPos.add(vec2(size.x*.18, 0)), vec2(size.x*.55, size.y), pipeLight);
-
-        // thin specular highlight
-        drawRect(centerPos.add(vec2(size.x*.28, 0)), vec2(size.x*.08, size.y), pipeSpec);
-
-        // subtle inner border to pop edges
-        drawRect(centerPos, size.subtract(vec2(.18, .18)), hsl(.33,.7,.32,.25));
+        drawRect(centerPos.add(vec2(-size.x*.24, 0)), vec2(size.x*.22, size.y), pipeLight);
+        drawRect(centerPos.add(vec2( size.x*.34, 0)), vec2(size.x*.30, size.y), pipeDark);
     }
 
-    // helper: draw rim cap at the gap with a simple top/bottom shading
-    function drawPipeRim(centerPos)
+    // cap/rim at the gap opening (slightly wider, same shading)
+    function drawPipeCap(centerPos)
     {
-        const rimSize = vec2(pipeWidth+0.6, 0.75);
-        drawRect(centerPos, rimSize, pipeRim);
-        drawRect(centerPos.add(vec2(0, -.12)), vec2(rimSize.x, rimSize.y*.55), pipeRimDk);
-        // carry the same stripe idea on the rim
-        drawRect(centerPos.add(vec2(-rimSize.x*.18, 0)), vec2(rimSize.x*.50, rimSize.y), hsl(.33,.8,.22,.65));
-        drawRect(centerPos.add(vec2(rimSize.x*.20, 0)), vec2(rimSize.x*.50, rimSize.y), hsl(.33,.65,.45,.65));
-        drawRect(centerPos.add(vec2(rimSize.x*.30, 0)), vec2(rimSize.x*.08, rimSize.y), pipeSpec);
+        const cap = vec2(pipeWidth + .7, .9);
+        drawPipeBody(centerPos, cap);
     }
 
-    // top pipe
+    // top pipe (hangs from the ceiling)
     {
         const h = ceilY - gapTop;
         if (h > 0)
-        {
-            const pos = vec2(p.x, (gapTop + ceilY)/2);
-            const size = vec2(pipeWidth, h);
-            drawPipeSection(pos, size);
-        }
-
-        // rim at gap
-        drawPipeRim(vec2(p.x, gapTop + .38));
+            drawPipeBody(vec2(p.x, (gapTop + ceilY)/2), vec2(pipeWidth, h));
+        drawPipeCap(vec2(p.x, gapTop + .45));
     }
 
-    // bottom pipe
+    // bottom pipe (rises from the ground)
     {
         const h = gapBot - floorY;
         if (h > 0)
-        {
-            const pos = vec2(p.x, (floorY + gapBot)/2);
-            const size = vec2(pipeWidth, h);
-            drawPipeSection(pos, size);
-        }
-
-        // rim at gap
-        drawPipeRim(vec2(p.x, gapBot - .38));
+            drawPipeBody(vec2(p.x, (floorY + gapBot)/2), vec2(pipeWidth, h));
+        drawPipeCap(vec2(p.x, gapBot - .45));
     }
 }
 
@@ -972,11 +901,11 @@ function gameRenderPost()
 {
     if (!isPlaying()) return;
 
-    // score
-    drawTextScreen('' + score, vec2(mainCanvasSize.x/2, 60), 72, hsl(0,0,1), 6, hsl(0,0,0));
+    // score (top-left)
+    drawTextScreen('' + score, vec2(30, 54), 60, hsl(0,0,1), 6, hsl(0,0,0), 'left');
 
-    // best
-    drawTextScreen('BEST ' + max(score, getBestScore()), vec2(mainCanvasSize.x - 140, 26), 28, hsl(0,0,1), 4, hsl(0,0,0));
+    // best (right below the score)
+    drawTextScreen('BEST ' + max(score, getBestScore()), vec2(32, 96), 26, hsl(0,0,1), 4, hsl(0,0,0), 'left');
 
     // prompts
     if (state === STATE_DEAD)
