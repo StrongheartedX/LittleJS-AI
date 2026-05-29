@@ -99,6 +99,41 @@ const wildCost = (m) => Math.ceil(BALANCE.wildCostBase * BALANCE.wildCostScale *
 const levelCost = (m) => Math.ceil(BALANCE.levelCostBase * BALANCE.levelCostScale ** (m.level - 1));
 const canAfford = (n) => cash >= n;
 
+// ---- SPRITE ATLAS ----
+// Atlas layout: tiles 0-3 = the four demons (DEMON_TYPES[key].tile),
+// tiles 4..(4+symbols.length-1) = symbol emojis in BALANCE.symbols order,
+// next tile = wild emoji (== wildTileIndex()). 500x500 px draw space.
+function buildSprites()
+{
+    initDrawToTexture();
+    // demons (placeholder shapes now; refine later with /iterate-sprite)
+    const demonColors = { imp:'#c33', greed:'#3a3', wrath:'#e60', sloth:'#36c' };
+    for (const key in DEMON_TYPES)
+    {
+        const col = demonColors[key];
+        drawToTexture(DEMON_TYPES[key].tile, (ctx) => {
+            ctx.fillStyle = col;
+            ctx.beginPath(); ctx.arc(250, 270, 170, 0, 7); ctx.fill();   // body
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(195,240,35,0,7); ctx.arc(305,240,35,0,7); ctx.fill();  // eyes
+            ctx.fillStyle = '#000';
+            ctx.beginPath(); ctx.arc(195,245,15,0,7); ctx.arc(305,245,15,0,7); ctx.fill();  // pupils
+            ctx.fillStyle = col;  // horns
+            ctx.beginPath(); ctx.moveTo(140,140); ctx.lineTo(110,40); ctx.lineTo(180,120); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(360,140); ctx.lineTo(390,40); ctx.lineTo(320,120); ctx.fill();
+        }, `${key} demon`);
+    }
+    // symbol emojis (incl. wild) as text glyphs
+    const symbolTiles = [...BALANCE.symbols.map(s => s.emoji), BALANCE.wildEmoji];
+    symbolTiles.forEach((emoji, i) => {
+        drawToTexture(4 + i, (ctx) => {
+            ctx.font = '380px serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(emoji, 250, 270);
+        }, `symbol ${emoji}`);
+    });
+}
+
 // weighted symbol roll
 function rollSymbol()
 {
@@ -133,6 +168,9 @@ async function gameInit()
     // Primes the unified save blobs. Must come before any menu construction
     // so persist: items can read their stored values on init.
     saveDataInit('SlotDemon');
+
+    // Build the procedural sprite atlas (demons + symbol/wild emoji tiles).
+    buildSprites();
 
     // Initial bg shared with the color picker in OPTIONS, so opening the
     // menu shows the swatch matching what's actually on screen.
