@@ -23,6 +23,12 @@
 <link rel="apple-touch-icon" href="logo.png">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0b0e14">
+<script>
+    // Apply the saved light/dark theme before first paint so there's no flash
+    // of the wrong theme on reload. The toggle wiring lives in the main script.
+    document.documentElement.setAttribute('data-theme',
+        localStorage.getItem('littlejs-games-theme') === 'light' ? 'light' : 'dark');
+</script>
 <style>
     :root {
         --bg: #0b0e14;
@@ -37,6 +43,9 @@
         --accent-bg: #1a2f4d;
         --chip-bg: #232b3c;
         --chip-text: #adbac7;
+        --spark: #fff;            /* ambient starfield + logo sparkle color */
+        --tile-base: #0d1117;     /* base color the Top Picks tiles tint over */
+        --tile-border: #3a4862;   /* Top Picks tile border */
 
         /* Per-category accent + translucent fill, applied via --cat-color / --cat-bg
               CSS vars set on chips/tiles/row headers at build time. */
@@ -46,6 +55,25 @@
         --cat-board:   #f7c948;   --cat-board-bg:   rgba(247,201,72,.18);
         --cat-sports:  #4ade80;   --cat-sports-bg:  rgba(74,222,128,.18);
         --cat-construction: #ff9744; --cat-construction-bg: rgba(255,151,68,.18);
+    }
+    /* Light theme — overrides the surface/text palette only; the bright
+          category + accent hues carry over (they read fine on light too). */
+    :root[data-theme="light"] {
+        --bg: #dde1e8;
+        --bg-2: #e6e9ef;
+        --panel: #ffffff;
+        --panel-2: #eef1f6;
+        --border: #d0d6e0;
+        --text: #1b2230;
+        --muted: #5a6573;
+        --accent: #2f7ad6;
+        --accent-2: #d6488f;
+        --accent-bg: #dbe8fb;
+        --chip-bg: #e6eaf1;
+        --chip-text: #3c4658;
+        --spark: #2f7ad6;
+        --tile-base: #ffffff;
+        --tile-border: #d0d6e0;
     }
     * { box-sizing: border-box; }
     /* `height: 100%` on iOS measures the layout viewport (which extends behind
@@ -521,9 +549,9 @@
         width: 220px;
         min-height: 140px;
         background: linear-gradient(135deg,
-            color-mix(in srgb, var(--cat-color, #58a6ff) 20%, #0d1117) 0%,
-            color-mix(in srgb, var(--cat-color, #58a6ff) 9%, #0d1117) 100%);
-        border-color: #3a4862;
+            color-mix(in srgb, var(--cat-color, #58a6ff) 20%, var(--tile-base)) 0%,
+            color-mix(in srgb, var(--cat-color, #58a6ff) 9%, var(--tile-base)) 100%);
+        border-color: var(--tile-border);
     }
     .tiles.top .tile .name { font-size: 16px; }
     .tiles.top .tile .desc { font-size: 12.5px; }
@@ -578,6 +606,30 @@
         0%, 100% { transform: translateY(0); }
         50%      { transform: translateY(-8px); }
     }
+
+    /* ===================== Theme toggle (top-right of the launcher) ===================== */
+    #theme-toggle {
+        position: fixed;
+        top: 12px;
+        right: 22px;
+        z-index: 100;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 18px;
+        line-height: 1;
+        color: var(--text);
+        transition: background .15s, border-color .15s, transform .15s;
+    }
+    #theme-toggle:hover { border-color: var(--accent); transform: scale(1.08); }
+    /* Hide while a game is loaded — the iframe owns the view there. */
+    body.in-game #theme-toggle { display: none; }
 
     /* ===================== Mobile drawer chrome (hidden on desktop) ===================== */
     #hamburger {
@@ -667,7 +719,7 @@
     .sparkle {
         position: absolute;
         pointer-events: none;
-        background: #fff;
+        background: var(--spark, #fff);
         border-radius: 1px;
         box-shadow: 0 0 8px rgba(255, 255, 255, .8),
                                 0 0 14px rgba(180, 220, 255, .4);
@@ -760,6 +812,7 @@
     <span class="grid"><span></span><span></span><span></span><span></span></span>
 </button>
 <div id="backdrop"></div>
+<button id="theme-toggle" aria-label="Toggle light/dark theme"></button>
 
 <aside id="sidebar">
     <div id="sidebar-header">
@@ -1536,6 +1589,29 @@ document.addEventListener('keydown', e => {
     }
 });
 
+// ===================== Light / dark theme toggle =====================
+const THEME_KEY = 'littlejs-games-theme';
+const themeToggle = document.getElementById('theme-toggle');
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+
+function applyTheme(theme) {
+    const light = theme === 'light';
+    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+    // The button shows the icon for the mode it will switch TO.
+    themeToggle.textContent = light ? '🌙' : '☀️';
+    themeToggle.title = light ? 'Switch to dark mode' : 'Switch to light mode';
+    themeToggle.setAttribute('aria-label', themeToggle.title);
+    if (themeColorMeta) themeColorMeta.content = light ? '#eef1f6' : '#0b0e14';
+}
+
+let currentTheme = localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+applyTheme(currentTheme);
+themeToggle.addEventListener('click', () => {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    localStorage.setItem(THEME_KEY, currentTheme);
+    applyTheme(currentTheme);
+});
+
 // ===================== Ambient effects (starfield + logo sparkles) =====================
 
 function setupStarfield() {
@@ -1565,12 +1641,15 @@ function setupStarfield() {
         const w = canvas.width, h = canvas.height;
         ctx.clearRect(0, 0, w, h);
         if (currentFile === null) {
+            // On light backgrounds white stars vanish — use a soft slate instead.
+            const light = document.documentElement.getAttribute('data-theme') === 'light';
+            const starColor = light ? '#9aa7b8' : '#fff';
             for (const s of stars) {
                 s.y += s.vy;
                 if (s.y < -0.05) { s.y = 1.05; s.x = Math.random(); }
                 ctx.globalAlpha = s.z * 0.55;
                 const size = Math.max(1, Math.round(s.z * 2.4));
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = starColor;
                 ctx.fillRect(s.x * w, s.y * h, size, size);
             }
             ctx.globalAlpha = 1;
