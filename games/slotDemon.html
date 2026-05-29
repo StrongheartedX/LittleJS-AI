@@ -347,6 +347,82 @@ function newGame()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// ECONOMY
+// Every buy function guards canAfford() and no-ops when unaffordable, so menu
+// disabling is feedback only — never relied on for correctness.
+
+function buyMachine()
+{
+    if (machines.length >= pitCapacity) return;
+    const c = machineCost(); if (!canAfford(c)) return;
+    cash -= c; spawnMachine();
+}
+function expandPit()
+{
+    const c = pitCost(); if (!canAfford(c)) return;
+    cash -= c; pitCapacity += BALANCE.pitExpand;
+}
+function cheapestLevelMachine(){ return machines.slice().sort((a,b)=>levelCost(a)-levelCost(b))[0]; }
+function levelUpMachine()
+{
+    const m = cheapestLevelMachine(); if (!m) return;
+    const c = levelCost(m); if (!canAfford(c)) return;
+    cash -= c; m.level++;
+}
+function cheapestWildMachine(){ return machines.slice().sort((a,b)=>wildCost(a)-wildCost(b))[0]; }
+function buyWild()
+{
+    const m = cheapestWildMachine(); if (!m) return;
+    const c = wildCost(m); if (!canAfford(c)) return;
+    cash -= c; m.wildCount++;
+}
+function sacrificeOldestSpecific(d){ const i=demons.indexOf(d); if(i>=0)demons.splice(i,1); if(d.machine)d.machine.assignedDemon=null; d.destroy(); }
+function sellMachine()
+{
+    if (machines.length <= 1) return;            // keep at least one
+    const refund = Math.ceil(machineCost()/BALANCE.machineCostScale * BALANCE.sellRefund);
+    const m = machines[machines.length-1];       // sell most recent
+    if (m.assignedDemon) sacrificeOldestSpecific(m.assignedDemon);
+    m.destroy(); machines.pop();
+    cash += refund;
+}
+
+// ---- demon purchase (auto-assign; sacrifice when pit is full & all manned) ----
+function openMachineForDemon(){ return machines.find(m => !m.assignedDemon) || null; }
+function placeDemon(type, cost)   // assumes an open machine exists; pushes exactly once
+{
+    const target = openMachineForDemon(); if (!target) return;
+    cash -= cost;
+    demonsBought[type] = (demonsBought[type] || 0) + 1;
+    demons.push(new Demon(type, target));   // Demon ctor sets target.assignedDemon; we push here
+}
+function sacrificeOldest()
+{
+    const d = demons.shift(); if (!d) return;
+    if (d.machine) d.machine.assignedDemon = null;
+    d.destroy();
+    ++stats.sacrifices;
+}
+function buyDemon(type)
+{
+    const cost = demonCost(type);
+    if (!canAfford(cost)) return;
+    if (openMachineForDemon()) { placeDemon(type, cost); return; }
+    // no open machine:
+    if (machines.length < pitCapacity)         // room to add a machine, then place
+    {
+        spawnMachine();
+        placeDemon(type, cost);
+        return;
+    }
+    // pit full AND all manned -> sacrifice prompt
+    if (demons.length > 0)
+        showConfirmDialog({ message:'The pit is full. Banish a demon to make room for ' + DEMON_TYPES[type].name + '?',
+            title:'SACRIFICE', icon:'🔥',
+            onYes: () => { sacrificeOldest(); placeDemon(type, cost); } });
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // MENU SYSTEM TEMPLATE
 // Demonstrates createMenu() and createToolbar() from menus.js.
 
@@ -533,11 +609,70 @@ async function gameInit()
         ],
     });
 
+    // ----- shop menu (buy machines / demons / upgrades; full economy) -----
+    // While any menu is visible the engine is paused (setMenuVisibilityCallback
+    // above), so the pit freezes while shopping — intended.
+    //
+    // liveItem builds a button whose label shows a live "$cost" and which
+    // disables (feedback only) when unaffordable. costFn returns null when the
+    // action is unavailable (e.g. no machine to level up / buy wild for), in
+    // which case we show the bare base label and disable the button. The buy
+    // functions themselves already no-op when unaffordable.
+    const liveItem = (id, baseLabel, costFn, onClick) => ({
+        type:'button', id, label:baseLabel, onClick,
+        onUpdate: () =>
+        {
+            const it = shopMenu.getItem(id);
+            const c = costFn();
+            it.setLabel(c == null ? baseLabel : `${baseLabel} ($${c})`);
+            it.setDisabled(c == null || !canAfford(c));
+        },
+    });
+
+    const demonItems = Object.keys(DEMON_TYPES).map(key =>
+        liveItem('buy_' + key, 'Buy ' + DEMON_TYPES[key].name,
+            () => demonCost(key), () => buyDemon(key)));
+
+    const shopMenu = createMenu({
+        id: 'shop',
+        title: 'SHOP',
+        dismissable: true,
+        items: [
+            liveItem('buyMachine', 'Buy Machine', () => machineCost(), buyMachine),
+            liveItem('expandPit',  'Expand Pit +5', () => pitCost(), expandPit),
+            {type:'separator'},
+            ...demonItems,
+            {type:'separator'},
+            liveItem('levelUp', 'Level Up',
+                () => { const m = cheapestLevelMachine(); return m ? levelCost(m) : null; },
+                levelUpMachine),
+            liveItem('buyWild', 'Buy Wild',
+                () => { const m = cheapestWildMachine(); return m ? wildCost(m) : null; },
+                buyWild),
+            liveItem('sellMachine', 'Sell Machine (50%)',
+                () => null, sellMachine),
+            {type:'separator'},
+            {type:'button', label:'CLOSE', onClick: () => hideMenu('shop')},
+        ],
+    });
+    // Sell Machine has no cost; disable it when only one machine remains
+    // (sellMachine keeps >= 1). Override the liveItem onUpdate for this case.
+    shopMenu.getItem('sellMachine').setLabel('Sell Machine (50%)');
+    shopMenu._items.find(it => it.itemId === 'sellMachine').onUpdate = () =>
+        shopMenu.getItem('sellMachine').setDisabled(machines.length <= 1);
+
     // ----- toolbar (always visible, including over the title menu) -----
     // installDefaultToolbar gives the standard mute / fullscreen / hamburger
     // trio, with built-in title-aware hamburger graying so the player can't
-    // try to open the pause menu from on top of the title menu.
-    installDefaultToolbar();
+    // try to open the pause menu from on top of the title menu. We insert a
+    // SHOP button before the trio so it sits alongside mute/fullscreen/menu;
+    // the hamburger (☰) still opens the pause menu, so pause stays reachable.
+    installDefaultToolbar({
+        extraItemsBefore: [
+            {type:'button', id:'shop', label:'🛒', title:'Shop',
+                onClick: () => showMenu('shop')},
+        ],
+    });
 
     // Spawn the starting pit so it renders as a frozen backdrop behind the
     // title menu (menus.js freezes gameUpdate while the title is up, but
