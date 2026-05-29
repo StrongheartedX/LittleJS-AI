@@ -3591,16 +3591,13 @@ async function gameInit()
         confirmQuit: false,
     });
 
-    // HUD toolbar — top-right corner. Always visible; the hamburger grays
-    // out when the title menu is on top (default behavior), OR when the
-    // run has ended (death / victory) so the player can't dismiss the
-    // results menu and walk around a sealed-off field.
+    // HUD toolbar — top-right corner. Always visible, but the hamburger
+    // grays out any time the player isn't actively in a run. Covers all
+    // the pre-game menus (title / heroSelect / stageSelect / shop / about
+    // — none of those should be dismissable to a sealed-off field), and
+    // covers the post-run results menus too via gameOver / runVictory.
     installDefaultToolbar({grayedWhen: () =>
-    {
-        if (gameOver || runVictory) return true;
-        const top = getTopMenu();
-        return !!(top && top.id === 'title');
-    }});
+        gameOver || runVictory || !isPlaying()});
 
     tweakEngineDefaults();
     tweakDivider('Emoji Survivors');
