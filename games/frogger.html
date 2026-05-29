@@ -503,8 +503,11 @@
     bestLevel = getSaveData().bestLevel ?? 1;
 
     setSoundVolume(.8);
+    // Only auto-pause the engine for in-game menus (the pause menu). On the
+    // title screen isPlaying() is false, so the world keeps running and the
+    // attract loop scrolls traffic behind the menu.
     if (typeof installAutoPause === 'function')
-        installAutoPause();
+        installAutoPause(() => isPlaying());
 
     buildLanes();
     resetRun(true);
