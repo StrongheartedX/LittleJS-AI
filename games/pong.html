@@ -659,7 +659,7 @@ showEngineVersion = false; // Hide engine version console display
 
         // scan lines
         const float scanlineAlpha = .28;
-        c *= 1. - scanlineAlpha * cos(p.y * 2. * iResolution.y);
+        c *= 1. - scanlineAlpha * cos(p.y * 1. * iResolution.y);
 
         // dark vignette around edges
         float dx = 2.*p.x - 1., dy = 2.*p.y - 1.;
