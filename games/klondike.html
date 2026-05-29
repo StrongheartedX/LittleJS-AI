@@ -320,32 +320,8 @@ async function gameInit()
 ///////////////////////////////////////////////////////////////////////////////
 // Input helpers
 
-// Returns { stack, card } for the topmost card under `worldPoint`, or
-// { stack, card: null } if the point is over an empty stack, or null.
-function stackUnderPoint(worldPoint)
-{
-    // Search cascades last-card-first (visually topmost is logically last).
-    for (const s of cardStacks)
-    {
-        if (s.type === StackType.Cascade)
-        {
-            for (let i = s.cards.length - 1; i >= 0; --i)
-                if (isOverlapping(worldPoint, CARD_SIZE, s.cards[i].pos))
-                    return { stack: s, card: s.cards[i] };
-        }
-        else
-        {
-            const top = s.topCard();
-            if (top && isOverlapping(worldPoint, CARD_SIZE, top.pos))
-                return { stack: s, card: top };
-        }
-    }
-    // No card hit — check empty stack anchors so clicks/drops on empty stacks work.
-    for (const s of cardStacks)
-        if (s.isEmpty() && isOverlapping(worldPoint, CARD_SIZE, s.pos))
-            return { stack: s, card: null };
-    return null;
-}
+// Topmost card / empty stack under `worldPoint` (see cardAtPoint in cards.js).
+function stackUnderPoint(worldPoint) { return cardAtPoint(cardStacks, worldPoint); }
 
 function isMoveLegal(target)
 {
@@ -679,10 +655,9 @@ function gameRender()
 
     // Empty-slot outlines (back layer): every cascade slot, plus the top-row
     // stacks (stock / waste / foundations) whether or not they hold cards.
-    // A cascade slot keeps showing until its base card finishes tweening in,
-    // so it doesn't blink out from under a card still flying toward it.
+    // Empty-slot outlines (back layer) — see cardSlotVisible() in cards.js.
     for (const s of cardStacks)
-        if (s.type !== StackType.Cascade || s.isEmpty() || s.cards[0].isTweening())
+        if (cardSlotVisible(s))
             drawCardSlot(s.pos, s.type === StackType.Foundation);
 
     // Dead-stock indicator: the pass limit is reached and the stock can no

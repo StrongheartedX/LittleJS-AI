@@ -413,6 +413,33 @@ class CardStack
     }
 }
 
+// Hit-test: returns { stack, card } for the topmost card under `worldPoint`,
+// { stack, card:null } for an empty stack there, or null. Cards are searched
+// last-first (the visually topmost card is last in its stack); piles work too
+// since all their cards share the anchor, so the top is found first.
+function cardAtPoint(stacks, worldPoint)
+{
+    for (const s of stacks)
+        for (let i = s.cards.length - 1; i >= 0; --i)
+            if (isOverlapping(worldPoint, CARD_SIZE, s.cards[i].pos))
+                return { stack: s, card: s.cards[i] };
+    for (const s of stacks)
+        if (s.isEmpty() && isOverlapping(worldPoint, CARD_SIZE, s.pos))
+            return { stack: s, card: null };
+    return null;
+}
+
+// Should `stack`'s empty-slot outline be drawn this frame? Pile stacks (no fan
+// offset — stock, waste, foundations) always show it beneath their cards. A
+// fanning stack shows it while empty, and keeps showing it until its base card
+// finishes tweening in, so the outline doesn't blink out from under a card
+// still flying toward it.
+function cardSlotVisible(stack)
+{
+    if (!stack.offsetFn) return true;
+    return stack.isEmpty() || stack.cards[0].isTweening();
+}
+
 // Returns a fresh, shuffled 52-card deck (Fisher-Yates with LittleJS rand).
 function shuffledDeck()
 {
