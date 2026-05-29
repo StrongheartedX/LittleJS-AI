@@ -94,8 +94,16 @@
         font-weight: 600;
         letter-spacing: 1.2px;
         text-transform: uppercase;
-        color: var(--muted);
+        color: var(--accent);
         text-align: center;
+        text-shadow: 0 0 10px rgba(88, 166, 255, .55),
+                     0 0 18px rgba(255, 126, 182, .3);
+        transition: color .15s, text-shadow .15s;
+    }
+    #sidebar-logo-wrap:hover #sidebar-logo-title {
+        color: var(--accent-2);
+        text-shadow: 0 0 12px rgba(255, 126, 182, .65),
+                     0 0 22px rgba(88, 166, 255, .35);
     }
     #sidebar-logo {
         height: 64px;
