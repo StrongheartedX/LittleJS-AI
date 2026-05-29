@@ -179,7 +179,7 @@ function spawnWinBurst(pos, big)
     );
 }
 
-let sfxWin, sfxSpin;   // SoundGenerator instances
+let sfxWin, sfxSpin, sfxRefresh, sfxSleep;   // SoundGenerator instances
 function buildSounds()
 {
     // Short dry low click for each spin.
@@ -191,6 +191,16 @@ function buildSounds()
     sfxWin = new SoundGenerator({
         volume: .6, frequency: 520, attack: .01, release: .25,
         shapeCurve: 1, slide: 1, pitchJump: 220, pitchJumpTime: .06,
+    });
+    // Bright "power-up" blip when a demon is refreshed (high freq, quick attack, short release, slight upward jump).
+    sfxRefresh = new SoundGenerator({
+        volume: .4, frequency: 700, attack: .005, release: .12,
+        shapeCurve: 1, slide: 2, pitchJump: 300, pitchJumpTime: .05,
+    });
+    // Low descending "powering-down" tone when a demon falls asleep (low freq, downward slide + drop).
+    sfxSleep = new SoundGenerator({
+        volume: .4, frequency: 220, attack: .01, release: .2,
+        shapeCurve: 1, slide: -3, pitchJump: -120, pitchJumpTime: .08,
     });
 }
 
@@ -210,6 +220,7 @@ const nextFreeCell = () => {
     return vec2(i % GRID_COLS, Math.floor(i / GRID_COLS));
 };
 const machineAtPos = (p) => machines.find(m => isOverlapping(m.pos, m.size, p, vec2(0.1)));
+function demonAtPos(p) { return demons.find(d => isOverlapping(d.pos, d.size, p, vec2(0.1))); }
 
 class Machine extends EngineObject
 {
@@ -277,6 +288,45 @@ class Machine extends EngineObject
         }
         // level label
         drawText('Lv ' + this.level, this.pos.add(vec2(0, -this.size.y/2+0.6)), 0.8, hsl(0,0,1));
+    }
+}
+
+class Demon extends EngineObject
+{
+    constructor(type, machine)
+    {
+        // sit on the lower part of its OWN machine cabinet (not in the gap below)
+        super(machine.pos.add(vec2(0, -machine.size.y/2 + 0.9)), vec2(2.2));
+        this.type = type;
+        this.machine = machine;
+        this.energy = 1;
+        machine.assignedDemon = this;
+        this.spinClock = 0;
+    }
+    update()
+    {
+        const def = DEMON_TYPES[this.type];
+        const wasAwake = this.energy > 0;
+        this.energy = max(0, this.energy - timeDelta * BALANCE.decayRate * def.decayMult);
+        if (wasAwake && this.energy <= 0) sfxSleep.play(this.pos);   // awake->asleep transition
+        if (this.energy > 0)
+        {
+            this.spinClock += timeDelta * this.energy * def.speedMult;
+            if (this.spinClock >= BALANCE.spinInterval) { this.spinClock = 0; this.machine.spin(); }
+        }
+        super.update();
+    }
+    refresh() { this.energy = 1; sfxRefresh.play(this.pos); }
+    render() {}   // suppressed; drawn via draw() from gameRender (same pattern as Machine)
+    draw()
+    {
+        const asleep = this.energy <= 0;
+        drawTile(this.pos, this.size, tile(DEMON_TYPES[this.type].tile), asleep ? hsl(0,0,.5) : WHITE);
+        // energy bar just under the demon
+        const barW = this.size.x, by = -1.5;
+        drawRect(this.pos.add(vec2(0, by)), vec2(barW, 0.3), hsl(0,0,.2));
+        drawRect(this.pos.add(vec2(-barW/2 + barW*this.energy/2, by)), vec2(barW*this.energy, 0.3), hsl(this.energy*0.33, 1, .5));
+        if (asleep) drawText('z', this.pos.add(vec2(1.2, 1.2)), 1.2, hsl(.6,.5,.9));
     }
 }
 
@@ -507,12 +557,13 @@ function gameUpdate()
     if (bindPauseKey({ when: () => isPlaying() })) return;
     if (!isPlaying()) return;
 
-    // Click an UNMANNED machine to spin it (demon-driven spins come later).
+    // Click a demon to refresh its energy; else click an UNMANNED machine to spin it.
+    // Demons render above machines, so check demons FIRST.
     if (mouseWasPressed(0) && !isMenuVisible())
     {
-        const m = machineAtPos(mousePos);
-        if (m && !m.assignedDemon) { m.spin(); sfxSpin.play(m.pos); }
-        // (demon-refresh + camera-pan handled in later tasks)
+        const d = demonAtPos(mousePos);
+        if (d) d.refresh();
+        else { const m = machineAtPos(mousePos); if (m && !m.assignedDemon) { m.spin(); sfxSpin.play(m.pos); } }
     }
 
     // advance floating win texts
@@ -530,6 +581,9 @@ function gameRender()
     // menu is up, gameUpdate is frozen but gameRender still runs, so the pit
     // sits as a static backdrop behind the menu.
     machines.forEach(m => m.draw());
+
+    // demons render above their machines (so clicks check demons first)
+    demons.forEach(d => d.draw());
 
     // floating win texts (rise and fade)
     for (const f of floatTexts)
