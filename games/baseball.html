@@ -514,108 +514,176 @@ function gameUpdate()
 
 function gameUpdatePost()
 {
-    // gentle camera pan toward action
-    let target = vec2(0, 18);
-    if (ballState === 'play')
-    {
-        target = vec2(
-            clamp(ball.pos.x * .5, -18, 18),
-            clamp(10 + ball.pos.y * .55, 6, 26));
-    }
-    cameraPos = cameraPos.lerp(target, .06);
+    // camera stays stationary — set once in gameInit, never panned
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Rendering
 
-function drawField()
+// fair-territory wedge spans 45°..135° (foul lines)
+const fairA0 = PI/2 - foulAngleHalf;
+const fairA1 = PI/2 + foulAngleHalf;
+
+// base positions form a true square (home & 2B are opposite corners)
+const baseDist   = 20;                          // home -> 1B distance
+const firstBase  = vec2(cos(PI/4)*baseDist, sin(PI/4)*baseDist);
+const thirdBase  = vec2(cos(3*PI/4)*baseDist, sin(3*PI/4)*baseDist);
+const secondBase = vec2(0, baseDist*Math.SQRT2);
+const infieldCenter = vec2(0, baseDist*Math.SQRT2/2);
+
+// --- arc / ring point-list builders (used for gap-free drawLineList outlines) ---
+function arcPoints(r, a0, a1, segs)
 {
-    // build the fair-territory polygon: home plate at apex, arc along the fence
-    const fairArcSegs = 32;
-    const a0 = PI/2 - foulAngleHalf;
-    const a1 = PI/2 + foulAngleHalf;
-    const fairPoly = [platePos];
-    for (let i = 0; i <= fairArcSegs; i++)
+    const pts = [];
+    for (let i = 0; i <= segs; i++)
     {
-        const t = a0 + (a1-a0)*i/fairArcSegs;
-        fairPoly.push(vec2(cos(t)*fenceRadius, sin(t)*fenceRadius));
+        const t = a0 + (a1 - a0) * i / segs;
+        pts.push(vec2(cos(t)*r, sin(t)*r));
     }
-    drawPoly(fairPoly, hsl(.32, .55, .32));
+    return pts;
+}
 
-    // warning track: dirt-colored thick line along the inside of the fence
-    for (let i = 0; i < fairArcSegs; i++)
+// filled annular wedge: outer arc forward, inner arc back
+function ringPoly(rInner, rOuter, a0, a1, segs)
+{
+    return arcPoints(rOuter, a0, a1, segs).concat(arcPoints(rInner, a1, a0, segs));
+}
+
+function drawStadium()
+{
+    const segs = 56;
+
+    // concrete seating bowl — huge, wraps fully around and runs off every screen edge
+    drawPoly(ringPoly(43, 90, -.3, PI + .3, segs), hsl(.62, .05, .44));
+
+    // tiers of seats as gap-free connected arcs (a "line list")
+    for (let i = 0; i < 8; i++)
     {
-        const t0 = a0 + (a1-a0)*i/fairArcSegs;
-        const t1 = a0 + (a1-a0)*(i+1)/fairArcSegs;
-        const r = fenceRadius - .9;
-        drawLine(
-            vec2(cos(t0)*r, sin(t0)*r),
-            vec2(cos(t1)*r, sin(t1)*r),
-            1.6, hsl(.08, .35, .38));
-    }
-
-    // dirt infield diamond (square rotated 45° around mound area)
-    drawRect(moundCenter.add(vec2(0, -9)), vec2(20, 20), hsl(.08, .45, .35), PI/4);
-
-    // dirt cutout around home plate
-    drawCircle(platePos.add(vec2(0, .5)), 5, hsl(.08, .45, .35));
-
-    // outfield fence (white line along the arc)
-    for (let i = 0; i < fairArcSegs; i++)
-    {
-        const t0 = a0 + (a1-a0)*i/fairArcSegs;
-        const t1 = a0 + (a1-a0)*(i+1)/fairArcSegs;
-        drawLine(
-            vec2(cos(t0)*fenceRadius, sin(t0)*fenceRadius),
-            vec2(cos(t1)*fenceRadius, sin(t1)*fenceRadius),
-            .3, hsl(0, 0, .92));
+        const r = 47 + i*4.7;
+        const c = i % 2 ? hsl(.60, .32, .36) : hsl(.58, .16, .56);
+        drawLineList(arcPoints(r, .1, PI - .1, segs), 3.2, c);
     }
 
-    // foul lines from home plate to fence
-    drawLine(platePos, vec2(cos(PI-foulAngleHalf)*fenceRadius, sin(PI-foulAngleHalf)*fenceRadius), .15, WHITE);
-    drawLine(platePos, vec2(cos(foulAngleHalf)*fenceRadius, sin(foulAngleHalf)*fenceRadius), .15, WHITE);
+    // front railing at the lip of the bowl
+    drawLineList(arcPoints(45, .5, PI - .5, segs), .5, hsl(0, 0, .82));
+}
 
-    // bases (white squares at 1B, 2B, 3B)
+function drawFieldGround()
+{
+    const segs = 48;
+
+    // fair grass: home plate apex out to the fence arc
+    drawPoly([platePos, ...arcPoints(fenceRadius, fairA0, fairA1, segs)], hsl(.33, .5, .30));
+
+    // classic mowed concentric arcs (alternating shade)
+    for (const i of [1, 3, 5])
+        drawPoly(ringPoly(i*7, (i+1)*7, fairA0, fairA1, segs), hsl(.33, .52, .35));
+
+    // skinned infield (dirt diamond) with a grass center, aligned to the bases
+    const dirt = hsl(.08, .45, .38);
+    drawRect(infieldCenter, vec2(25, 25), dirt, PI/4);
+    drawRect(infieldCenter, vec2(17, 17), hsl(.34, .5, .33), PI/4);
+
+    // dirt cutouts at home and the mound
+    drawCircle(platePos.add(vec2(0, .3)), 5, dirt);
+    drawCircle(moundCenter, 4, hsl(.08, .38, .42));
+
+    // warning track — single connected outline, no gaps
+    drawLineList(arcPoints(fenceRadius - 1.6, fairA0, fairA1, segs), 1.8, hsl(.08, .4, .4));
+
+    // outfield wall + yellow home-run line on top (both gap-free line lists)
+    drawLineList(arcPoints(fenceRadius, fairA0, fairA1, segs), 1.3, hsl(.55, .3, .26));
+    drawLineList(arcPoints(fenceRadius + .35, fairA0, fairA1, segs), .25, hsl(.14, .9, .6));
+}
+
+function drawDiamond()
+{
+    // foul lines from home to the fence
+    drawLine(platePos, vec2(cos(fairA1), sin(fairA1)).scale(fenceRadius), .18, WHITE);
+    drawLine(platePos, vec2(cos(fairA0), sin(fairA0)).scale(fenceRadius), .18, WHITE);
+
+    // chalk baselines connecting the whole diamond (home -> 1B -> 2B -> 3B -> home)
+    drawLineList([platePos, firstBase, secondBase, thirdBase], .25, hsl(0, 0, .95), true);
+
+    // bases
     const baseSize = vec2(1.2, 1.2);
-    const firstBase = vec2(cos(PI/4) * 20, sin(PI/4) * 20);
-    const secondBase = vec2(0, 28);
-    const thirdBase = vec2(cos(3*PI/4) * 20, sin(3*PI/4) * 20);
     drawRect(firstBase, baseSize, WHITE, PI/4);
     drawRect(secondBase, baseSize, WHITE, PI/4);
     drawRect(thirdBase, baseSize, WHITE, PI/4);
 
-    // pitcher's rubber on the mound
-    drawCircle(moundCenter, 4, hsl(.08, .38, .42));
+    // pitcher's rubber
     drawRect(moundCenter, vec2(1.2, .35), WHITE);
 
-    // home plate (pentagon approximated as a small white pentagon-ish shape via two rects)
+    // home plate (square + point toward catcher)
     drawRect(platePos, vec2(1.2, 1.0), WHITE);
     drawRect(platePos.add(vec2(0, -.6)), vec2(1.0, .5), WHITE, PI/4);
 
-    // strike zone overlay (visible to player)
+    // strike zone overlay
     drawRect(platePos, zoneHalf.scale(2), hsl(.16, .9, .6, .18));
-    // box outline simulated with 4 thin rects
-    const zw = zoneHalf.x*2, zh = zoneHalf.y*2;
-    drawRect(platePos.add(vec2(0,  zoneHalf.y)), vec2(zw + .06, .06), hsl(.16, 1, .65, .9));
-    drawRect(platePos.add(vec2(0, -zoneHalf.y)), vec2(zw + .06, .06), hsl(.16, 1, .65, .9));
-    drawRect(platePos.add(vec2( zoneHalf.x, 0)), vec2(.06, zh + .06), hsl(.16, 1, .65, .9));
-    drawRect(platePos.add(vec2(-zoneHalf.x, 0)), vec2(.06, zh + .06), hsl(.16, 1, .65, .9));
+    const zoneRect = [
+        platePos.add(vec2(-zoneHalf.x, -zoneHalf.y)),
+        platePos.add(vec2( zoneHalf.x, -zoneHalf.y)),
+        platePos.add(vec2( zoneHalf.x,  zoneHalf.y)),
+        platePos.add(vec2(-zoneHalf.x,  zoneHalf.y))];
+    drawLineList(zoneRect, .08, hsl(.16, 1, .65, .9), true);
+}
 
-    // batter's box (rectangle next to plate)
-    drawRect(batterPos.add(vec2(0, 0)), vec2(1.6, 2.4), hsl(0, 0, .85, .15));
-    drawRect(batterPos.add(vec2(0, 0)), vec2(1.6, 2.4), hsl(0, 0, 1, .35), 0);
+function drawBatter()
+{
+    const skin   = hsl(.07, .5, .62);
+    const jersey = hsl(.6, .45, .5);
+    const pants  = hsl(0, 0, .85);
+    const helmet = hsl(.6, .55, .28);
+    const hand   = batterPos.add(vec2(.4, .3));
 
-    // batter (top-down: head circle + shoulder oval)
-    drawEllipse(batterPos.add(vec2(.05, .15)), vec2(1.6, 1.9), hsl(.6, .35, .25));
-    drawCircle(batterPos.add(vec2(.05, .25)), 1.0, hsl(.08, .25, .82));
+    // batter's box outline
+    const bw = .9, bh = 1.3;
+    const box = [
+        batterPos.add(vec2(-bw, -bh)), batterPos.add(vec2(bw, -bh)),
+        batterPos.add(vec2( bw,  bh)), batterPos.add(vec2(-bw,  bh))];
+    drawPoly(box, hsl(0, 0, 1, .06), .1, hsl(0, 0, 1, .4));
 
-    // catcher (south of plate, crouched)
-    drawCircle(catcherPos, 1.6, hsl(.55, .45, .25));
-    drawCircle(catcherPos.add(vec2(0, .35)), .85, hsl(.08, .2, .82));
+    // shadow + stance
+    drawEllipse(batterPos.add(vec2(.25, -.3)), vec2(2.2, 2.4), hsl(0, 0, 0, .22));
+    drawEllipse(batterPos.add(vec2(-.55, -.55)), vec2(.55, 1.0), pants, .35);
+    drawEllipse(batterPos.add(vec2( .45, -.7)),  vec2(.55, 1.0), pants, -.25);
 
-    // pitcher on mound
-    drawCircle(pitcherPos.add(vec2(0, -.2)), 1.4, hsl(0, .45, .35));
-    drawCircle(pitcherPos.add(vec2(0, 0)), .85, hsl(.08, .25, .82));
+    // torso
+    drawEllipse(batterPos.add(vec2(-.05, .15)), vec2(1.7, 2.1), jersey, .1);
+
+    // arms reaching to the grip
+    drawLine(batterPos.add(vec2(-.3, .55)), hand, .42, jersey);
+    drawLine(batterPos.add(vec2(.25, .6)),  hand, .36, jersey);
+    drawCircle(hand, .55, skin);
+
+    // helmet (with brim toward the pitcher + a little shine)
+    drawEllipse(batterPos.add(vec2(0, 1.05)), vec2(.95, .45), helmet);
+    drawCircle(batterPos.add(vec2(0, .55)), 1.05, helmet);
+    drawCircle(batterPos.add(vec2(-.2, .75)), .35, hsl(.6, .5, .42));
+}
+
+function drawFielders()
+{
+    // catcher (south of plate, crouched, mitt up toward the plate)
+    drawEllipse(catcherPos.add(vec2(.2, -.25)), vec2(2.5, 2.5), hsl(0, 0, 0, .22));
+    drawCircle(catcherPos, 1.7, hsl(.05, .55, .42));
+    drawCircle(catcherPos.add(vec2(0, .4)), .9, hsl(.6, .4, .3));
+    drawCircle(catcherPos.add(vec2(.15, 1.0)), .6, hsl(.08, .5, .35));
+
+    // pitcher on the mound
+    drawEllipse(pitcherPos.add(vec2(.25, -.25)), vec2(2.1, 2.3), hsl(0, 0, 0, .22));
+    drawEllipse(pitcherPos.add(vec2(0, -.1)), vec2(1.7, 2.0), hsl(0, .5, .42), -.08);
+    drawCircle(pitcherPos.add(vec2(0, .35)), .95, hsl(0, .4, .3));
+    drawCircle(pitcherPos.add(vec2(0, .35)), .55, hsl(.07, .5, .62));
+}
+
+function drawField()
+{
+    drawStadium();
+    drawFieldGround();
+    drawDiamond();
+    drawBatter();
+    drawFielders();
 }
 
 function drawBat()
