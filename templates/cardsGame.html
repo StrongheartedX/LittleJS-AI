@@ -295,9 +295,12 @@ function gameRender()
 {
     if (!stacks.length) return;
 
-    // Empty-slot outlines (back layer).
+    // Empty-slot outlines (back layer). Non-tableau piles always show the
+    // outline under their cards. A tableau slot shows while empty AND keeps
+    // showing until its base card has finished tweening in (so the outline
+    // doesn't blink out from under a card that's still flying toward it).
     for (const s of stacks)
-        if (s.isEmpty() || s.type !== StackType.Tableau)
+        if (s.type !== StackType.Tableau || s.isEmpty() || s.cards[0].isTweening())
             drawCardSlot(s.pos);
 
     // Hover highlight on the tail that would lift if clicked.

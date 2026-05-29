@@ -679,8 +679,10 @@ function gameRender()
 
     // Empty-slot outlines (back layer): every cascade slot, plus the top-row
     // stacks (stock / waste / foundations) whether or not they hold cards.
+    // A cascade slot keeps showing until its base card finishes tweening in,
+    // so it doesn't blink out from under a card still flying toward it.
     for (const s of cardStacks)
-        if (s.isEmpty() || s.type !== StackType.Cascade)
+        if (s.type !== StackType.Cascade || s.isEmpty() || s.cards[0].isTweening())
             drawCardSlot(s.pos, s.type === StackType.Foundation);
 
     // Dead-stock indicator: the pass limit is reached and the stock can no

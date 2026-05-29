@@ -660,9 +660,11 @@ function gameRender()
 {
     if (!cardStacks.length) return;
 
-    // Empty-slot outlines (back layer).
+    // Empty-slot outlines (back layer). A cascade slot keeps showing until its
+    // base card finishes tweening in, so it doesn't blink out from under a
+    // card still flying toward it (e.g. a snap-back to an emptied column).
     for (const s of cardStacks)
-        if (s.isEmpty() || s.type !== StackType.Cascade)
+        if (s.type !== StackType.Cascade || s.isEmpty() || s.cards[0].isTweening())
             drawCardSlot(s.pos, s.type === StackType.Foundation);
 
     // Compute per-card tint for this frame. Color-coded:
