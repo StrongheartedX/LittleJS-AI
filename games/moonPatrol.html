@@ -588,33 +588,26 @@ function drawBackground()
     const view = getCameraSize();
     drawRect(cameraPos, view, hsl(.66,.55,.06));
 
-    // stars (parallax)
-    const p = 0.12, cell = 3.5;
-    const lx = Math.floor((cameraPos.x - view.x/2)*p/cell) - 1;
-    const rx = Math.floor((cameraPos.x + view.x/2)*p/cell) + 1;
-    const by = Math.floor((cameraPos.y - view.y/2)*p/cell) - 1;
-    const ty = Math.floor((cameraPos.y + view.y/2)*p/cell) + 1;
-    for (let xi = lx; xi <= rx; ++xi)
-    for (let yi = by; yi <= ty; ++yi)
-    {
-        const h = starHash(xi, yi);
-        if (h > 0.30) continue;
-        const sx = (xi + starHash(xi+7,yi+3)) * cell / p;
-        const sy = (yi + starHash(xi+11,yi+5)) * cell / p;
-        drawRect(vec2(sx, sy), vec2(0.05 + h*0.12), hsl(.6,.1,.95, 0.9));
-    }
+    // starfield (two parallax layers, twinkling) — fills the whole sky
+    drawStarLayer(0.15, 2.4, 0.60, 0.14, 1, view);   // far: dense, dim
+    drawStarLayer(0.32, 3.6, 0.45, 0.22, 2, view);   // near: sparser, brighter
 
-    // earth in the sky
-    const ex = cameraPos.x + view.x*0.30;
-    const ey = cameraPos.y + view.y*0.30;
-    drawCircle(vec2(ex, ey), 4.4, hsl(.58,.5,.45, .95));
-    drawCircle(vec2(ex+0.5, ey+0.4), 4.4, hsl(.66,.55,.06, .55));
-    drawCircle(vec2(ex-0.8, ey+0.3), 1.6, hsl(.35,.5,.45, .6));
-    drawCircle(vec2(ex+1.1, ey-1.0), 1.1, hsl(.35,.5,.45, .5));
+    // crescent moon (opaque): a bright disc carved by an offset sky-colored disc
+    const mx = cameraPos.x + view.x*0.30;
+    const my = cameraPos.y + view.y*0.28;
+    const mr = 4.8;                       // diameter
+    const lit = hsl(.62,.12,.84);
+    const sky = hsl(.66,.55,.06);
+    drawCircle(vec2(mx, my), mr, lit);
+    // craters on the lit (right) side so they survive the carve
+    drawCircle(vec2(mx+1.4, my+0.5), 0.6, hsl(.62,.10,.74));
+    drawCircle(vec2(mx+1.5, my-1.0), 0.45, hsl(.62,.10,.74));
+    // carve the crescent: opaque sky disc shifted left leaves a sliver on the right
+    drawCircle(vec2(mx-2.1, my+0.3), mr, sky);
 
     // distant ridges (parallax: scroll slower than the foreground, stay put vertically)
-    drawRidge(0.5, hsl(.70,.30,.12, .85), -0.04, 2.6, 0.22);
-    drawRidge(0.7, hsl(.72,.40,.18, .95), -0.12, 1.8, 0.38);
+    drawRidge(0.5, hsl(.70,.30,.10), -0.04, 2.6, 0.22);
+    drawRidge(0.7, hsl(.72,.38,.16), -0.12, 1.8, 0.38);
 }
 
 function starHash(x, y)
@@ -623,6 +616,31 @@ function starHash(x, y)
     n = (n ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>> 4;
     n = Math.imul(n, 0x27d4eb2d); n ^= n >>> 15;
     return (n >>> 0) / 4294967296;
+}
+
+// One parallax star layer. par<1 scrolls slower than the foreground (distant),
+// cell = grid spacing, prob = fraction of cells that hold a star, sizeMax = max
+// star size, seed separates layers so they don't overlap identically.
+function drawStarLayer(par, cell, prob, sizeMax, seed, view)
+{
+    const ox = cameraPos.x * (1 - par);
+    const oy = cameraPos.y * (1 - par);
+    const lx = Math.floor((cameraPos.x - view.x/2 - ox)/cell) - 1;
+    const rx = Math.floor((cameraPos.x + view.x/2 - ox)/cell) + 1;
+    const by = Math.floor((cameraPos.y - view.y/2 - oy)/cell) - 1;
+    const ty = Math.floor((cameraPos.y + view.y/2 - oy)/cell) + 1;
+    for (let xi = lx; xi <= rx; ++xi)
+    for (let yi = by; yi <= ty; ++yi)
+    {
+        const h = starHash(xi*4 + seed, yi*7 - seed);
+        if (h > prob) continue;
+        const wx = (xi + starHash(xi+7, yi+3))*cell + ox;
+        const wy = (yi + starHash(xi+11, yi+5))*cell + oy;
+        const b = h/prob;                                   // 0..1 brightness ramp
+        const tw = 0.55 + 0.45*Math.sin(time*2.5 + h*40);   // twinkle
+        const size = 0.06 + b*sizeMax;
+        drawRect(vec2(wx, wy), vec2(size), hsl(.62, .12, 1, (0.45 + 0.55*b)*tw));
+    }
 }
 
 function drawRidge(par, color, screenYFrac, amp, freq)
