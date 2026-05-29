@@ -20,6 +20,22 @@ let TILE_COLS, TILE_PADDING, TILE_STRIDE, TILE_SIZE, TILE_COUNT;
 let atlasCanvas, atlasCtx, atlasDirty, flushScheduled;
 const tileDescriptions = [];
 
+// Default font family used by drawTextToTexture when a caller doesn't pass
+// its own `font` option. 'serif' picks the OS emoji font on every platform.
+// A game that bundles its own emoji font (e.g. a loaded Twemoji FontFace)
+// can call setTextureFont('"Twemoji", serif') once before painting its atlas
+// to get identical glyphs across browsers/OSes. Backward-compatible: any game
+// that doesn't call it keeps the original 'serif' behaviour.
+let textureDefaultFont = 'serif';
+function setTextureFont(font) { textureDefaultFont = font || 'serif'; }
+
+// Default outline used by drawTextToTexture when a caller doesn't pass its
+// own `outline` option. null = no outline (original behaviour). Set once via
+// setTextureOutline(true) (or an {color,width} object) to give every emoji in
+// a game's atlas a black sticker outline so it pops off the background.
+let textureDefaultOutline = null;
+function setTextureOutline(outline) { textureDefaultOutline = outline; }
+
 function initDrawToTexture(cols = 4)
 {
     ASSERT(cols === 4 || cols === 8, 'cols must be 4 or 8');
@@ -95,6 +111,7 @@ function drawToTexture(tileIndex, drawFn, description)
 //   drawTextToTexture(7, 'GO', {sizeMul: .6, font: 'sans-serif'});
 //   drawTextToTexture(31, '🗡️', {flipX: true});   // mirror across vertical axis
 //   drawTextToTexture(44, '🪓', {flipY: true});   // mirror across horizontal axis
+//   drawTextToTexture(5, '🐱', {outline: true});  // black sticker outline
 //
 // Options:
 //   description  – atlas-prompt label; falls back to `text` if omitted
@@ -105,13 +122,19 @@ function drawToTexture(tileIndex, drawFn, description)
 //   font         – font family, default 'serif' (matches the emoji look)
 //   flipX        – mirror the glyph left↔right (about the vertical axis)
 //   flipY        – mirror the glyph top↔bottom (about the horizontal axis)
+//   outline      – add a contrasting outline so the glyph pops off the
+//                  background. true | width-fraction | {color, width}.
+//                  `width` is a fraction of the tile size (default .04).
+//                  Color emoji can't be stroked cleanly, so this DILATES the
+//                  glyph — stamps a flattened-to-solid copy around a ring —
+//                  rather than using strokeText.
 function drawTextToTexture(tileIndex, text, options)
 {
     options = options || {};
     const hueShift    = options.hueShift    || 0;
     const filter      = options.filter      || (hueShift ? 'hue-rotate(' + hueShift + 'deg)' : '');
     const sizeMul     = options.sizeMul     != null ? options.sizeMul : .85;
-    const font        = options.font        || 'serif';
+    const font        = options.font        || textureDefaultFont;
     const flipX       = !!options.flipX;
     const flipY       = !!options.flipY;
     // Falling back to the glyph itself as the description keeps the
@@ -119,9 +142,20 @@ function drawTextToTexture(tileIndex, text, options)
     // a label — for emoji sheets that's almost always good enough.
     const description = options.description || text;
 
+    // Normalise the outline option into {color, width} or null.
+    let outline = options.outline != null ? options.outline : textureDefaultOutline;
+    if (outline)
+    {
+        if (outline === true)                 outline = {};
+        else if (typeof outline === 'number') outline = {width: outline};
+        outline = {
+            color: outline.color != null ? outline.color : '#000',
+            width: outline.width != null ? outline.width : .04,
+        };
+    }
+
     return drawToTexture(tileIndex, ctx =>
     {
-        if (filter) ctx.filter = filter;
         ctx.font = (TILE_SIZE * .96 * sizeMul) + 'px ' + font;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -129,19 +163,55 @@ function drawTextToTexture(tileIndex, text, options)
         // nudge down so the visual centre lands at the tile centre.
         const cx = TILE_SIZE / 2;
         const cy = TILE_SIZE / 2 + TILE_SIZE * .04;
-        if (flipX || flipY)
+
+        // Paint the glyph once at (x,y), honouring the optional flip.
+        const paint = (x, y) =>
         {
-            // Translate + scale so the flip pivots around the glyph centre.
+            if (flipX || flipY)
+            {
+                // Translate + scale so the flip pivots around the glyph centre.
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+                ctx.fillText(text, 0, 0);
+                ctx.restore();
+            }
+            else
+                ctx.fillText(text, x, y);
+        };
+
+        if (outline)
+        {
+            // brightness(0) flattens the colour glyph to solid black while
+            // keeping its alpha shape; stamping the whole glyph (not a point)
+            // at each ring offset fully covers the dilated band, so a modest
+            // sample count leaves no gaps.
+            const r = outline.width * TILE_SIZE;
+            const samples = 16;
             ctx.save();
-            ctx.translate(cx, cy);
-            ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-            ctx.fillText(text, 0, 0);
+            ctx.filter = 'brightness(0)';
+            for (let i = 0; i < samples; ++i)
+            {
+                const a = i / samples * 2 * Math.PI;
+                paint(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+            }
             ctx.restore();
+
+            // Recolour the black silhouette if a non-black outline was asked
+            // for. source-atop tints only the pixels already drawn.
+            if (outline.color !== '#000' && outline.color !== 'black')
+            {
+                ctx.save();
+                ctx.globalCompositeOperation = 'source-atop';
+                ctx.fillStyle = outline.color;
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                ctx.restore();
+            }
         }
-        else
-        {
-            ctx.fillText(text, cx, cy);
-        }
+
+        // The colour glyph on top of its outline.
+        if (filter) ctx.filter = filter;
+        paint(cx, cy);
     }, description);
 }
 

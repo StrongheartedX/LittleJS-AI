@@ -12,7 +12,7 @@
 'use strict';
 
 // debug settings
-const DEBUG_SPRITES = 0;
+const DEBUG_SPRITES = 1;
 const DEBUG_AUTOSTART = 0;
 const DEBUG_GOD_MODE_DEFAULT = 0;
 
@@ -188,9 +188,9 @@ class Player extends EngineObject
 }
 
 const ENEMY_TYPES = [
-    {key:'ant',     sprite:'ant',     hp: 1,  dmg: 3,  speed: 1.0, xpDrop: 1, size: .55},
+    {key:'ant',     sprite:'ant',     hp: 1,  dmg: 3,  speed: 1.0, xpDrop: 1, size: .6},
     {key:'zombie',  sprite:'zombie',  hp: 3,  dmg: 10, speed: 1.5, xpDrop: 1, size: 1.0},
-    {key:'bat',     sprite:'bat',     hp: 1,  dmg: 5,  speed: 4.0, xpDrop: 1, size: .85},
+    {key:'bat',     sprite:'bat',     hp: 1,  dmg: 5,  speed: 4.0, xpDrop: 1, size: .9},
     {key:'snail',   sprite:'snail',   hp: 25, dmg: 5,  speed: .7,  xpDrop: 5, size: 1.2},
     {key:'skull',   sprite:'skull',   hp: 8,  dmg: 15, speed: 1.2, xpDrop: 3, size: 1.0},
     {key:'clown',   sprite:'clown',   hp: 5,  dmg: 8,  speed: 1.8, xpDrop: 2, size: 1.0,
@@ -292,7 +292,7 @@ const STAGES = [
         floorColor: hsl(.65, .04, .14),    // muted stone-blue
         groundPalette: [hsl(.65, .04, .14), hsl(.30, .22, .20), hsl(.65, .04, .09)],
         roadColor: hsl(.10, .04, .28),     // pale cobble path
-        backdropProps: {deadFlower: .5, tree2: 1.0},
+        backdropProps: {tombstone: .5, tree2: 1.0},
         propCount: 550,
         propSize: 2.5,
         borderKey: 'brick',
@@ -3179,10 +3179,33 @@ function aiDirection()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Load the bundled Twemoji color font so the sprite atlas renders identical
+// emoji glyphs on every browser/OS instead of the host's native emoji set.
+// Twemoji.ttf is a COLR/CPAL color font — Chrome/Firefox paint it in full
+// colour via canvas fillText. If the load fails (offline, blocked), we fall
+// back to 'serif' (OS emoji) so the game still renders.
+async function loadEmojiFont()
+{
+    try
+    {
+        const font = new FontFace('Twemoji', 'url(twemoji.ttf)');
+        await font.load();
+        document.fonts.add(font);
+        // Missing glyphs (if any) fall through to the OS emoji font.
+        setTextureFont('"Twemoji", serif');
+    }
+    catch (e)
+    {
+        console.warn('Twemoji font failed to load, using OS emoji:', e);
+    }
+}
+
 async function gameInit()
 {
     saveDataInit('emojiSurvivors');
+    await loadEmojiFont();
     initDrawToTexture(8);
+    setTextureOutline(true);   // black sticker outline on every emoji sprite
     DEBUG_SPRITES && showAtlasOverlay();
 
     // hero sprites — painted once at startup; HEROES[*].spriteKey selects
@@ -3227,14 +3250,14 @@ async function gameInit()
     // slot 7: free
 
     // Row 1 — Common enemies
-    sprites.ant       = drawTextToTexture(8,  '🐜', {description: 'a small black ant', flipX: true});
+    sprites.ant       = drawTextToTexture(8,  '🐛', {description: 'a small black ant', flipX: true});
     sprites.bat       = drawTextToTexture(9,  '🦇', {description: 'a black bat with spread wings'});
     sprites.zombie    = drawTextToTexture(10, '🧟', {description: 'a green zombie shambling forward'});
     sprites.skull     = drawTextToTexture(11, '💀', {description: 'a white skull, menacing'});
     sprites.clown     = drawTextToTexture(12, '🤡', {description: 'a clown face with red nose'});
     sprites.duck      = drawTextToTexture(13, '🦆', {description: 'a yellow duck', flipX: true});
-    sprites.ghost     = drawTextToTexture(14, '👻', {description: 'a pale ghost'});
-    sprites.snail     = drawTextToTexture(15, '🐌', {description: 'a brown snail with shell'});
+    sprites.ghost     = drawTextToTexture(14, '👻', {description: 'a pale ghost', flipX: true});
+    sprites.snail     = drawTextToTexture(15, '🐌', {description: 'a brown snail with shell', flipX: true});
 
     // Row 2 — Theme enemies + bolt + barrel
     sprites.fireImp   = drawTextToTexture(16, '😈', {description: 'a smiling devil-face fire imp'});
@@ -3242,7 +3265,7 @@ async function gameInit()
     sprites.skeleton  = drawTextToTexture(18, '🦴', {description: 'a single white bone', flipX: true});
     sprites.crab      = drawTextToTexture(19, '🦀', {description: 'a red crab'});
     sprites.octopus   = drawTextToTexture(20, '🐙', {description: 'a purple octopus'});
-    sprites.penguin   = drawTextToTexture(21, '🐧', {description: 'a black-and-white penguin', flipX: true});
+    sprites.penguin   = drawTextToTexture(21, '🐧', {description: 'a black-and-white penguin'});
     sprites.bolt      = drawTextToTexture(22, '⚡', {description: 'a yellow lightning bolt'});
     sprites.barrel    = drawTextToTexture(23, '🛢️', {description: 'an oil barrel'});
 
@@ -3266,7 +3289,7 @@ async function gameInit()
     sprites.bomb      = drawTextToTexture(34, '💣', {description: 'a black bomb with fuse'});
     sprites.pizza     = drawTextToTexture(35, '🍕', {description: 'a pizza slice'});
     sprites.starToss  = drawTextToTexture(36, '⭐', {description: 'a yellow five-pointed star'});
-    sprites.dagger    = drawTextToTexture(37, '🗡️', {description: 'a small dagger', flipY: true});
+    sprites.dagger    = drawTextToTexture(37, '🗡️', {description: 'a small dagger', flipX: true, flipY: true});
     sprites.fish      = drawTextToTexture(38, '🐟', {description: 'a blue fish', flipX: true});
     sprites.heartDrain = drawTextToTexture(39, '❤️', {description: 'a red heart'});
 
@@ -3297,14 +3320,12 @@ async function gameInit()
     sprites.chest     = drawTextToTexture(54, '🎁', {description: 'a wrapped gift box with bow'});
     sprites.crate     = drawTextToTexture(55, '📦', {description: 'a wooden crate'});
 
-    // Row 7 — Meadow / Graveyard / Beach backdrops. 🪦 headstone is Unicode
-    // 13.0 and doesn't render in older Windows emoji fonts, so use ⚰️
-    // coffin to keep the atlas from baking a blank cell.
+    // Row 7 — Meadow / Graveyard / Beach backdrops.
     sprites.tree1      = drawTextToTexture(56, '🌳', {description: 'a deciduous tree'});
     sprites.tree2      = drawTextToTexture(57, '🌲', {description: 'an evergreen pine tree'});
     sprites.tree3      = drawTextToTexture(58, '🌴', {description: 'a palm tree'});
     sprites.wall       = drawTextToTexture(59, '⛰️', {description: 'a rocky mountain peak'});
-    sprites.deadFlower = drawTextToTexture(60, '🥀', {description: 'a dead flower'});
+    sprites.tombstone  = drawTextToTexture(60, '🪦', {description: 'a tombstone'});
     sprites.brick      = drawTextToTexture(61, '🧱', {description: 'a red brick block'});
     sprites.shell      = drawTextToTexture(62, '🐚', {description: 'a spiral seashell'});
 
