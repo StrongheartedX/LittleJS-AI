@@ -13,7 +13,7 @@
 
 // debug settings
 const DEBUG_SPRITES = 1;
-const DEBUG_AUTOSTART = 1;
+const DEBUG_AUTOSTART = 0;
 const DEBUG_GOD_MODE_DEFAULT = 1;
 
 // engine settings, do not remove
@@ -1583,7 +1583,8 @@ class ChainLightningWeapon
         {
             current.takeDamage(dmg);
             hit.add(current);
-            chainFlashes.push({a: from, b: current.pos.copy(), t: time + .15});
+            chainFlashes.push({a: from, b: current.pos.copy(), t: time + .15,
+                               zigzag: true});
             from = current.pos;
             let best = null, bestD = chainRange;
             for (const e of enemies)
@@ -1598,6 +1599,34 @@ class ChainLightningWeapon
     }
 }
 
+// Build a zigzaggy "lightning bolt" path between two points. Cached on the
+// flash so it stays stable across its ~.15 s lifetime (re-rolling per
+// frame would look like a jittery scribble). Segment count scales with
+// length so a short flash isn't sliced into one-pixel pieces. Perp jitter
+// tapers via sin(t·π) so the endpoints are still anchored cleanly to
+// `a` and `b`. Straight rays (chest fireworks, explosion spokes) skip
+// this and keep drawing as a single drawLine().
+function buildLightningPath(a, b)
+{
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < .01) return [a, b];
+    // Perpendicular unit vector for the displacement
+    const px = -dy / len, py = dx / len;
+    const segs = clamp(Math.round(len * 1.5), 4, 14);
+    const amp = min(len * .18, .8);
+    const pts = [a];
+    for (let i = 1; i < segs; ++i)
+    {
+        const t = i / segs;
+        const off = rand(-1, 1) * amp * sin(t * PI);
+        pts.push(vec2(a.x + dx * t + px * off,
+                      a.y + dy * t + py * off));
+    }
+    pts.push(b);
+    return pts;
+}
+
 function drawChainFlashes()
 {
     for (let i = chainFlashes.length - 1; i >= 0; --i)
@@ -1608,7 +1637,20 @@ function drawChainFlashes()
         const lifetime = f.lifetime || .15;
         const alpha = remaining / lifetime;
         const c = f.color || new Color(1, 1, .4, 1);
-        drawLine(f.a, f.b, .15, new Color(c.r, c.g, c.b, alpha));
+        const col = new Color(c.r, c.g, c.b, alpha);
+        if (f.zigzag)
+        {
+            // Lazily build + cache the bolt path so the same flash is
+            // stable across the handful of frames it stays visible.
+            // drawLineList draws the whole polyline as a single batched
+            // WebGL primitive — one call instead of N drawLine calls.
+            if (!f.points) f.points = buildLightningPath(f.a, f.b);
+            drawLineList(f.points, .15, col);
+        }
+        else
+        {
+            drawLine(f.a, f.b, .15, col);
+        }
     }
 }
 
@@ -1983,8 +2025,12 @@ class ThunderstormWeapon
         this.cooldown = .5 / player.fireRateMult;
 
         // strike up to 5 random enemies in a wide radius — no chain, all
-        // simultaneous, like the screen got hit by a sudden storm
-        const range = 14 * player.areaMult;
+        // simultaneous, like the screen got hit by a sudden storm. Kept
+        // just slightly larger than Chain Lightning's 8 wu first-hit
+        // range so the evolution still feels bigger, but capped at 9 so
+        // we never zap an enemy the player can't actually see (the camera
+        // only shows ~24×16 wu — the old 14 was reaching off-screen).
+        const range = 9 * player.areaMult;
         const candidates = enemies.filter(e => !e.isBreakable && e.pos.distance(player.pos) < range);
         const dmg = this.damage() * player.dmgMult;
         const strikes = min(5, candidates.length);
@@ -1995,7 +2041,7 @@ class ThunderstormWeapon
             candidates.splice(idx, 1);
             target.takeDamage(dmg);
             chainFlashes.push({a: player.pos.copy(), b: target.pos.copy(),
-                               t: time + .2});
+                               t: time + .2, zigzag: true});
         }
     }
 }
@@ -2147,13 +2193,13 @@ class CometProjectile extends EngineObject
 {
     constructor(pos, target, damage)
     {
-        super(pos, vec2(.8), sprites.comet);
+        super(pos, vec2(1.2), sprites.comet);
         this.target = target;
         this.damage = damage;
         this.life = 2.5;
         setupKinematicProp(this);
-        this.angleVelocity = 4;
-        this.speedPerFrame = 18 * player.projSpeedMult / 60;
+        this.angleVelocity = 1;
+        this.speedPerFrame = 8 * player.projSpeedMult / 60;
     }
 
     update()
@@ -3259,7 +3305,7 @@ async function gameInit()
     // Row 5 — Evolved weapons + Beach/Frozen stage borders. Axe gets a
     // horizontal-axis mirror so the head sits on the opposite side from
     // the dagger's blade (asked-for tweak).
-    sprites.comet       = drawTextToTexture(40, '☄️', {description: 'a fiery comet'});
+    sprites.comet       = drawTextToTexture(40, '🔥', {hueShift: 180, description: 'a fiery comet'});
     sprites.nuke        = drawTextToTexture(41, '☢️', {description: 'a radioactive trefoil'});
     sprites.axe         = drawTextToTexture(42, '🪓', {description: 'a wood-handled axe', flipX: true});
     sprites.star        = drawTextToTexture(43, '🌟', {description: 'a yellow glowing star'});
