@@ -167,6 +167,30 @@ function drawGlowLineList(points, width, col, wrap=false, pos=vec2(), angle=0)
         drawLineList(points, width * g.width, rgb(col.r, col.g, col.b, col.a * g.alpha), wrap, pos, angle);
 }
 
+// Call drawFn(ghostPos) at the object's real position AND at any wrapped
+// "ghost" copies that peek into view near a screen edge, so objects slide
+// seamlessly across the wrap seam instead of popping. `radius` is the
+// object's draw radius (used to decide which ghosts are on-screen). The wrap
+// period matches wrapPos exactly (view size + 2*WRAP_MARGIN), so a ghost sits
+// precisely where the object lands when it teleports — no visible jump.
+function drawWrapped(pos, radius, drawFn)
+{
+    const spanX = 2 * (worldHalf.x + WRAP_MARGIN);
+    const spanY = 2 * (worldHalf.y + WRAP_MARGIN);
+    const viewL = cameraPos.x - worldHalf.x, viewR = cameraPos.x + worldHalf.x;
+    const viewB = cameraPos.y - worldHalf.y, viewT = cameraPos.y + worldHalf.y;
+    for (let ix = -1; ix <= 1; ix++)
+    for (let iy = -1; iy <= 1; iy++)
+    {
+        const gx = pos.x + ix * spanX;
+        const gy = pos.y + iy * spanY;
+        // skip copies whose bounding circle can't touch the visible view
+        if (gx + radius < viewL || gx - radius > viewR) continue;
+        if (gy + radius < viewB || gy - radius > viewT) continue;
+        drawFn(vec2(gx, gy));
+    }
+}
+
 function randEdgeSpawn(minDistanceFromCenter = 4)
 {
     // spawn just outside the view bounds
@@ -530,7 +554,8 @@ class Rock extends EngineObject
 
     render()
     {
-        drawGlowLineList(this.points, LINE_WIDTH, rgb(1,1,1), true, this.pos, this.angle);
+        drawWrapped(this.pos, this.r * 1.15, p =>
+            drawGlowLineList(this.points, LINE_WIDTH, rgb(1,1,1), true, p, this.angle));
     }
 }
 
