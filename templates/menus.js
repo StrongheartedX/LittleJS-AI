@@ -67,6 +67,11 @@
 // Toasts:          showMenuToast({icon, title, text, duration, position}) —
 //                  DOM notification in any corner (top-left default), queued.
 //                  MenuMedal (extends LittleJS Medal) auto-toasts on unlock().
+// Orientation:     setOrientationLock('landscape'|'portrait', {icon, title,
+//                  text}) — on touch devices held the wrong way, shows a
+//                  full-screen "rotate your device" overlay above everything
+//                  and pauses the game (folds into the visibility/pause hook).
+//                  Off by default; setOrientationLock(false) clears it.
 // Lookups:         getMenu(id), getToolbar(id), getTopMenu(),
 //                  isMenuVisible(), showMenu(id), hideMenu(id),
 //                  hideAllMenus().
@@ -1517,7 +1522,9 @@ function installAutoPause(predicate)
 }
 function fireMenuVisibility()
 {
-    const v = isMenuVisible();
+    // The orientation-lock overlay counts as "something blocking play" so it
+    // pauses the game through the same single signal as menus/dialogs.
+    const v = isMenuVisible() || orientationBlocked;
     // When the last menu closes, clear stale mouse-button state in LittleJS's
     // input table. We stopPropagation on pointer events at the menu DOM root
     // (so menu widgets like sliders work), which means a mouse RELEASE that
@@ -1532,6 +1539,84 @@ function fireMenuVisibility()
         for (let b = 0; b < 3; b++) inputClearKey(b, 0, true, true, true);
     if (menuVisibilityCallback) menuVisibilityCallback(v);
     for (const fn of _internalVisibilityListeners) fn(v);
+}
+
+// --- Orientation lock ----------------------------------------------------
+// setOrientationLock('landscape'|'portrait', options?) declares the device
+// orientation a game wants. On touch devices held the wrong way, a full-
+// screen overlay appears (above all menus) and the game pauses — the block
+// folds into fireMenuVisibility() above, so setMenuVisibilityCallback /
+// installAutoPause drive `paused` with no extra wiring. Off by default;
+// setOrientationLock(false) (or null) clears it. options overrides:
+//   { icon, title, text } — defaults: '📱', 'Please Rotate Your Device',
+//   'This game is best played in <orientation>.'
+let orientationLock      = null;   // 'landscape' | 'portrait' | null
+let orientationBlocked   = false;  // overlay currently showing
+let orientationOpts      = {};
+let orientationOverlay   = null;   // lazily-created DOM element
+let orientationListening = false;  // resize/orientationchange listeners attached
+
+function setOrientationLock(orientation, options)
+{
+    if (orientation !== 'landscape' && orientation !== 'portrait')
+        orientation = null;        // anything else (false/null/typo) disables
+    initMenuSystem();
+    orientationLock = orientation;
+    orientationOpts = options || {};
+    if (orientation && !orientationListening)
+    {
+        orientationListening = true;
+        const onChange = () => updateOrientationLock();
+        window.addEventListener('resize', onChange);
+        window.addEventListener('orientationchange', onChange);
+    }
+    updateOrientationLock();
+}
+
+function orientationIsTouchDevice()
+{
+    if (typeof isTouchDevice !== 'undefined') return isTouchDevice;
+    return ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+}
+
+function ensureOrientationOverlay()
+{
+    if (orientationOverlay) return orientationOverlay;
+    const el = document.createElement('div');
+    el.className = 'ljs-orientation-lock';
+    for (const cls of ['ljs-orient-icon', 'ljs-orient-title', 'ljs-orient-text'])
+    {
+        const child = document.createElement('div');
+        child.className = cls;
+        el.appendChild(child);
+    }
+    menuSystemRoot.appendChild(el);
+    orientationOverlay = el;
+    return el;
+}
+
+function updateOrientationLock()
+{
+    const current = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    const blocked = !!orientationLock && orientationIsTouchDevice() &&
+        current !== orientationLock;
+    if (blocked)
+    {
+        const el = ensureOrientationOverlay();
+        el.querySelector('.ljs-orient-icon').textContent  = orientationOpts.icon  || '📱';
+        el.querySelector('.ljs-orient-title').textContent = orientationOpts.title || 'Please Rotate Your Device';
+        el.querySelector('.ljs-orient-text').textContent  = orientationOpts.text  ||
+            ('This game is best played in ' + orientationLock + '.');
+        el.classList.add('visible');
+    }
+    else if (orientationOverlay)
+        orientationOverlay.classList.remove('visible');
+
+    if (blocked !== orientationBlocked)
+    {
+        orientationBlocked = blocked;
+        fireMenuVisibility();   // re-pause / un-pause through the shared signal
+    }
 }
 
 // Currently arrow/d-pad-selected element. Independent of DOM focus — DOM
@@ -1616,6 +1701,10 @@ function injectStyles()
     /* big icon at the top of showAlertDialog / showConfirmDialog */
     --dialog-icon-size:    3em;
     --dialog-icon-padding: 0;
+
+    /* orientation-lock overlay (setOrientationLock) */
+    --orient-bg:        rgba(0, 0, 0, 0.95);
+    --orient-icon-size: 5em;
 }
 /* Single visibility class wins over every display rule below. setVisible()
    on every item type — and the toolbar parent — toggles this class. */
@@ -1681,7 +1770,7 @@ button.ljs-menu-item, input.ljs-menu-item {
    elsewhere — that was the "stuck selection" on touch we were chasing. */
 @media (hover: hover) and (pointer: fine) {
     button.ljs-menu-item:hover {
-        background: var(--menu-item-hover-bg);
+    background: var(--menu-item-hover-bg);
         border-color: var(--menu-accent); outline: none;
     }
 }
@@ -1831,6 +1920,30 @@ button.ljs-grid-cell { cursor: pointer; }
 .ljs-toast-content { flex: 1; min-width: 0; }
 .ljs-toast-title { font-size: var(--toast-title-size); font-weight: bold; color: var(--menu-accent); }
 .ljs-toast-text { font-size: var(--toast-text-size); opacity: 0.85; word-break: break-word; }
+
+/* Orientation-lock overlay (setOrientationLock). Full-viewport, sits above
+   every menu/dialog/toast, captures pointer events so taps don't fall through
+   to the canvas. Hidden until .visible is added. */
+.ljs-orientation-lock {
+    position: fixed; inset: 0; z-index: 100000;
+    display: none; pointer-events: auto;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 1em; text-align: center; padding: 2em; box-sizing: border-box;
+    background: var(--orient-bg); color: var(--menu-fg);
+    font-family: var(--menu-font);
+}
+.ljs-orientation-lock.visible { display: flex; }
+.ljs-orient-icon {
+    font-size: var(--orient-icon-size); line-height: 1;
+    animation: ljs-orient-rotate 1.6s ease-in-out infinite;
+}
+.ljs-orient-title { font-size: var(--menu-title-size); font-weight: bold; color: var(--menu-accent); }
+.ljs-orient-text  { font-size: var(--menu-item-size); max-width: 18em; opacity: 0.9; }
+/* Wiggle the icon between portrait-ish and landscape-ish to suggest rotating. */
+@keyframes ljs-orient-rotate {
+    0%, 100% { transform: rotate(-12deg); }
+    50%      { transform: rotate(78deg); }
+}
 `;
     const style = document.createElement('style');
     style.textContent = css;

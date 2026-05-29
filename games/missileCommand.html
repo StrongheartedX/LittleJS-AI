@@ -1054,6 +1054,7 @@ function gameInit()
     sBonusTick = new SoundGenerator({volume:.45, frequency:780, attack:0, release:.06, shapeCurve:1.6});
 
     installAutoPause();
+    setOrientationLock('landscape');
 
     buildMenus();
 
