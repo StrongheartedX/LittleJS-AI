@@ -73,11 +73,11 @@ const COLOR_RETICLE  = hsl(.15, .9, .65, .85);
 //------------------------------------------------------------------------------
 // sounds
 
-const sThrow   = new SoundGenerator({frequency: 240, slide: -2,   release: .12, volume: .55, randomness: .12});
+const sThrow   = new Sound([.7,,300,.05,,.15,,1.3,2,-32,,,,2]); // Loaded Sound 8389
 const sSwish   = new SoundGenerator({frequency: 880, pitchJump: 1400, pitchJumpTime: .04, release: .28, volume: .7});
 const sScore   = new SoundGenerator({frequency: 620, pitchJump: 900,  pitchJumpTime: .04, release: .22, volume: .6});
 const sClank   = new SoundGenerator({frequency: 180, slide: -3,   release: .09, volume: .45, randomness: .2, noise: .3});
-const sBuzzer  = new SoundGenerator({frequency: 130, release: .9,  volume: .7, noise: .15, shapeCurve: .4});
+const sBuzzer  = new Sound([,0,400,.05,1,,,,,,,,.1,,,,,,,.05]); // Random 8390
 const sFire    = new SoundGenerator({frequency: 300, pitchJump: 1600, pitchJumpTime: .15, release: .4, volume: .6});
 
 //------------------------------------------------------------------------------
@@ -119,7 +119,8 @@ function getBoardPos()   { const h = getHoopCenter(); return vec2(h.x + BOARD_OF
 function launchBall(pos, vel)
 {
     balls.push(new Ball(pos, vel));
-    sThrow.play();
+    const freq = lerp(.5, 1, vel.length() * .05);
+    sThrow.play(pos, vel.length() * .02, freq);
 }
 
 // Velocity computed across the recorded mouse trail — averages out jitter
