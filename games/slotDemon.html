@@ -101,14 +101,20 @@ const PAN_DRAG_PX = 8;   // screen-pixel movement before it counts as a drag, no
 
 function boardBounds()
 {
-    if (!machines.length) return { min: vec2(), max: vec2() };
-    let min = machines[0].pos.copy(), max = machines[0].pos.copy();
-    for (const m of machines)
+    // Bounds over ALL pit slots (0..pitCapacity-1), not just placed machines,
+    // so the camera frames and clamps to the whole pit (empty slots included).
+    let min = null, max = null;
+    for (let i=0;i<pitCapacity;++i)
     {
-        min = vec2(Math.min(min.x, m.pos.x), Math.min(min.y, m.pos.y));
-        max = vec2(Math.max(max.x, m.pos.x), Math.max(max.y, m.pos.y));
+        const p = cellToPos(vec2(i%GRID_COLS, Math.floor(i/GRID_COLS)));
+        if (!min) { min = p.copy(); max = p.copy(); }
+        else
+        {
+            min = vec2(Math.min(min.x, p.x), Math.min(min.y, p.y));
+            max = vec2(Math.max(max.x, p.x), Math.max(max.y, p.y));
+        }
     }
-    return { min, max };
+    return min ? { min, max } : { min: vec2(), max: vec2() };
 }
 function clampCamera()
 {
@@ -116,13 +122,21 @@ function clampCamera()
     cameraPos = vec2(clamp(cameraPos.x, b.min.x - pad, b.max.x + pad),
                      clamp(cameraPos.y, b.min.y - pad, b.max.y + pad));
 }
-// Frame the board: center the camera on the midpoint of all machines. Called
-// on new game / load so the initial view is centered (machines fill grid
-// columns left-to-right, so a lone starting machine is otherwise far-left).
+// Frame the pit: zoom so all grid COLUMNS fit in the play area (window minus the
+// docked shop, ~230px), then center the pit there. The pit only ever grows in
+// rows (≤ GRID_COLS wide), so the width-fit is stable; tall pits are panned.
+// Called on new game / load; the player can still pan freely afterward.
+const SHOP_PX = 230;
 function centerCamera()
 {
     const b = boardBounds();
-    cameraPos = b.min.add(b.max).scale(0.5);
+    const mid = b.min.add(b.max).scale(0.5);
+    const cols = Math.min(pitCapacity, GRID_COLS);
+    const pitWidth = (cols - 1) * CELL.x + CELL.x*1.1;        // end-to-end span + a margin cell
+    const playW = Math.max(200, mainCanvasSize.x - SHOP_PX);
+    cameraScale = Math.min(32, playW / pitWidth);             // never zoom past the default
+    // place the pit's center at the center of the play area (left of the shop)
+    cameraPos = vec2(mid.x + SHOP_PX / (2 * cameraScale), mid.y);
 }
 
 // cost helpers
@@ -523,30 +537,32 @@ function loadGame()
 // Every buy function guards canAfford() and no-ops when unaffordable, so menu
 // disabling is feedback only — never relied on for correctness.
 
+// Every purchase saves immediately (saveGame) so a reload never loses a
+// discrete action — the autosave timer only covers passive win cash.
 function buyMachine()
 {
     if (machines.length >= pitCapacity) return;
     const c = machineCost(); if (!canAfford(c)) return;
-    cash -= c; spawnMachine();
+    cash -= c; spawnMachine(); saveGame();
 }
 function expandPit()
 {
     const c = pitCost(); if (!canAfford(c)) return;
-    cash -= c; pitCapacity += BALANCE.pitExpand;
+    cash -= c; pitCapacity += BALANCE.pitExpand; saveGame();
 }
 function cheapestLevelMachine(){ return machines.slice().sort((a,b)=>levelCost(a)-levelCost(b))[0]; }
 function levelUpMachine()
 {
     const m = cheapestLevelMachine(); if (!m) return;
     const c = levelCost(m); if (!canAfford(c)) return;
-    cash -= c; m.level++;
+    cash -= c; m.level++; saveGame();
 }
 function cheapestWildMachine(){ return machines.slice().sort((a,b)=>wildCost(a)-wildCost(b))[0]; }
 function buyWild()
 {
     const m = cheapestWildMachine(); if (!m) return;
     const c = wildCost(m); if (!canAfford(c)) return;
-    cash -= c; m.wildCount++;
+    cash -= c; m.wildCount++; saveGame();
 }
 function sacrificeOldestSpecific(d){ const i=demons.indexOf(d); if(i>=0)demons.splice(i,1); if(d.machine)d.machine.assignedDemon=null; d.destroy(); }
 function sellMachine()
@@ -556,7 +572,7 @@ function sellMachine()
     const m = machines[machines.length-1];       // sell most recent
     if (m.assignedDemon) sacrificeOldestSpecific(m.assignedDemon);
     m.destroy(); machines.pop();
-    cash += refund;
+    cash += refund; saveGame();
 }
 
 // ---- demon purchase (auto-assign; sacrifice when pit is full & all manned) ----
@@ -568,6 +584,7 @@ function placeDemon(type, cost)   // assumes an open machine exists; pushes exac
     demonsBought[type] = (demonsBought[type] || 0) + 1;
     demons.push(new Demon(type, target));   // Demon ctor sets target.assignedDemon; we push here
     unlockMedal(2);                          // Hired Help (first demon)
+    saveGame();
 }
 function sacrificeOldest()
 {
@@ -846,8 +863,9 @@ async function gameInit()
     tweak('BALANCE.payoutBase',   {min:1,     max:20});
     tweakEngineDefaults();
 
-    // Autosave cadence: while playing, persist every few seconds.
-    saveTimer = new Timer(5);
+    // Autosave cadence: while playing, persist every couple seconds (explicit
+    // purchases also save immediately; this mainly catches win cash).
+    saveTimer = new Timer(2);
 
     // No title screen — boot straight into the game.
     setPlaying(true);
@@ -900,19 +918,33 @@ function gameUpdate()
     for (const f of floatTexts) { f.pos.y += timeDelta*2; f.life -= timeDelta; }
     floatTexts = floatTexts.filter(f => f.life > 0);
 
-    // periodic autosave while playing
-    if (saveTimer.elapsed()) { saveGame(); saveTimer.set(5); }
+    // periodic autosave while playing (catches win cash between explicit saves)
+    if (saveTimer.elapsed()) { saveGame(); saveTimer.set(2); }
 }
 
 function gameUpdatePost()
 {
 }
 
+// Draw a framed recess for every pit slot (0..pitCapacity-1) so the player can
+// always see how big the pit is and which slots are still open. Machines draw
+// on top of their slots; empty slots show a faint "+".
+function drawPit()
+{
+    for (let i=0;i<pitCapacity;++i)
+    {
+        const p = cellToPos(vec2(i%GRID_COLS, Math.floor(i/GRID_COLS)));
+        drawRect(p, vec2(CELL.x*0.96, CELL.y*0.96), hsl(.85,.35,.18));   // slot frame
+        drawRect(p, vec2(CELL.x*0.86, CELL.y*0.86), hsl(.85,.25,.09));   // recess
+        if (i >= machines.length)                                        // open slot hint
+            drawText('+', p, 2.5, hsl(.85,.3,.4));
+    }
+}
+
 function gameRender()
 {
-    // Draw the pit every frame regardless of isPlaying() — when the title
-    // menu is up, gameUpdate is frozen but gameRender still runs, so the pit
-    // sits as a static backdrop behind the menu.
+    // Pit slots first (shows pit size + open slots), then machines on top.
+    drawPit();
     machines.forEach(m => m.draw());
 
     // demons render above their machines (so clicks check demons first)
@@ -930,13 +962,17 @@ function gameRenderPost()
     // paused gameUpdate — gameRenderPost runs every frame regardless of pause.
     refreshShopPanel();
 
-    // Cash HUD — always visible during play. Drawn here (screen pixels)
-    // rather than via a toolbar onUpdate: menus.js's per-frame onUpdate loop
-    // only ticks menu items, not toolbar items, so a toolbar label would not
-    // refresh live.
+    // Cash HUD — pinned to the top-LEFT (left-aligned so big numbers don't run
+    // off the left edge), with the demon count stacked underneath. Drawn here in
+    // screen pixels; a toolbar label can't live-update (menus.js only ticks menu
+    // items, not toolbar items).
     if (isPlaying())
-        drawTextScreen('$' + Math.floor(cash) + '   👹 ' + demons.length,
-            vec2(110, 40), 40, hsl(.13,1,.7), 4, hsl(0,0,0));
+    {
+        drawTextScreen('$' + Math.floor(cash), vec2(20, 36), 40,
+            hsl(.13,1,.7), 4, BLACK, 'left');
+        drawTextScreen('👹 ' + demons.length + (demons.length === 1 ? ' demon' : ' demons'),
+            vec2(22, 74), 26, hsl(.13,.6,.85), 3, BLACK, 'left');
+    }
 
     // Transient jackpot banner. An unset Timer reports elapsed()===false, so
     // the bannerText guard keeps it hidden until showBanner() first fires.
