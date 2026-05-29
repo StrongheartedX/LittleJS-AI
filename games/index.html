@@ -216,14 +216,6 @@
     }
     .empty { padding: 20px 16px; color: var(--muted); font-size: 13px; text-align: center; }
 
-    /* Gamepad-support chip — accent-tinted so it stands out from plain tag chips. */
-    .chip.gamepad {
-        background: var(--accent-bg);
-        color: var(--accent);
-        border: 1px solid var(--accent);
-        text-transform: none;
-    }
-
     /* High-score badge — gold accent, used on tiles + sidebar cards. */
     .score-badge {
         display: inline-flex;
@@ -992,8 +984,9 @@ function makeCard(g) {
     }
     if (hasGamepad(g)) {
         const chip = document.createElement('span');
-        chip.className = 'chip gamepad';
-        chip.textContent = '🎮 gamepad';
+        chip.className = 'chip';
+        chip.textContent = '🎮';
+        chip.title = 'Gamepad supported';
         chipsEl.appendChild(chip);
     }
     card.addEventListener('click', () => selectGame(g.file));
@@ -1010,7 +1003,10 @@ function renderList() {
     for (const g of GAMES) {
         if (activeCategory !== 'all' && g.category !== activeCategory) continue;
         if (q) {
-            const hay = (g.name + ' ' + g.desc + ' ' + g.category + ' ' + g.tags.join(' ') + ' ' + (g.keywords||[]).join(' ')).toLowerCase();
+            // Gamepad-supporting games are searchable by "gamepad"/"controller"
+            // without per-game tags — folded in from the GAMEPAD_GAMES set.
+            const gp = hasGamepad(g) ? ' gamepad controller' : '';
+            const hay = (g.name + ' ' + g.desc + ' ' + g.category + ' ' + g.tags.join(' ') + ' ' + (g.keywords||[]).join(' ') + gp).toLowerCase();
             if (!hay.includes(q)) continue;
         }
         (g.category === 'construction' ? construction : regular).push(g);
@@ -1087,7 +1083,7 @@ function makeTile(g, index) {
     }
     if (hasGamepad(g)) {
         const chip = document.createElement('span');
-        chip.className = 'chip gamepad';
+        chip.className = 'chip';
         chip.textContent = '🎮';
         chip.title = 'Gamepad supported';
         chipsEl.appendChild(chip);
