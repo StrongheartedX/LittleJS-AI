@@ -115,6 +115,14 @@ function clampCamera()
     cameraPos = vec2(clamp(cameraPos.x, b.min.x - pad, b.max.x + pad),
                      clamp(cameraPos.y, b.min.y - pad, b.max.y + pad));
 }
+// Frame the board: center the camera on the midpoint of all machines. Called
+// on new game / load so the initial view is centered (machines fill grid
+// columns left-to-right, so a lone starting machine is otherwise far-left).
+function centerCamera()
+{
+    const b = boardBounds();
+    cameraPos = b.min.add(b.max).scale(0.5);
+}
 
 // cost helpers
 const demonCost = (type) => Math.ceil(DEMON_TYPES[type].cost * DEMON_TYPES[type].costScale ** (demonsBought[type] || 0));
@@ -382,6 +390,7 @@ function newGame()
     demons.forEach(d => d.destroy());   demons = [];
     cash = 0; pitCapacity = BALANCE.pitStart; demonsBought = {}; stats = { sacrifices:0 };
     spawnMachine();   // start with one machine to click
+    centerCamera();   // frame the lone starting machine in the middle of the view
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -429,6 +438,7 @@ function loadGame()
         }
     }
     if (!machines.length) spawnMachine();
+    centerCamera();   // frame the restored board centered in the view
     return true;
 }
 
