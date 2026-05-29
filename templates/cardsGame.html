@@ -123,18 +123,15 @@ function buildTable()
 // Topmost card / empty stack under `worldPoint` (see cardAtPoint in cards.js).
 function stackUnderPoint(worldPoint) { return cardAtPoint(stacks, worldPoint); }
 
-// Cards that would lift if `hit` were grabbed now. Free-form: any face-up
-// tableau card takes everything stacked on top of it; waste takes its top
+// Cards that would lift if `hit` were grabbed now. Free-form: any tableau card
+// (face-up or down) takes everything stacked on top of it; waste takes its top
 // card; the stock is click-to-deal only.
 function pickableTail(hit)
 {
     if (!hit || !hit.card) return [];
     if (hit.stack.type === StackType.Stock) return [];
     if (hit.stack.type === StackType.Tableau)
-    {
-        if (!hit.card.faceUp) return [];
         return hit.stack.cards.slice(hit.stack.cards.indexOf(hit.card));
-    }
     return hit.card === hit.stack.topCard() ? [hit.card] : [];
 }
 
