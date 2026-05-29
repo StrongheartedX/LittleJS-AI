@@ -286,7 +286,7 @@ const STAGES = [
                        bat:.10, ant:.05, snail:.05}),
         finalBoss: {
             key:'ogre',      sprite:'ogre',    name:'👹 THE OGRE',
-            hp: 2800, dmg: 30, speed: 2.5, size: 3.6, xpDrop: 0,
+            hp: 2800, dmg: 30, speed: 4.0, size: 3.6, xpDrop: 0,
             isFinalBoss: true, finalBossTint: new Color(.5, .1, .1, 0),
         },
     },
@@ -305,7 +305,7 @@ const STAGES = [
                        clown:.10, ghost:.08, ant:.10, zombie:.07}),
         finalBoss: {
             key:'kraken',    sprite:'octopus', name:'🐙 THE KRAKEN',
-            hp: 3200, dmg: 35, speed: 2.0, size: 4.0, xpDrop: 0,
+            hp: 3200, dmg: 35, speed: 4.0, size: 4.0, xpDrop: 0,
             isFinalBoss: true, finalBossTint: new Color(.3, 0, .55, 0),
         },
     },
@@ -324,7 +324,7 @@ const STAGES = [
                        skull:.10, zombie:.10, ant:.08, snail:.05}),
         finalBoss: {
             key:'frostGiant', sprite:'snowman', name:'☃️ THE FROST GIANT',
-            hp: 3500, dmg: 35, speed: 2.0, size: 4.2, xpDrop: 0,
+            hp: 3500, dmg: 35, speed: 4.0, size: 4.2, xpDrop: 0,
             isFinalBoss: true, finalBossTint: new Color(.2, .55, .85, 0),
         },
     },
@@ -343,7 +343,7 @@ const STAGES = [
                        zombie:.10, bat:.12, ant:.05, ghost:.10}),
         finalBoss: {
             key:'dragon',    sprite:'dragon',  name:'🐉 THE DRAGON',
-            hp: 4000, dmg: 35, speed: 2.5, size: 4.5, xpDrop: 0,
+            hp: 4000, dmg: 35, speed: 4.5, size: 4.5, xpDrop: 0,
             shootEvery: 1.8, shootSprite: 'fireball',
             isFinalBoss: true, finalBossTint: new Color(.85, .25, 0, 0),
         },
@@ -528,11 +528,6 @@ class Enemy extends EngineObject
         // velocity.x so a ball moving right rolls clockwise, left rolls CCW.
         this.rollAngle = 0;
         this.shootTimer = 0;
-        // Skeleton revival state — set by takeDamage when a revivable enemy
-        // hits 0 HP. While > 0 the enemy is "down" (no AI, no contact, no
-        // hit-box), then stands back up at half HP.
-        this.revivingTimer = 0;
-        this.hasRevived    = false;
         // Sprite-mirror flag for facing. Sticky — only flips when the enemy
         // actually moves horizontally, so a frozen enemy stays oriented the
         // way it last walked instead of snapping back to right.
@@ -550,14 +545,6 @@ class Enemy extends EngineObject
         // the board, ~25 visible). isOnScreen takes a bit of size padding
         // to account for the wobble offsets and bigger boss sizes.
         if (!isOnScreen(this.pos, this.size.scale(1.6))) return;
-        // Collapsed-to-bones pose during the revival window. Drawn small,
-        // grey, and tilted so it visibly reads as "not standing yet."
-        if (this.revivingTimer > 0)
-        {
-            drawTile(this.pos, this.size.scale(.7), this.tileInfo,
-                     new Color(.7, .7, .7, .55), this.bobPhase + PI/2);
-            return;
-        }
         let tint = this.tint || WHITE;
         let additive = this.additive;
         // elite glow acts as the base layer; status effects (burn etc.)
@@ -658,15 +645,6 @@ class Enemy extends EngineObject
         // Tick down the post-spawn invuln so the AI / movement still run —
         // only damage is blocked while the timer is active.
         if (this.spawnInvulnTimer > 0) this.spawnInvulnTimer -= 1 / 60;
-        // Skeleton revival — collapsed enemies skip AI, contact, and the
-        // physics step entirely until the timer expires. Then they pop back
-        // up to half HP and resume normal behaviour.
-        if (this.revivingTimer > 0)
-        {
-            this.revivingTimer -= 1 / 60;
-            this.renderOrder = -baseY(this);
-            return;
-        }
         // tick status effects — priority order: freeze > burn > slow > none.
         // tint/additive are reset each frame; hit flash in render() overrides.
         let moveScale = 1;
@@ -867,9 +845,6 @@ class Enemy extends EngineObject
 
     takeDamage(amount)
     {
-        // While collapsed, skeletons take no damage — the player has to
-        // wait out the revive (or move on) before re-engaging.
-        if (this.revivingTimer > 0) return;
         // Post-spawn invuln window — split children (clown ants, bone shards)
         // get a brief moment to scatter before weapons start chipping them.
         if (this.spawnInvulnTimer > 0) return;
@@ -882,20 +857,7 @@ class Enemy extends EngineObject
             spawnDamageNumber(this.pos, amount);
             this._lastDmgT = time;
         }
-        if (this.hp <= 0)
-        {
-            // Skeleton-style revive — first kill collapses to bones, second
-            // kill drops loot normally. Bosses are never revivable.
-            if (this.type && this.type.revivable && !this.hasRevived && !this.isBoss)
-            {
-                this.hasRevived    = true;
-                this.hp            = this.maxHp * .5;
-                this.revivingTimer = 4;
-                if (sounds.hurt && sounds.hurt.play) sounds.hurt.play(this.pos);
-                return;
-            }
-            this.destroy();
-        }
+        if (this.hp <= 0) this.destroy();
     }
 }
 
@@ -1280,9 +1242,12 @@ class Pickup extends EngineObject
 // Auto-aim picker for weapons that need a single target (Fireball, Comet,
 // ChainLightning first hop, StarStorm, etc). Default order: enemy first,
 // breakable as fallback so the player isn't wasting shots on crates during
-// a swarm. The 🧙 Wizard hero flips this — its `preferBreakables` flag
-// makes auto-aim hunt crates and barrels first since those are hard to
-// hit by hand and the Wizard's whole identity is AOE / cleanup.
+// a swarm. The 🧙 Wizard hero biases toward breakables — its
+// `preferBreakables` flag prefers a crate/barrel ONLY when the player is
+// already standing within WIZARD_BREAKABLE_RADIUS of one. Outside that
+// range, auto-aim falls back to the normal nearest-enemy pick so the
+// Wizard's weapons never abandon an incoming swarm for a far-off loot box.
+const WIZARD_BREAKABLE_RADIUS = 2;
 function nearestEnemy(fromPos, maxDist)
 {
     let bestEnemy = null,     bestEnemyD = maxDist;
@@ -1296,8 +1261,9 @@ function nearestEnemy(fromPos, maxDist)
         }
         else if (d < bestEnemyD)    { bestEnemy = e;     bestEnemyD = d; }
     }
-    if (currentHero && currentHero.preferBreakables)
-        return bestBreakable || bestEnemy;
+    if (currentHero && currentHero.preferBreakables && bestBreakable &&
+        player && player.pos.distance(bestBreakable.pos) < WIZARD_BREAKABLE_RADIUS)
+        return bestBreakable;
     return bestEnemy || bestBreakable;
 }
 
@@ -3731,7 +3697,7 @@ function buildUpgradeChoices()
 // banish — there's nothing left to thin or skip). All reset when a fresh
 // level-up enters showLevelUpMenu (not on rebuild).
 let levelUpRerolls    = 0;
-let levelUpBanishes   = 0;     // banish-uses this level-up; doubles cost
+let levelUpBanishes   = 0;     // banish-uses this level-up; +20💰 per extra
 let levelUpBanishMode = false;
 let levelUpLimitBreak = false;
 let levelUpChoices    = [];
@@ -3804,11 +3770,11 @@ const BANISH_BASE_COST  = 20;
 const SKIP_XP_FRACTION  = .2;   // +20% of next-level XP
 
 function levelUpRerollCost() { return REROLL_BASE_COST + levelUpRerolls * REROLL_BASE_COST; }
-// Banish cost doubles per use within a single level-up (20 → 40 → 80 → …),
-// mirroring reroll's "expensive to repeat" feel but harsher since banish
-// is permanent for the run. Resets per level-up so you always get one
-// cheap banish per ding.
-function levelUpBanishCost() { return BANISH_BASE_COST * (1 << levelUpBanishes); }
+// Banish cost steps up linearly per use within a single level-up
+// (20 → 40 → 60 → 80 → …). Cheaper than doubling so banish-stacking stays
+// accessible later in the run when you actually want to thin the offer
+// pool. Resets per level-up so you always get a fresh first cheap banish.
+function levelUpBanishCost() { return BANISH_BASE_COST + BANISH_BASE_COST * levelUpBanishes; }
 
 // Finish handling the current pending level-up — close the menu and either
 // show the next queued one or stop.
@@ -3937,8 +3903,8 @@ function rebuildLevelUpMenu()
             title: levelUpBanishMode
                 ? 'Cancel banish mode — no coins spent.'
                 : 'Spend ' + levelUpBanishCost() + '💰 to permanently remove ' +
-                  'a choice for the rest of the run. Cost doubles for each ' +
-                  'extra banish this level-up.',
+                  'a choice for the rest of the run. Cost goes up by 20💰 ' +
+                  'for each extra banish this level-up.',
             onClick: onLevelUpBanish},
         {type: 'button', id: 'skip',
             label: '⏭️  Skip  (+20% XP)',
@@ -3977,8 +3943,8 @@ function onLevelUpChoiceClick(i)
     if (!c) return;
     if (levelUpBanishMode)
     {
-        // Cost doubles per banish use within this level-up — second is 40,
-        // third is 80, fourth is 160. Reset between level-ups via showLevelUpMenu.
+        // Cost steps up linearly per banish use within this level-up —
+        // 20 / 40 / 60 / 80 / 100… Reset between level-ups via showLevelUpMenu.
         const cost = levelUpBanishCost();
         if (coins < cost) return;
         coins -= cost;
