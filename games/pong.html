@@ -212,7 +212,7 @@ showEngineVersion = false; // Hide engine version console display
             const angle = rand(-.25, .25); // slight vertical variance
             ball.vel = vec2(dirX, angle).normalize(ballStartSpeed);
             waitingForServe = false;
-            sfxServe?.play(ball.pos);
+            isPlaying() && sfxServe?.play(ball.pos);
     }
 
     function addScore(leftScored)
@@ -220,7 +220,7 @@ showEngineVersion = false; // Hide engine version console display
             if (leftScored) scoreL++;
             else scoreR++;
 
-            sfxScore?.play();
+            isPlaying() && sfxScore?.play();
             addScreenShake(.3, .21);
             bgFlash = 1;
             bgFlashColor = leftScored ? COLOR_L : COLOR_R;
@@ -454,7 +454,7 @@ showEngineVersion = false; // Hide engine version console display
             {
                     ball.pos.y = yLimit;
                     ball.vel.y = -Math.abs(ball.vel.y);
-                    sfxWall?.play(ball.pos);
+                    isPlaying() && sfxWall?.play(ball.pos);
                     spawnHitBurst(ball.pos, ballTintColor());
                     addScreenShake(.06, .05);
                     ballSquash = .6;
@@ -463,7 +463,7 @@ showEngineVersion = false; // Hide engine version console display
             {
                     ball.pos.y = -yLimit;
                     ball.vel.y = Math.abs(ball.vel.y);
-                    sfxWall?.play(ball.pos);
+                    isPlaying() && sfxWall?.play(ball.pos);
                     spawnHitBurst(ball.pos, ballTintColor());
                     addScreenShake(.06, .05);
                     ballSquash = .6;
@@ -473,7 +473,7 @@ showEngineVersion = false; // Hide engine version console display
             if (ball.vel.x < 0 && aabbOverlap(ball.pos, ballSize, left.pos, paddleSize))
             {
                     bounceOffPaddle(left, 1);
-                    sfxPaddle?.play(ball.pos);
+                    isPlaying() && sfxPaddle?.play(ball.pos);
 
                     lastHitter = -1;
                     leftFlash = 1;
@@ -487,7 +487,7 @@ showEngineVersion = false; // Hide engine version console display
             if (ball.vel.x > 0 && aabbOverlap(ball.pos, ballSize, right.pos, paddleSize))
             {
                     bounceOffPaddle(right, -1);
-                    sfxPaddle?.play(ball.pos);
+                    isPlaying() && sfxPaddle?.play(ball.pos);
 
                     lastHitter = 1;
                     rightFlash = 1;
