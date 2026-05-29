@@ -699,6 +699,16 @@ class Enemy extends EngineObject
             this.tint = new Color(.7, .85, 1);
         }
 
+        // Dead player — enemies stop chasing and freeze in place. They
+        // still render (and their wobble keeps going) but no more walking
+        // onto a corpse.
+        if (gameOver)
+        {
+            this.velocity = vec2();
+            super.update();
+            this.renderOrder = -baseY(this);
+            return;
+        }
         // walk toward the player — clamped so we don't tunnel through.
         // Fast enemies like 🦇 were stepping past player.pos in a single
         // frame, which read as a glitchy snap. Now we stop within touch
@@ -1266,7 +1276,7 @@ class Pickup extends EngineObject
 // already standing within WIZARD_BREAKABLE_RADIUS of one. Outside that
 // range, auto-aim falls back to the normal nearest-enemy pick so the
 // Wizard's weapons never abandon an incoming swarm for a far-off loot box.
-const WIZARD_BREAKABLE_RADIUS = 2;
+const WIZARD_BREAKABLE_RADIUS = 4;
 function nearestEnemy(fromPos, maxDist)
 {
     let bestEnemy = null,     bestEnemyD = maxDist;
@@ -1527,6 +1537,9 @@ function drawShadows()
     for (const obj of engineObjects)
     {
         if (obj.destroyed) continue;
+        // Player vanishes on death — their shadow has to vanish with them,
+        // otherwise the corpse leaves a floating dark blob on the field.
+        if (obj === player && gameOver) continue;
         const isShadowed = obj === player ||
             obj instanceof Enemy ||
             obj instanceof Pickup ||
@@ -3579,8 +3592,15 @@ async function gameInit()
     });
 
     // HUD toolbar — top-right corner. Always visible; the hamburger grays
-    // out when the title menu is on top.
-    installDefaultToolbar();
+    // out when the title menu is on top (default behavior), OR when the
+    // run has ended (death / victory) so the player can't dismiss the
+    // results menu and walk around a sealed-off field.
+    installDefaultToolbar({grayedWhen: () =>
+    {
+        if (gameOver || runVictory) return true;
+        const top = getTopMenu();
+        return !!(top && top.id === 'title');
+    }});
 
     tweakEngineDefaults();
     tweakDivider('Emoji Survivors');
@@ -4498,6 +4518,9 @@ function drawWalls()
 function drawWeaponVisuals()
 {
     if (!player || !player.weapons) return;
+    // No weapon visuals once the player is dead — orbits (Fish, Hearts,
+    // Blizzard ring) shouldn't keep spinning around an invisible corpse.
+    if (gameOver) return;
     for (const w of player.weapons)
         if (w.draw) w.draw();
 }
