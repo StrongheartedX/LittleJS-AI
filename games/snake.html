@@ -32,8 +32,19 @@ const stepIntervalMin   = .06;
 const stepSpeedup       = .003;
 const deathFreezeTime   = .55; // brief freeze before game-over menu surfaces
 
-let snake, dir, nextDir;
-let food, poison;
+// bonus fruit (time-limited, positive)
+const bonusLifeTime = 6;    // seconds a bonus fruit stays on the board
+const bonusValue    = 5;    // points awarded for a bonus fruit
+const bonusGrow     = 2;    // segments gained from a bonus fruit
+const bonusChance   = 22;   // % roll per normal food eaten (once warmed up)
+const bonusMinScore = 5;    // bonuses only start appearing past this score
+
+// layout
+const fieldOffsetY  = .8;   // shift the playfield up to open a bottom HUD strip
+
+let snake, oldSnake, dir, nextDir;  // oldSnake = pre-tick snapshot for smooth glide
+let food;
+let bonus, bonusTimer, bonusLifeMax; // bonus cell (or 0), remaining time, max time
 let grow;
 let score;
 let alive;
@@ -49,7 +60,7 @@ let snakeFlashTimer; // flash on death
 let foodSpawnTimer;  // small grow-in animation when food appears
 
 // sounds (created in gameInit so user-gesture audio is happy)
-let sEat, sPoison, sDie, sStep;
+let sEat, sBonus, sDie, sStep;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -62,7 +73,8 @@ function clampDir(d)
 
 function cellToWorld(c)
 {
-    return vec2((c.x - gridW/2 + .5) * cellSize, (c.y - gridH/2 + .5) * cellSize);
+    return vec2((c.x - gridW/2 + .5) * cellSize,
+                (c.y - gridH/2 + .5) * cellSize + fieldOffsetY);
 }
 
 function isCellInBounds(c)
@@ -86,14 +98,14 @@ function randEmptyCell()
         const c = vec2(randInt(gridW), randInt(gridH));
         if (cellOnSnake(c)) continue;
         if (food && cellEquals(c, food)) continue;
-        if (poison && cellEquals(c, poison)) continue;
+        if (bonus && cellEquals(c, bonus)) continue;
         return c;
     }
     for (let y=0; y<gridH; ++y)
     for (let x=0; x<gridW; ++x)
     {
         const c = vec2(x,y);
-        if (!cellOnSnake(c) && (!food || !cellEquals(c, food)) && (!poison || !cellEquals(c, poison)))
+        if (!cellOnSnake(c) && (!food || !cellEquals(c, food)) && (!bonus || !cellEquals(c, bonus)))
             return c;
     }
     return vec2(0,0);
@@ -106,6 +118,7 @@ function resetGame()
 {
     const start = vec2(gridW/2|0, gridH/2|0);
     snake = [start.copy(), start.add(vec2(-1,0)), start.add(vec2(-2,0)), start.add(vec2(-3,0))];
+    oldSnake = snake.map(s => s.copy());
     dir = vec2(1,0);
     nextDir = dir;
 
@@ -117,7 +130,9 @@ function resetGame()
     stepTimer = stepInterval;
 
     food = randEmptyCell();
-    poison = 0;
+    bonus = 0;
+    bonusTimer = 0;
+    bonusLifeMax = bonusLifeTime;
 
     particles = [];
     foodPulseTimer = 0;
@@ -169,6 +184,21 @@ function renderParticles()
     }
 }
 
+// depleting ring drawn as short line segments around a circle (frac of full)
+function drawTimerRing(center, radius, frac, color)
+{
+    const segs = 40;
+    const n = Math.ceil(segs * clamp(frac, 0, 1));
+    for (let i=0; i<n; ++i)
+    {
+        const a0 = -PI/2 + (i  /segs) * PI*2;
+        const a1 = -PI/2 + ((i+1)/segs) * PI*2;
+        const p0 = center.add(vec2(Math.cos(a0), Math.sin(a0)).scale(radius));
+        const p1 = center.add(vec2(Math.cos(a1), Math.sin(a1)).scale(radius));
+        drawLine(p0, p1, .11, color);
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Step / consume / die
 
@@ -208,31 +238,41 @@ function eatFood()
 
     food = randEmptyCell();
 
-    // chance to introduce poison after you get going
-    if (!poison && score >= 3 && randInt(100) < 35)
-        poison = randEmptyCell();
+    // chance to spawn a time-limited bonus fruit once you're warmed up
+    if (!bonus && score >= bonusMinScore && randInt(100) < bonusChance)
+        spawnBonus();
 }
 
-function hitPoison()
+function spawnBonus()
 {
-    sPoison && sPoison.play();
+    bonus = randEmptyCell();
+    bonusTimer = bonusLifeMax = bonusLifeTime;
+}
 
-    // shrink by 2 segments (but keep at least 2)
-    let shrink = 2;
-    while (shrink-- && snake.length > 2)
-        snake.pop();
+function eatBonus()
+{
+    score += bonusValue;
+    grow  += bonusGrow;
+    sBonus && sBonus.play();
 
-    score = max(0, score - 1);
+    // big golden burst
+    const bp = cellToWorld(bonus);
+    spawnParticles(bp, hsl(.13, 1, .65), 24, 3, 9, .6);
+    spawnParticles(bp, hsl(.05, .9, .7),  8, 2, 6, .45);
+    addScreenShake(.18, .16);
+    scorePopTimer  = .45;
+    growPulseTimer = .30;
 
-    const pp = cellToWorld(poison);
-    spawnParticles(pp, hsl(.78, 1, .7), 16, 3, 8, .55);
-    addScreenShake(.20, .18);
-    poison = randEmptyCell();
+    bonus = 0;
+    bonusTimer = 0;
+
+    stepInterval = max(stepIntervalMin, stepIntervalStart - score * stepSpeedup);
 }
 
 function tick()
 {
     dir = clampDir(nextDir);
+    oldSnake = snake.map(s => s.copy()); // snapshot for smooth glide rendering
 
     const head = snake[0];
     const newHead = head.add(dir);
@@ -254,16 +294,13 @@ function tick()
 
     if (cellEquals(newHead, food))
         eatFood();
-    else if (poison && cellEquals(newHead, poison))
-        hitPoison();
+    else if (bonus && cellEquals(newHead, bonus))
+        eatBonus();
     else
         sStep && sStep.play();
 
     if (grow > 0) grow--;
     else snake.pop();
-
-    if (!poison && score >= 5 && randInt(100) < 4)
-        poison = randEmptyCell();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -309,7 +346,7 @@ function buildMenus()
 {
     createTitleMenu({
         title: 'SNAKE',
-        subtitle: 'Eat the green dots. Avoid the walls.',
+        subtitle: 'Eat the apples. Grab the gold. Avoid the walls.',
         onPlay: startNewRun,
         canReveal: () => !isPlaying(),
         items: [
@@ -326,9 +363,10 @@ function buildMenus()
         onHide: popMenu,
         items: [
             {type:'label', text:'A LittleJS prototype.'},
-            {type:'text',  text:'Move with the Arrow keys or WASD. Eat the green ' +
-                'food to grow and score. Watch out for the purple poison — it shrinks ' +
-                'you and costs a point. Press Esc or Start to pause.'},
+            {type:'text',  text:'Move with the Arrow keys or WASD. Eat the red apples ' +
+                'to grow and score. Now and then a golden fruit appears — grab it before ' +
+                'it vanishes for a big bonus. Avoid the walls and yourself. ' +
+                'Press Esc or Start to pause.'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
         ],
@@ -378,7 +416,7 @@ async function gameInit()
 
     // sounds (constructed after engine init so audio context can resume on gesture)
     sEat    = new SoundGenerator({volume:.7, frequency:520, release:.06, shapeCurve:1.2, pitchJump:120, pitchJumpTime:.02});
-    sPoison = new SoundGenerator({volume:.7, frequency:180, release:.12, noise:.15, slide:-.2});
+    sBonus  = new SoundGenerator({volume:.8, frequency:700, release:.18, shapeCurve:1.1, pitchJump:380, pitchJumpTime:.06});
     sDie    = new SoundGenerator({volume:1,  frequency:90,  release:.35, noise:.25, shapeCurve:.6, slide:-.4, delay:.03});
     sStep   = new SoundGenerator({volume:.10, frequency:380, release:.015, shapeCurve:1.4});
 
@@ -416,6 +454,17 @@ function gameUpdate()
 
     updateParticles(timeDelta);
 
+    // tick down the time-limited bonus fruit; puff away if it expires
+    if (alive && bonus)
+    {
+        bonusTimer -= timeDelta;
+        if (bonusTimer <= 0)
+        {
+            spawnParticles(cellToWorld(bonus), hsl(0,0,.85), 8, 1, 4, .4);
+            bonus = 0;
+        }
+    }
+
     if (!alive)
     {
         // brief freeze, then surface the game-over menu (which pauses the game)
@@ -450,83 +499,103 @@ function gameRender()
     // background
     drawRectGradient(cameraPos, getCameraSize(), hsl(0,0,.06), hsl(0,0,.12));
 
-    // playfield — anchored at world origin (cameraPos shake from the gameFx
-    // plugin moves all world-space drawing together).
-    const fieldSize = vec2(gridW*cellSize, gridH*cellSize);
-    drawRect(vec2(0, 0), fieldSize.add(vec2(.6)), hsl(.33,.4,.18));
-    drawRect(vec2(0, 0), fieldSize.add(vec2(.4)), hsl(0,0,.2));
-    drawRect(vec2(0, 0), fieldSize, hsl(0,0,.08));
+    // playfield — centered at (0, fieldOffsetY). cameraPos shake from the gameFx
+    // plugin moves all world-space drawing together.
+    const fieldSize   = vec2(gridW*cellSize, gridH*cellSize);
+    const fieldCenter = vec2(0, fieldOffsetY);
+    drawRect(fieldCenter, fieldSize.add(vec2(.7)), hsl(.34,.45,.30));        // soft frame
+    drawRect(fieldCenter, fieldSize.add(vec2(.4)), hsl(.34,.25,.16));
+    drawRectGradient(fieldCenter, fieldSize, hsl(.34,.20,.10), hsl(.34,.18,.07));
 
     // subtle grid lines
     {
         const halfW = gridW/2;
         const halfH = gridH/2;
-        const col = hsl(0,0,.2,.30);
+        const col = hsl(.34,.15,.35,.18);
         for (let x=-halfW; x<=halfW; ++x)
-            drawLine(vec2(x,-halfH), vec2(x,halfH), .03, col);
+            drawLine(vec2(x,-halfH+fieldOffsetY), vec2(x,halfH+fieldOffsetY), .03, col);
         for (let y=-halfH; y<=halfH; ++y)
-            drawLine(vec2(-halfW,y), vec2(halfW,y), .03, col);
+            drawLine(vec2(-halfW,y+fieldOffsetY), vec2(halfW,y+fieldOffsetY), .03, col);
     }
 
-    // food (pulsing) with grow-in animation
+    // food — cute red apple with grow-in + gentle pulse, highlight and leaf
     {
         const p = cellToWorld(food);
-        const pulse = .75 + Math.sin(foodPulseTimer * 6) * .06;
-        const grow = foodSpawnTimer > 0 ? clamp(1 - foodSpawnTimer/.25, 0, 1) : 1;
-        const size = pulse * (.4 + .6*grow);
-        // soft glow
-        drawCircle(p, size + .35, hsl(.12, 1, .55, .15));
-        drawCircle(p, size + .18, hsl(.12, 1, .60, .25));
-        drawCircle(p, size,       hsl(.12, 1, .58));
-        drawCircle(p, size * .55, hsl(.16, 1, .80));
+        const pulse  = .72 + Math.sin(foodPulseTimer * 6) * .05;
+        const growIn = foodSpawnTimer > 0 ? clamp(1 - foodSpawnTimer/.25, 0, 1) : 1;
+        const size   = pulse * (.45 + .55*growIn);
+        drawCircle(p, size + .22, hsl(.99, .8, .55, .18));                  // soft glow
+        drawCircle(p, size,       hsl(.99, .75, .57));                      // apple body
+        drawCircle(p.add(vec2(-.14,.14)), size*.28, hsl(.04,.7,.85,.9));    // highlight
+        drawCircle(p.add(vec2(.10, size*.85)), size*.22, hsl(.34,.6,.45));  // leaf
     }
 
-    // poison
-    if (poison)
+    // bonus fruit — time-limited gold with a depleting timer ring; blinks late
+    if (bonus)
     {
-        const p = cellToWorld(poison);
-        const pulse = .72 + Math.sin(foodPulseTimer * 4 + 1.7) * .05;
-        drawCircle(p, pulse + .25, hsl(.78, 1, .55, .20));
-        drawCircle(p, pulse,       hsl(.78, 1, .60));
-        drawCircle(p, pulse * .55, hsl(.82, 1, .85));
+        const p     = cellToWorld(bonus);
+        const frac  = clamp(bonusTimer / bonusLifeMax, 0, 1);
+        const warn  = bonusTimer < 1.8;
+        const blink = warn ? .55 + .45*Math.sin(time*16) : 1;
+        const pulse = .80 + Math.sin(foodPulseTimer * 8) * .07;
+        drawCircle(p, pulse + .45, hsl(.13, 1, .60, .15*blink));            // glow
+        drawCircle(p, pulse + .22, hsl(.13, 1, .62, .22*blink));
+        drawCircle(p, pulse,       hsl(.13, 1, .56, blink));                // body
+        drawCircle(p, pulse*.6,    hsl(.16, 1, .82, blink));                // bright core
+        drawCircle(p.add(vec2(-.16,.16)), pulse*.18, hsl(0,0,1,.8*blink));  // sparkle
+        drawTimerRing(p, pulse + .55, frac, hsl(.13, 1, .72, blink));
     }
 
-    // snake — grow pulse swells the head briefly; death flashes red
-    const flash = snakeFlashTimer > 0 ? Math.sin(snakeFlashTimer * 40) > 0 : false;
-    const headSwell = growPulseTimer > 0 ? .12 * (growPulseTimer / .25) : 0;
-    for (let i=snake.length; i--;)
+    // snake — smooth glide between cells as a rounded, connected tube
+    const flash     = snakeFlashTimer > 0 ? Math.sin(snakeFlashTimer * 40) > 0 : false;
+    const headSwell = growPulseTimer > 0 ? .14 * (growPulseTimer / .30) : 0;
+    const prog      = alive ? clamp(1 - stepTimer/stepInterval, 0, 1) : 1;
+
+    // interpolated world position of each segment (oldSnake[i] -> snake[i])
+    const pts = [];
+    for (let i=0; i<snake.length; ++i)
     {
-        const c = snake[i];
-        const p = cellToWorld(c);
+        const from = oldSnake[i] || snake[i];
+        pts.push(cellToWorld(from).lerp(cellToWorld(snake[i]), prog));
+    }
+
+    // body: tail -> head so the head sits on top; capsule = thick line + round joints
+    const bodyW = .86;
+    for (let i=pts.length-1; i>=0; --i)
+    {
         const t = i / max(1, snake.length-1);
+        const col = (!alive && flash)
+            ? hsl(0, 1, lerp(.45, .65, 1-t))
+            : hsl(.34, .62, lerp(.32, .56, 1-t));   // pastel green, brighter toward head
+        if (i > 0) drawLine(pts[i], pts[i-1], bodyW, col);
+        drawCircle(pts[i], bodyW, col);
+    }
 
-        let col;
-        if (!alive && flash)
-            col = hsl(0, 1, lerp(.45, .65, 1-t));
-        else if (i === 0)
-            col = hsl(.33, 1, .7);
-        else
-            col = hsl(.33, .8, lerp(.25, .55, 1-t));
+    // head cap (brighter) + googly eyes + occasional tongue flick
+    {
+        const hp   = pts[0];
+        const hcol = (!alive && flash) ? hsl(0,1,.62) : hsl(.34, .72, .60);
+        drawCircle(hp, bodyW + headSwell, hcol);
 
-        const sz = i === 0 ? .92 + headSwell : .92;
-        drawRect(p, vec2(sz), col);
-
-        // two googly eyes on the leading face of the head — both eyes on the
-        // forward side, offset perpendicular to direction of travel so the snake
-        // gets a cartoony "head-on" cute look rather than a real-snake side view.
-        if (i === 0 && alive)
+        if (alive)
         {
-            const forward = vec2(dir.x, dir.y);
-            const side    = vec2(-dir.y, dir.x);    // perpendicular to forward
-            const eyeFwd  = .15;                    // toward leading edge of head
-            const eyeSep  = .20;                    // separation between eyes
-            const eyeD    = .30;                    // eye diameter (white sclera)
-            const pupilD  = .15;                    // pupil diameter
-            const pupilLean = forward.scale(.05);   // pupils peek slightly forward
+            const forward   = vec2(dir.x, dir.y);
+            const side      = vec2(-dir.y, dir.x);   // perpendicular to forward
+            const eyeFwd    = .15;                    // toward leading edge of head
+            const eyeSep    = .20;                    // separation between eyes
+            const eyeD      = .30;                    // eye diameter (white sclera)
+            const pupilD    = .15;                    // pupil diameter
+            const pupilLean = forward.scale(.05);     // pupils peek slightly forward
 
-            const eyeA = p.add(forward.scale(eyeFwd)).add(side.scale( eyeSep));
-            const eyeB = p.add(forward.scale(eyeFwd)).add(side.scale(-eyeSep));
+            // playful tongue flick out the front
+            if (Math.sin(time*3) > .9)
+            {
+                const base = hp.add(forward.scale(bodyW*.45));
+                drawLine(base, base.add(forward.scale(.30)), .07, hsl(.98,.85,.6));
+            }
 
+            const eyeA = hp.add(forward.scale(eyeFwd)).add(side.scale( eyeSep));
+            const eyeB = hp.add(forward.scale(eyeFwd)).add(side.scale(-eyeSep));
             drawCircle(eyeA, eyeD, hsl(0,0,1));
             drawCircle(eyeB, eyeD, hsl(0,0,1));
             drawCircle(eyeA.add(pupilLean), pupilD, hsl(0,0,.05));
@@ -543,21 +612,31 @@ function gameRenderPost()
     if (!isPlaying()) return; // title screen owns the canvas; menu draws its own
 
     const cx = mainCanvasSize.x/2;
+    const by = mainCanvasSize.y - 42;   // bottom HUD baseline, below the playfield
 
-    // Score (pops on eat)
-    const popScale = scorePopTimer > 0 ? 1 + .35 * (scorePopTimer / .35) : 1;
-    const scoreSize = 44 * popScale;
-    drawTextScreen(`${score}`, vec2(cx, 60), scoreSize, hsl(.33,.9,.85), 5, hsl(0,0,0));
-    drawTextScreen(`BEST  ${getBestScore()}`, vec2(cx, 100), 20, hsl(0,0,1,.75), 3, hsl(0,0,0,.8));
+    // Score (pops on eat) + best, in the bottom strip
+    const popScale  = scorePopTimer > 0 ? 1 + .35 * (scorePopTimer / .45) : 1;
+    const scoreSize = 38 * popScale;
+    drawTextScreen(`${score}`, vec2(cx, by), scoreSize, hsl(.34,.7,.88), 5, hsl(0,0,0));
+    drawTextScreen(`BEST  ${getBestScore()}`, vec2(cx, by + 28), 17, hsl(0,0,1,.7), 3, hsl(0,0,0,.8));
 
-    // touch / first-time hint (only while score is low)
+    // bonus indicator on the left of the bottom strip while a bonus is live
+    if (alive && bonus)
+    {
+        const warn = bonusTimer < 1.8;
+        const a = warn ? .55 + .45*Math.sin(time*16) : 1;
+        drawTextScreen(`★ +${bonusValue}`, vec2(150, by - 6), 24, hsl(.13,1,.7,a), 3, hsl(0,0,0,.8));
+        drawTextScreen(`${Math.ceil(bonusTimer)}s`, vec2(150, by + 22), 16, hsl(0,0,1,.85), 2, hsl(0,0,0,.8));
+    }
+
+    // first-time hint, faint near the top of the field (fades out once you score)
     if (alive && score < 2)
     {
         const help = isTouchDevice
             ? 'Swipe / d-pad to steer'
             : 'Arrow keys or WASD to move    Esc to pause';
-        const a = .6 + .4 * Math.sin(time * 2.5);
-        drawTextScreen(help, vec2(cx, mainCanvasSize.y - 32), 18, hsl(0,0,1,a), 3, hsl(0,0,0,a));
+        const a = .5 + .35 * Math.sin(time * 2.5);
+        drawTextScreen(help, vec2(cx, 34), 17, hsl(0,0,1,a), 3, hsl(0,0,0,a));
     }
 }
 
