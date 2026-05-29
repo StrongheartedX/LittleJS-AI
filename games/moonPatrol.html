@@ -31,6 +31,7 @@ const SHOOT_COOLDOWN = 0.12;    // seconds between shots
 const MAX_HEALTH     = 6;
 const INVULN_TIME    = 1.1;     // seconds of i-frames after a hit
 const BOMB_GRAVITY   = 22;
+const JUMP_CUT       = 0.4;     // ascent velocity kept when jump is released early
 
 // physics tuning (live-tweakable — press ~). On window so tweak() can reach it.
 var TUNE = {
@@ -155,6 +156,7 @@ function resetGame()
         speed: 8,
         angle: groundAngle(x0),
         onGround: true,
+        jumpCut: false,   // true while a jump can still be cut short
     };
     bestDist = rover.pos.x;
 
@@ -376,6 +378,7 @@ function jump()
     const a = rover.angle;
     rover.vel = vec2(Math.cos(a), Math.sin(a)).scale(rover.speed);
     rover.vel.y += TUNE.jump;
+    rover.jumpCut = true;
     playSoundSafe(sJump);
     burst(rover.pos.add(vec2(0,-ROVER_SIZE.y/2)), 8, 0.12, hsl(.10,.2,.6), hsl(.10,.2,.35), {life:30});
 }
@@ -403,6 +406,15 @@ function updateRover(dt)
     }
     else
     {
+        // variable jump height: trim upward speed if the button is let go while rising
+        const holdingJump = mouseIsDown(0) || keyIsDown('Space') || keyIsDown('ArrowUp');
+        if (rover.jumpCut && rover.vel.y > 0 && !holdingJump)
+        {
+            rover.vel.y *= JUMP_CUT;
+            rover.jumpCut = false;
+        }
+        if (rover.vel.y <= 0) rover.jumpCut = false;   // can't cut once falling
+
         rover.vel.y -= TUNE.gravity * dt;
         rover.pos = rover.pos.add(rover.vel.scale(dt));
 
@@ -592,18 +604,7 @@ function drawBackground()
     drawStarLayer(0.15, 2.4, 0.60, 0.14, 1, view);   // far: dense, dim
     drawStarLayer(0.32, 3.6, 0.45, 0.22, 2, view);   // near: sparser, brighter
 
-    // crescent moon (opaque): a bright disc carved by an offset sky-colored disc
-    const mx = cameraPos.x + view.x*0.30;
-    const my = cameraPos.y + view.y*0.28;
-    const mr = 4.8;                       // diameter
-    const lit = hsl(.62,.12,.84);
-    const sky = hsl(.66,.55,.06);
-    drawCircle(vec2(mx, my), mr, lit);
-    // craters on the lit (right) side so they survive the carve
-    drawCircle(vec2(mx+1.4, my+0.5), 0.6, hsl(.62,.10,.74));
-    drawCircle(vec2(mx+1.5, my-1.0), 0.45, hsl(.62,.10,.74));
-    // carve the crescent: opaque sky disc shifted left leaves a sliver on the right
-    drawCircle(vec2(mx-2.1, my+0.3), mr, sky);
+    drawMoon(cameraPos.x + view.x*0.30, cameraPos.y + view.y*0.28);
 
     // distant ridges (parallax: scroll slower than the foreground, stay put vertically)
     drawRidge(0.5, hsl(.70,.30,.10), -0.04, 2.6, 0.22);
@@ -641,6 +642,25 @@ function drawStarLayer(par, cell, prob, sizeMax, seed, view)
         const size = 0.06 + b*sizeMax;
         drawRect(vec2(wx, wy), vec2(size), hsl(.62, .12, 1, (0.45 + 0.55*b)*tw));
     }
+}
+
+// Crescent moon (smooth): a bright disc with a smaller gray shadow disc carved
+// out of it. The shadow disc is tangent to the moon's left edge, so it sits
+// entirely inside the moon — a clean crescent with no gray bulge outside the
+// silhouette, and the dark side reads as faint gray instead of black.
+function drawMoon(mx, my)
+{
+    const R = 2.4;                       // moon radius
+    const r = 1.7;                       // shadow radius (< R so it fits inside)
+    const off = R - r;                   // tangent on the left edge
+    const lit    = hsl(.62,.12,.84);
+    const shadow = hsl(.63,.16,.20);     // slightly gray dark side
+    const crater = hsl(.62,.10,.74);
+
+    drawCircle(vec2(mx, my), R*2, lit);          // bright moon
+    drawCircle(vec2(mx-off, my), r*2, shadow);   // gray shadow carves the crescent
+    drawCircle(vec2(mx+1.5, my+0.4), 0.55, crater);
+    drawCircle(vec2(mx+1.6, my-0.7), 0.40, crater);
 }
 
 function drawRidge(par, color, screenYFrac, amp, freq)
@@ -805,13 +825,14 @@ function gameRenderPost()
     if (!isPlaying()) return;
 
     const W = mainCanvasSize.x;
+    const H = mainCanvasSize.y;
     const panel = hsl(.62,.5,.08, .65);
     const edge  = hsl(.55,.6,.6, .9);
-
-    // ---- SPEED gauge (top-left) ----
-    const px = 24, py = 20, pw = 260, ph = 70;
-    hudPanel(px, py, pw, ph, panel, edge);
     const clear = hsl(0,0,0,0);
+
+    // ---- SPEED gauge (bottom-left) ----
+    const pw = 260, ph = 70, px = 24, py = H - ph - 24;
+    hudPanel(px, py, pw, ph, panel, edge);
     drawTextScreen('SPEED', vec2(px+16, py+22), 20, hsl(.55,.5,.8), 0, clear, 'left');
     const kph = Math.round(rover.speed * 4);
     const fast = rover.speed > TUNE.maxSpeed*0.85;
@@ -825,15 +846,15 @@ function gameRenderPost()
     if (frac > 0)
         drawRect(vec2(barX + (barW*frac)/2, barY + barH/2), vec2(barW*frac, barH), barCol, 0, undefined, true);
     if (fast)
-        drawTextScreen('BOOST!', vec2(px + pw/2, py + ph + 18), 20,
+        drawTextScreen('BOOST!', vec2(px + pw/2, py - 14), 20,
             hsl(.04,.9,.65), 3, hsl(0,0,0), 'center');
 
     // ---- DISTANCE (top-center) ----
     drawTextScreen(Math.round(bestDist) + 'm', vec2(W/2, 48), 46, hsl(0,0,1), 4, hsl(0,0,0,.6));
     drawTextScreen('BEST ' + (getBestScore()|0) + 'm', vec2(W/2, 80), 22, hsl(.55,.4,.75), 3, hsl(0,0,0,.6));
 
-    // ---- HULL pips (top-right) ----
-    const hpW = 220, hpH = 70, hx = W - hpW - 24, hy = 20;
+    // ---- HULL pips (bottom-right) ----
+    const hpW = 220, hpH = 70, hx = W - hpW - 24, hy = H - hpH - 24;
     hudPanel(hx, hy, hpW, hpH, panel, edge);
     drawTextScreen('HULL', vec2(hx + hpW - 16, hy+22), 20, hsl(.55,.5,.8), 0, clear, 'right');
     const low = health <= 2;
@@ -850,7 +871,7 @@ function gameRenderPost()
     }
 
     // kills badge
-    drawTextScreen('UFO x' + kills, vec2(hx + hpW - 16, hy + hpH + 18), 20,
+    drawTextScreen('UFO x' + kills, vec2(hx + hpW - 16, hy - 14), 20,
         hsl(.12,.8,.7), 3, hsl(0,0,0,.6), 'right');
 
     // damage flash vignette
