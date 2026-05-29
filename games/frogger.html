@@ -105,8 +105,17 @@
   let crossTimer = 0, crossTimerMax = 1;
   function levelCrossTime() { return Math.max(8, 22 - (level-1)*1.5); }
 
+  // Score (reset each new game). Points: forward hops, frog home, time bonus,
+  // level clear, and the bonus fly.
+  let score = 0;
+  let newHighScore = false;   // set on game over if this run beat the record
+  // Bonus fly: occasionally lands on an empty home pad for a few seconds;
+  // reaching THAT pad while it's there scores FLY_BONUS. flySlot<0 = none.
+  let flySlot = -1, flyLife = 0, flyCooldown = 4;
+  const FLY_BONUS = 200;
+
   // Sounds
-  let sHop, sDie, sHome, sLevel;
+  let sHop, sDie, sHome, sLevel, sTick, sFly;
 
   function gridToWorld(gx, gy) { return vec2(gx + .5, gy + .5); }
   function worldToGridPos(p) { return vec2(Math.floor(p.x), Math.floor(p.y)); }
@@ -123,12 +132,13 @@
   }
 
   function resetRun(full=false) {
-    frog.grid = vec2(Math.floor(LEVEL_W/2), 1);
+    frog.grid = vec2(Math.floor(LEVEL_W/2), 2);
     frog.pos = gridToWorld(frog.grid.x, frog.grid.y);
     frog.carryVx = 0;
     frog.facing = vec2(0, 1);
     frog.hopAnim = 0;
     frog.onLog = null;
+    frog.maxRow = frog.grid.y;   // furthest row this crossing (for forward-hop score)
     if (full) {
       reached.fill(false);
       lives = 3;
@@ -235,6 +245,7 @@
     }
 
     sDie.play(frog.pos);
+    addScreenShake(.5, .35);
     lives--;
     respawnTimer.set(1);
     if (lives < 0) {
@@ -244,6 +255,7 @@
         bestLevel = level;
         saveData({bestLevel});
       }
+      newHighScore = (typeof submitBestScore === 'function') ? submitBestScore(score) : false;
     }
   }
 
@@ -251,12 +263,24 @@
     if (reached[slotIndex]) return;
     reached[slotIndex] = true;
     sHome.play(frog.pos);
+
+    // home bonus + leftover-time bonus (read crossTimer before resetRun clears it)
+    score += 50 + Math.floor(crossTimer) * 10;
+    // bonus fly waiting on this pad?
+    if (slotIndex === flySlot) {
+      score += FLY_BONUS;
+      flySlot = -1;
+      sFly.play(frog.pos);
+    }
+
     resetRun(false);
 
     if (reached.every(Boolean)) {
       level++;
+      score += 1000;                    // level-clear bonus
       sLevel.play(vec2(LEVEL_W/2, HOME_Y+.5));
       reached.fill(false);
+      flySlot = -1; flyCooldown = 4;     // clear any fly for the fresh board
       buildLanes();
       // new level → apply its (shorter) crossing time to the next frog
       crossTimerMax = levelCrossTime();
@@ -283,6 +307,13 @@
     frog.facing = vec2(dx, dy);
     frog.hopAnim = 1;
     sHop.play(frog.pos);
+
+    // Score forward progress only (net-new rows), so hopping back and forth
+    // can't farm points.
+    if (frog.grid.y > frog.maxRow) {
+      score += 10 * (frog.grid.y - frog.maxRow);
+      frog.maxRow = frog.grid.y;
+    }
   }
 
   // Last cardinal direction from the analog/touch stick — used to edge-trigger
@@ -350,6 +381,25 @@
     }
   }
 
+  // Bonus fly: lands on a random empty home pad for a few seconds, then leaves.
+  function updateFly() {
+    if (flySlot >= 0) {
+      flyLife -= DT;
+      if (flyLife <= 0) flySlot = -1;   // flew off before you got there
+      return;
+    }
+    flyCooldown -= DT;
+    if (flyCooldown <= 0) {
+      const empty = [];
+      for (let i = 0; i < homeSlots; i++) if (!reached[i]) empty.push(i);
+      if (empty.length) {
+        flySlot = empty[Math.floor(rand() * empty.length)];
+        flyLife = rand(4, 6);
+      }
+      flyCooldown = rand(6, 11);
+    }
+  }
+
   function frogWorldChecks() {
     if (respawnTimer.active()) return;
 
@@ -405,7 +455,7 @@
     buildAtlas();
 
     frog = {
-      grid: vec2(Math.floor(LEVEL_W/2), 1),
+      grid: vec2(Math.floor(LEVEL_W/2), 2),
       pos: vec2(),
       carryVx: 0,
       facing: vec2(0, 1),
@@ -419,6 +469,8 @@
     sDie  = new SoundGenerator({ volume:.9, frequency:180, randomness:.2,  attack:0, release:.28, shapeCurve:.6, slide:-1.6, noise:.15 });
     sHome = new SoundGenerator({ volume:.8, frequency:720, randomness:.06, attack:0, release:.14, shapeCurve:1.2, pitchJump:360, pitchJumpTime:.04 });
     sLevel= new SoundGenerator({ volume:.9, frequency:420, randomness:.03, attack:0, release:.35, shapeCurve:1.1, repeatTime:.08, pitchJump:140, pitchJumpTime:.02 });
+    sTick = new SoundGenerator({ volume:.5, frequency:900, randomness:0,   attack:0, release:.05, shapeCurve:2 });
+    sFly  = new SoundGenerator({ volume:.7, frequency:1040,randomness:.04, attack:0, release:.12, shapeCurve:1.3, pitchJump:520, pitchJumpTime:.05 });
 
     bestLevel = getSaveData().bestLevel ?? 1;
 
@@ -433,6 +485,9 @@
 
   function startGame() {
     gameOver = false;
+    score = 0;
+    newHighScore = false;
+    flySlot = -1; flyCooldown = 4;
     resetRun(true);
     setPlaying(true);
   }
@@ -462,6 +517,7 @@
       revealOnClick: false,
       canReveal: () => !isPlaying(),
       itemsBefore: [
+        {type:'label', id:'highLabel', text:`HIGH SCORE ${getBestScore()}`},
         {type:'label', id:'bestLabel', text:`BEST LEVEL ${bestLevel}`},
       ],
       items: [
@@ -470,7 +526,9 @@
       ],
       onShow: () => {
         const m = getMenu('title');
-        if (m) m.getItem('bestLabel')?.setLabel(`BEST LEVEL ${bestLevel}`);
+        if (!m) return;
+        m.getItem('highLabel')?.setLabel(`HIGH SCORE ${getBestScore()}`);
+        m.getItem('bestLabel')?.setLabel(`BEST LEVEL ${bestLevel}`);
       },
     });
 
@@ -504,12 +562,16 @@
       onShow: () => {
         const m = getMenu('gameOver');
         if (!m) return;
+        m.getItem('scoreLabel')?.setLabel(`SCORE  ${score}`);
+        m.getItem('highLabel')?.setLabel((newHighScore ? 'NEW HIGH!  ' : 'HIGH  ') + getBestScore());
         m.getItem('levelReached')?.setLabel(`LEVEL  ${level}`);
-        m.getItem('bestLabel')?.setLabel(`BEST   ${bestLevel}`);
+        m.getItem('bestLabel')?.setLabel(`BEST LV  ${bestLevel}`);
       },
       items: [
+        {type:'label', id:'scoreLabel',   text:'SCORE  0'},
+        {type:'label', id:'highLabel',    text:'HIGH  0'},
         {type:'label', id:'levelReached', text:'LEVEL  0'},
-        {type:'label', id:'bestLabel',    text:'BEST   0'},
+        {type:'label', id:'bestLabel',    text:'BEST LV  0'},
         {type:'separator'},
         {type:'button', label:'PLAY AGAIN',    onClick: () => { hideMenu('gameOver'); startGame(); }},
         {type:'button', label:'QUIT TO TITLE', onClick: quitToTitleWithCleanup},
@@ -523,6 +585,11 @@
   }
 
   function gameUpdate() {
+    // Pin the camera here (before plugins run) so the gameFx screen-shake
+    // plugin — which nudges cameraPos after gameUpdate — isn't wiped by a
+    // later re-pin. Each frame: set base, then the plugin adds its offset.
+    setCameraPos(vec2(LEVEL_W/2, LEVEL_H/2));
+
     // Pause hotkey: Esc / gamepad Start. Skipped if gameOver menu is up.
     const endMenuShowing = (typeof getTopMenu === 'function') && getTopMenu()?.id === 'gameOver';
     if (isPlaying() && !endMenuShowing &&
@@ -573,9 +640,16 @@
     // Crossing countdown — runs only while the live frog is in play (not during
     // the respawn freeze). Running out costs a life, same as any other death.
     if (!respawnTimer.active()) {
+      const before = crossTimer;
       crossTimer -= DT;
+      // low-time warning: a tick once per second while under 3s
+      if (crossTimer > 0 && crossTimer < 3 &&
+          Math.floor(before) !== Math.floor(crossTimer))
+        sTick.play();
       if (crossTimer <= 0) { crossTimer = 0; killFrog(); }
     }
+
+    updateFly();
 
     // tick & cull death particles (simple gravity arcs)
     for (let i = particles.length - 1; i >= 0; i--) {
@@ -592,7 +666,7 @@
   }
 
   function gameUpdatePost() {
-    setCameraPos(vec2(LEVEL_W/2, LEVEL_H/2));
+    // camera is pinned at the top of gameUpdate (see note there)
   }
 
   // ------------------------------------------------------------
@@ -883,6 +957,18 @@
     }
   }
 
+  // Bonus fly sitting on an empty pad (drawn with primitives — atlas is full).
+  function drawFly() {
+    if (flySlot < 0) return;
+    const c = vec2(homeXs[flySlot]+.5, HOME_Y + .5 + Math.sin(time*8)*.04);
+    const wa = .18 + Math.sin(time*30)*.05;            // fluttering wings
+    drawEllipse(c.add(vec2(-.14,.06)), vec2(.30, wa), hsl(0,0,1,.6));
+    drawEllipse(c.add(vec2( .14,.06)), vec2(.30, wa), hsl(0,0,1,.6));
+    drawEllipse(c, vec2(.24,.36), hsl(0,0,.1));         // body
+    drawCircle(c.add(vec2(-.07,.15)), .10, hsl(0,.7,.5)); // eyes
+    drawCircle(c.add(vec2( .07,.15)), .10, hsl(0,.7,.5));
+  }
+
   // ------------------------------------------------------------
   // Per-obstacle vertical bounce helpers. The base y stored on the
   // obstacle is the MINIMUM position; bounce only ever adds upward.
@@ -994,6 +1080,7 @@
     bgLayer.draw(mainCanvasSize.scale(.5), mainCanvasSize, levelTint(), 0, false, undefined, true);
     drawWaterRipples();
     drawHomeFrogs();
+    drawFly();
 
     // Draw cars, logs, AND the player together, sorted back-to-front by y:
     // higher y (further back) first, lower y (nearer) last/on top. So the frog
@@ -1026,19 +1113,25 @@
   function gameRenderPost() {
     if (!isPlaying()) return; // title screen — menu owns the display
 
-    // Minimal HUD: lives + level only
-    drawTextScreen(`LIVES  ${Math.max(0,lives)}     LEVEL  ${level}`,
-      vec2(mainCanvasSize.x/2, 30), 26,
+    // HUD: score (prominent) + lives/level
+    drawTextScreen(`${score}`,
+      vec2(mainCanvasSize.x/2, 32), 42,
+      hsl(50/360,.9,.7), 5, hsl(0,0,0));
+    drawTextScreen(`LIVES  ${Math.max(0,lives)}      LEVEL  ${level}`,
+      vec2(mainCanvasSize.x/2, 66), 22,
       hsl(105/360,.55,.85), 4, hsl(0,0,0));
 
-    // Crossing-timer bar — drains as you cross; green → red, hidden on game over
+    // Crossing-timer bar at the bottom — drains as you cross; green → red, and
+    // blinks while under 3s. Hidden on game over.
     if (!gameOver) {
       const frac = clamp(crossTimer / crossTimerMax, 0, 1);
-      const barW = 320, barH = 14, cx = mainCanvasSize.x/2, by = 60;
+      const low = crossTimer < 3;
+      const blink = low ? .55 + .35*Math.sin(time*16) : .5;  // pulse when low
+      const barW = 320, barH = 16, cx = mainCanvasSize.x/2, by = mainCanvasSize.y - 28;
       drawRect(vec2(cx, by), vec2(barW+8, barH+8), hsl(0,0,0,.55), 0, glEnable, true);
       const fillW = barW * frac;
       drawRect(vec2(cx - barW/2 + fillW/2, by), vec2(fillW, barH),
-        hsl(frac*.33, .9, .5), 0, glEnable, true);
+        hsl(low ? 0 : frac*.33, .9, blink), 0, glEnable, true);
     }
 
     // Brief on-canvas banner; the gameOver menu owns the rest.
