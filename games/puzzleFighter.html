@@ -14,6 +14,7 @@ showEngineVersion = false;
 paused = false;
 gravity = vec2(0, 0);
 cameraPos = vec2(0, 0);
+inputWASDEmulateDirection = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -1008,7 +1009,10 @@ class Board
         if (this.gameOver) return;
         this.active = {
             a: piece.a, b: piece.b,
-            x: SPAWN_COL, y: BOARD_H_VISIBLE + 1,
+            // Spawn the pair in the hidden buffer just above the visible field
+            // (bottom gem at row 13, top at 14 — both within BOARD_H=15) so it
+            // enters at the top of the well rather than floating a row higher.
+            x: SPAWN_COL, y: BOARD_H_VISIBLE,
             rot: 0
         };
         if (!pieceCanPlace(this.grid, this.active, this.active.x, this.active.y, 0))
@@ -1137,7 +1141,12 @@ function drawBoardGems(board, boardIndex)
                 if (c.y < 0 || c.y >= BOARD_H_VISIBLE) continue;
                 const base = c.gem.type === 'diamond' ? rgb(1,1,1) : GEM_COLORS[c.gem.color];
                 const ghost = rgb(base.r * .5, base.g * .5, base.b * .5, .5);
-                drawRect(cellPos(boardIndex, c.x, c.y), vec2(.9, .9), ghost);
+                const gp = cellPos(boardIndex, c.x, c.y);
+                // Match the gem's real silhouette so a crash reads as a crash
+                // even in the landing preview.
+                if (c.gem.type === 'crash')        drawCircle(gp, .9, ghost);
+                else if (c.gem.type === 'diamond') drawRect(gp, vec2(.9, .9), ghost, Math.PI/4);
+                else                               drawRect(gp, vec2(.9, .9), ghost);
             }
         }
         for (const c of pieceCells(board.active))
@@ -1417,6 +1426,12 @@ function boardTick(board, controller, onLock)
                 {
                     // No chain — finalize immediately.
                     tickCounterGems(board.grid);
+                    // Recompute power gems on the REAL board so newly-formed
+                    // gems (e.g. a fresh 2x2) join/show connectors right away.
+                    // Without this, the only thing that ever merged the live
+                    // board was a chain animation, so power gems formed without
+                    // a detonation looked disconnected until an unrelated break.
+                    mergePowerGems(board.grid);
                     if (board.gameOver) sGameOver?.play();
                     if (onLock) onLock(board, {
                         totalDamage: chainData.totalDamage,
