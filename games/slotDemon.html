@@ -171,6 +171,12 @@ function rollSymbol()
 // ---- WIN FX + SOUNDS ----
 let floatTexts = [];   // {text, pos, color, life}
 function spawnFloatText(text, pos, color) { floatTexts.push({text, pos: pos.copy(), color, life: 1}); }
+
+// Transient big-win banner (shown on a jackpot/top-symbol win). An UNSET Timer's
+// .elapsed() returns false (NaN comparison), so we also gate on a non-empty
+// bannerText to keep the banner hidden at startup until showBanner() runs.
+let bannerTimer = new Timer(), bannerText = '';
+function showBanner(text) { bannerText = text; bannerTimer.set(1.5); }
 function spawnWinBurst(pos, big)
 {
     // ParticleEmitter(pos, angle, emitSize, emitTime, emitRate, emitConeAngle,
@@ -291,6 +297,7 @@ class Machine extends EngineObject
     {
         this.flash = 1;
         spawnFloatText('+' + payout, this.pos, hsl(.13,1,.6));
+        if (sym === BALANCE.symbols[BALANCE.symbols.length-1]) showBanner('JACKPOT! +' + payout);
         const big = sym === BALANCE.symbols[BALANCE.symbols.length-1] || payout >= 100;
         if (big && isScreenShakeEnabled()) addScreenShake(0.4, 0.3);
         sfxWin.play(this.pos, big ? 1 : 0.5);
@@ -553,11 +560,11 @@ async function gameInit()
     const playFromTitle = () => { setPlaying(true); titleMenu.hide(); };
     const titleMenu = createMenu({
         id: 'title',
-        title: 'MENU DEMO',
+        title: 'SLOT DEMON',
+        subtitle: 'Run the casino in Hell',
         dismissable: false,
         onStart: playFromTitle,
         items: [
-            {type:'label',  text:'A demo of menus.js'},
             {type:'button', label:'PLAY',    onClick: playFromTitle},
             {type:'button', label:'OPTIONS', onClick: () => pushMenu('options')},
             {type:'button', label:'MEDALS',  onClick: () => pushMenu('medals')},
@@ -632,15 +639,6 @@ async function gameInit()
             {type:'checkbox', id:'shake',  label:'SCREEN SHAKE', value: true,
                 persist:'shake',
                 onChange: v => setScreenShakeEnabled(v)},
-            {type:'color',    id:'bg',     label:'BG COLOR',     value:'#264d40',
-                persist:'bg',
-                title:'Pick the canvas background color',
-                onChange: c => canvasClearColor = new Color().setHex(c)},
-            {type:'input',    id:'name',   label:'NAME',         value:'Player',
-                persist:'name',
-                placeholder:'Enter a name', maxLength:16,
-                title:'Demo of the text input item type',
-                onChange: v => console.log('name ->', v)},
             {type:'button',   label:'FULLSCREEN', onClick: toggleFullscreen},
             {type:'separator'},
             // Explicit progress wipe (QUIT keeps the save; this is the only
@@ -661,12 +659,10 @@ async function gameInit()
         title: 'ABOUT',
         onHide: popMenu,
         items: [
-            {type:'label', text:'menus.js demo'},
-            {type:'text',  text:'A small declarative menu and toolbar helper for ' +
-                'LittleJS. Items: label, text, separator, button, toggle, slider, ' +
-                'checkbox, color, input, grid (clickable cells optional), and ' +
-                'custom.\n\nKeyboard, gamepad, mouse and touch input are all wired ' +
-                'automatically.'},
+            {type:'label', text:'SLOT DEMON'},
+            {type:'text',  text:'Run a casino in Hell. Click machines to spin, ' +
+                'then buy demons to work the reels for you. Expand the pit, level ' +
+                'up machines, and build an infernal money engine.'},
             {type:'separator'},
             {type:'button', label:'BACK', onClick: () => hideMenu('about')},
         ],
@@ -761,6 +757,20 @@ async function gameInit()
     // separately by the menu persist: items, not here.
     loadGame();
 
+    // ----- live-balancing tweakables (press ~ to toggle the panel) -----
+    // Expose BALANCE on window so tweak() dotted paths resolve to the SAME
+    // object the game reads each frame. (getByPath in tweakables.js resolves
+    // via indirect eval, which would already see the top-level `const BALANCE`,
+    // but window.BALANCE makes the binding explicit and guaranteed.) These
+    // three fields are READ from BALANCE every frame and never reassigned, so
+    // panel edits take effect live.
+    window.BALANCE = BALANCE;
+    tweakDivider('Slot Demon');
+    tweak('BALANCE.decayRate',    {min:0.005, max:0.2});
+    tweak('BALANCE.spinInterval', {min:0.2,   max:3});
+    tweak('BALANCE.payoutBase',   {min:1,     max:20});
+    tweakEngineDefaults();
+
     // Autosave cadence: while playing, persist every few seconds (and on QUIT).
     saveTimer = new Timer(5);
 
@@ -848,6 +858,11 @@ function gameRenderPost()
     if (isPlaying())
         drawTextScreen('$' + Math.floor(cash) + '   👹 ' + demons.length,
             vec2(110, 40), 40, hsl(.13,1,.7), 4, hsl(0,0,0));
+
+    // Transient jackpot banner. An unset Timer reports elapsed()===false, so
+    // the bannerText guard keeps it hidden until showBanner() first fires.
+    if (bannerText && !bannerTimer.elapsed())
+        drawTextScreen(bannerText, vec2(mainCanvasSize.x/2, mainCanvasSize.y*0.25), 80, hsl(.13,1,.6), 6, BLACK);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
