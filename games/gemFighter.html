@@ -129,8 +129,11 @@ function mergePowerGems(grid)
     {
         const cells = pgs.get(id);
         let [minX, minY, maxX, maxY] = bboxOf(cells);
-        // Must be a filled rectangle; otherwise it was carved externally — release it.
-        if (cells.length !== (maxX - minX + 1) * (maxY - minY + 1))
+        const pw = maxX - minX + 1, ph = maxY - minY + 1;
+        // A real power gem must be a FILLED rectangle that is at least 2x2. If a
+        // remnant ever fails this (carved cell, stale 1xN / single-cell leftover),
+        // release it to loose — step 3 will only re-form it if a true 2x2+ exists.
+        if (cells.length !== pw * ph || pw < 2 || ph < 2)
         {
             for (const [x, y] of cells) grid[x][y].powerGemId = -1;
             continue;
@@ -2938,7 +2941,7 @@ async function gameInit()
 
     // Build marker — confirm in the console which power-gem build is loaded.
     // If you see non-rectangles joining, you're on a cached OLD build; hard-reload.
-    console.log('%cPuzzle Fighter — RECTANGLE-ONLY power gems + counter-order fix (rev 6)', 'color:#0f0;font-weight:bold');
+    console.log('%cGem Fighter — RECTANGLE-ONLY power gems, break-as-unit, counter-order (rev 7)', 'color:#0f0;font-weight:bold');
 
     runUnitTests();
 }
