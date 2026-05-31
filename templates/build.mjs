@@ -43,7 +43,7 @@ Build
 (
     join(BUILD_FOLDER, 'index.js'),
     sourceFiles,
-    [minifyBuildStep, htmlBuildStep]
+    [minifyBuildStep, htmlBuildStep, zipBuildStep]
 );
 
 console.log('');
@@ -92,4 +92,13 @@ function htmlBuildStep(filename)
 
     // output html file
     fs.writeFileSync(join(BUILD_FOLDER, 'index.html'), buffer, {flag: 'w+'});
+}
+
+function zipBuildStep(filename)
+{
+    console.log('Zipping...');
+    const sources = ['index.html', ...dataFiles];
+    const sourceList = sources.join(' ');
+    execSync(`npx bestzip ../${PROGRAM_NAME}.zip ${sourceList}`, {cwd:BUILD_FOLDER, stdio: 'inherit'});
+    console.log(`Size of ${PROGRAM_NAME}.zip: ${fs.statSync(join(__dirname, `${PROGRAM_NAME}.zip`)).size} bytes`);
 }
