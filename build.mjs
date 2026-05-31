@@ -26,7 +26,7 @@
 'use strict';
 
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, basename } from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -165,26 +165,39 @@ function buildGame(gameName)
     for (const file of dataFiles)
         fs.copyFileSync(join(gameDir, file), join(BUILD_FOLDER, file));
 
+    // basenames of the build inputs the dev index.html loads via <script src>
+    // (engine + sources), normalized so the dev engine tag matches the release
+    // build input (littlejs.js <-> littlejs.release.js)
+    const inputBasenames = new Set(sourceRelPaths.map(p => normalizeScriptName(basename(p))));
+
     // build steps are closures over this game's config so multiple games can be
     // built in one process (build --all) without leaking state between them
     function htmlBuildStep(filename)
     {
         console.log('Building html...');
 
-        // inline the minified script into a single html file
-        let buffer = '';
-        buffer += '<!DOCTYPE html>';
-        buffer += '<head>';
-        buffer += `<title>${title}</title>`;
-        buffer += '<meta charset=utf-8>';
-        buffer += '</head>';
-        buffer += '<body>';
-        buffer += '<script>';
-        buffer += fs.readFileSync(filename) + '\n';
-        buffer += '</script>';
+        const bundle = `<script>${fs.readFileSync(filename)}\n</script>`;
+        const htmlPath = join(gameDir, 'index.html');
 
-        // output html file
-        fs.writeFileSync(join(BUILD_FOLDER, 'index.html'), buffer, {flag: 'w+'});
+        let outHtml;
+        if (fs.existsSync(htmlPath))
+        {
+            // transform the game's own index.html: keep all of it, swap the dev
+            // <script src> tags that load build inputs for the inlined bundle
+            outHtml = transformGameHtml(fs.readFileSync(htmlPath, 'utf8'), inputBasenames, bundle);
+        }
+        else
+        {
+            // no dev index.html: fall back to generated boilerplate (uses title)
+            outHtml =
+                '<!DOCTYPE html><head>' +
+                `<title>${title}</title>` +
+                '<meta charset=utf-8>' +
+                '</head><body>' +
+                bundle;
+        }
+
+        fs.writeFileSync(join(BUILD_FOLDER, 'index.html'), outHtml, {flag: 'w+'});
     }
 
     function zipBuildStep()
@@ -233,4 +246,51 @@ function minifyBuildStep(filename)
 {
     console.log('Running terser...');
     execSync(`npx terser ${filename} -c -m -o ${filename}`, {stdio: 'inherit'});
+}
+
+// normalize a <script src> basename for matching against build inputs:
+// strip a .release or .min infix that sits right before .js so the dev engine
+// tag (littlejs.js) matches the release build input (littlejs.release.js)
+function normalizeScriptName(name)
+{
+    return name.replace(/\.(release|min)\.js$/i, '.js');
+}
+
+// transform a game's dev index.html: keep the whole document, but replace the
+// dev <script src> tags that load build inputs (engine + sources) with the
+// single inlined bundle. Non-input <script src> (CDN, box2d, analytics) and
+// inline <script> blocks are left untouched. If no input tag is found, the
+// bundle is injected before </body> (or appended) with a warning.
+function transformGameHtml(html, inputBasenames, bundle)
+{
+    let replaced = false;
+
+    // match a <script ...></script> tag and capture its attributes
+    const out = html.replace(/<script\b([^>]*)>\s*<\/script>/gi, (tag, attrs) =>
+    {
+        const m = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i);
+        if (!m)
+            return tag; // inline script (no src) - leave as-is
+
+        const src = m[1] ?? m[2] ?? m[3];
+        const isInput = inputBasenames.has(normalizeScriptName(basename(src)));
+        if (!isInput)
+            return tag; // external/non-input script - leave as-is
+
+        if (replaced)
+            return ''; // drop additional input tags (bundle already inserted)
+
+        replaced = true;
+        return bundle; // first input tag becomes the inlined bundle
+    });
+
+    if (replaced)
+        return out;
+
+    // no <script src> matched a build input: inject the bundle so the game still runs
+    console.log('Warning: no matching <script src> in index.html; bundle appended');
+    const closeBody = out.search(/<\/body>/i);
+    if (closeBody >= 0)
+        return out.slice(0, closeBody) + bundle + out.slice(closeBody);
+    return out + bundle;
 }

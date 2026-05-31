@@ -32,8 +32,13 @@ Build (optional, for distributable single-file zips)
   release file automatically, concatenates the game's source files, minifies, inlines into
   one `index.html`, and zips it. Edit `build.json` to add source/data files. Fields:
   `sources` (required, ordered), `data` (zipped alongside), `name` (zip name, defaults to
-  folder), `title` (html title, defaults to name), `engine` (override path or `false`),
-  `keepIntermediate` (keep `build/index.js`).
+  folder), `title` (html title for the generated fallback page only, defaults to name),
+  `engine` (override path or `false`), `keepIntermediate` (keep `build/index.js`).
+- The build keeps your game's own `index.html` (custom CSS, meta tags, canvas markup, etc.)
+  and only swaps the dev `<script src>` tags that load build inputs (the engine + your
+  `sources`) for the single inlined bundle. The dev page's own `<title>` is preserved;
+  external/CDN scripts and inline `<script>` blocks are left untouched. Only when a game has
+  no `index.html` does the build generate boilerplate (and use the `title` field).
 - Output (`build/`, `*.zip`) is gitignored. Dev never requires the build — it is only for shipping.
 
 Template selection for new games
