@@ -6,23 +6,35 @@ Core goals
 - Work in short iterations. After each step, suggest the next small step.
 
 Project structure and workflow
-- This repo is not focused on single-file game prototypes anymore.
-- Each game should live in its own folder under `games/`.
+- This repo is built for real games (medium and large), not just single-file prototypes.
+- Each game lives in its own folder under `games/`.
+- The canonical starter is `games/emptyGame/` — copy it to `games/<gameName>/` for a new game.
 - Standard starter layout for a new game:
   - `games/<gameName>/index.html`
   - `games/<gameName>/game.js`
+  - `games/<gameName>/build.mjs` (optional single-file zip build; carried over from the starter)
 - It is fine (and expected) to add more files for larger games, for example:
   - `games/<gameName>/constants.js`
   - `games/<gameName>/player.js`
   - `games/<gameName>/ui.js`
-- Prefer modular game code over one giant script block.
-- No build step or bundler unless the user explicitly asks for one.
+- Prefer modular game code (multiple `.js` files) over one giant script block.
+- Use the global LittleJS API: load `../../dist/littlejs.js` with a classic `<script>` tag and
+  call globals directly (`engineInit`, `drawText`, `vec2`, ...). Do NOT use ES-module imports
+  or an `LJS.` prefix — the repo, all templates, and the zip build are global-style.
+- No bundler. To develop, just open `index.html` in a browser (works from `file://`, no server).
+
+Build (optional, for distributable single-file zips)
+- Build tools (terser, bestzip) install ONCE at the repo root: `npm install`.
+- Build a game from its folder: `node games/<gameName>/build.mjs` (or `npm run build:emptyGame`).
+- The build concatenates `dist/littlejs.release.js` + the game's source files, minifies, inlines
+  into one `index.html`, and zips it. Edit the CONFIG block in `build.mjs` to add source/data files.
+- Output (`build/`, `*.zip`) is gitignored. Dev never requires the build — it is only for shipping.
 
 Template selection for new games
-- Recommend a template before generating files.
-- Start from `templates/emptyGame/` when the user wants a clean scratch start:
-  - Uses `index.html` + `game.js` and ES modules.
-- Use `templates/game.html` for a quick default non-physics starter.
+- The default path for a real game is: copy `games/emptyGame/` to `games/<gameName>/`.
+- The `templates/*.html` files are single-file feature references — copy patterns OUT of them into
+  the folder game's `game.js`; do not base a new game's structure on a single-file template.
+- Use `templates/game.html` for the default non-physics scaffold (shapes, text, camera).
 - Use `templates/boardGame.html` for turn-based grid/board games.
 - Use `templates/box2dGame.html` for Box2D physics games.
 - Use `templates/menuGame.html` when the game needs title/pause/options UI.
@@ -30,19 +42,17 @@ Template selection for new games
 - Use `templates/tweakableGame.html` for runtime tuning workflows.
 - Use `templates/uiGame.html` when canvas UI widgets are required.
 
-When scaffolding from templates into `games/<gameName>/`
+When scaffolding into `games/<gameName>/`
 - Keep the game in its own folder under `games/`.
-- Ensure script paths are correct from the new folder location.
-- For classic script templates copied from `templates/*.html`, paths usually become:
+- Ensure script paths are correct from the new folder location (one level deeper than `templates/`):
   - `../../dist/littlejs.js`
   - `../../dist/box2d.wasm.js` (if Box2D)
   - `../../templates/menus.js`
   - `../../templates/gameFx.js`
   - `../../templates/textureGenerator.js`
   - `../../templates/tweakables.js`
-- For the ES module starter (`templates/emptyGame/`), keep `game.js` importing:
-  - `../../dist/littlejs.esm.js`
-- If you copy a single-file template, split gameplay code into `game.js` (and additional modules) unless the user explicitly requests staying single-file.
+- When pulling code from a single-file template, split gameplay into `game.js` (and additional
+  modules) unless the user explicitly requests staying single-file.
 
 Project constraints
 - Indent with 4 spaces, not 2 and not tabs.

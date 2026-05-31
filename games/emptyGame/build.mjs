@@ -2,10 +2,13 @@
  * LittleJS Build System
  * - Concatenates the engine + game source into one file
  * - Minifies with terser, inlines into a single index.html, then zips it
- * - Run with: npm run build  (or: node build.mjs)
+ * - Run from this game's folder with: node build.mjs
  *
- * To use this for your own game, copy this file + package.json into your game
- * folder and edit the CONFIG block below.
+ * Build tools (terser, bestzip) are installed once at the repo root:
+ *   npm install            (run once in the repo root after cloning)
+ *
+ * To build your own game, copy this file into your game folder and edit the
+ * CONFIG block below. npx resolves the tools from the shared root node_modules.
  */
 
 'use strict';

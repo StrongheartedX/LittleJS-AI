@@ -28,15 +28,30 @@ LittleJS and everything in this repository is **MIT licensed!** See [LICENSE](LI
 
 ## 🛠️ Make Your Own
 
-Each game is one self-contained HTML file — no build step, no external assets, no dependencies. To start:
+Clone the repo and you have everything you need to build games — from quick prototypes to large, multi-file projects. No external assets and no dependencies to play; the only npm packages are optional build tools.
 
-1. Copy a file from [templates/](templates/).
-2. Edit the JavaScript inside the `<script>` tag.
-3. Open the `.html` in a web browser.
+### Start a new game
 
-### 📝 Templates
+1. Copy the starter folder [games/emptyGame/](games/emptyGame/) to `games/<yourGame>/`.
+2. Edit `game.js` — and add more files (`player.js`, `ui.js`, `constants.js`, …) as the game grows.
+3. Open `index.html` in a web browser. That's it — it runs straight from `file://`, no server needed.
 
-- [game.html](templates/game.html) — minimal scaffold
+Games use the **global LittleJS API**: load `dist/littlejs.js` with a plain `<script>` tag and call globals like `engineInit`, `drawText`, and `vec2` directly. Keep gameplay modular across several `.js` files for medium and large games.
+
+### Ship a single-file build (optional)
+
+Each game folder includes a `build.mjs` that concatenates the engine + your source, minifies it, and produces one self-contained `index.html` plus a `.zip` (great for game jams).
+
+```sh
+npm install                       # once, in the repo root — installs terser + bestzip
+node games/<yourGame>/build.mjs   # builds games/<yourGame>/build/ and <name>.zip
+```
+
+### 📝 Feature templates
+
+Single-file references to copy patterns from when adding a feature — not full game scaffolds:
+
+- [game.html](templates/game.html) — minimal scaffold (shapes, text, camera)
 - [boardGame.html](templates/boardGame.html) — grid-based games (chess, sokoban, match-3)
 - [menuGame.html](templates/menuGame.html) — title, pause, options, medals, HUD toolbar
 - [box2dGame.html](templates/box2dGame.html) — Box2D physics (pool, plinko, pinball)

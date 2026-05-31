@@ -1,11 +1,14 @@
 {
-  "compilerOptions": {
-  },
-  "include": [  
-    "./dist/littlejs.js",
-    "./games/*.js",
-    "./local/*.js",
-  ],
-  "exclude": [
-  ]
+    "compilerOptions": {
+        "checkJs": false
+    },
+    "include": [
+        "./dist/littlejs.js",
+        "./games/**/*.js",
+        "./templates/*.js"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/build"
+    ]
 }

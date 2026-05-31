@@ -1,0 +1,13 @@
+{
+    "name": "littlejs-ai",
+    "version": "1.0.0",
+    "private": true,
+    "description": "AI-assisted LittleJS toolkit: starter, templates, helper modules, and a single-file zip build shared across all games.",
+    "scripts": {
+        "build:emptyGame": "node games/emptyGame/build.mjs"
+    },
+    "devDependencies": {
+        "bestzip": "^2.2.1",
+        "terser": "^5.31.0"
+    }
+}
