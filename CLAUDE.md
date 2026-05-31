@@ -39,6 +39,13 @@ Build (optional, for distributable single-file zips)
   `sources`) for the single inlined bundle. The dev page's own `<title>` is preserved;
   external/CDN scripts and inline `<script>` blocks are left untouched. Only when a game has
   no `index.html` does the build generate boilerplate (and use the `title` field).
+- `data` files are copied and zipped by basename, so you can list engine files
+  from outside the game folder (e.g. `../../dist/box2d.wasm.js` and
+  `../../dist/box2d.wasm.wasm`) to ship them beside the page without minifying.
+  In the built page, a local (non-URL) `<script src>` that is not a build input
+  (e.g. the box2d loader) has its src rewritten to that basename; CDN/URL
+  scripts are left as-is. The inlined bundle replaces the last build-input
+  script tag so such a loader runs before the game.
 - Output (`build/`, `*.zip`) is gitignored. Dev never requires the build — it is only for shipping.
 
 Template selection for new games
@@ -47,7 +54,8 @@ Template selection for new games
   the folder game's `game.js`; do not base a new game's structure on a single-file template.
 - Use `templates/game.html` for the default non-physics scaffold (shapes, text, camera).
 - Use `templates/boardGame.html` for turn-based grid/board games.
-- Use `templates/box2dGame.html` for Box2D physics games.
+- Use `templates/box2dGame.html` for Box2D physics patterns; `games/box2dGame/`
+  is a ready-made Box2D example folder (copies box2d.wasm.js/.wasm via `data`).
 - Use `templates/menuGame.html` when the game needs title/pause/options UI.
 - Use `templates/textureGame.html` for procedural sprite-atlas workflows.
 - Use `templates/tweakableGame.html` for runtime tuning workflows.
