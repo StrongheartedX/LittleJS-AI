@@ -257,35 +257,63 @@ function normalizeScriptName(name)
     return name.replace(/\.(release|min)\.js$/i, '.js');
 }
 
-// transform a game's dev index.html: keep the whole document, but replace the
-// dev <script src> tags that load build inputs (engine + sources) with the
-// single inlined bundle. Non-input <script src> (CDN, box2d, analytics) and
-// inline <script> blocks are left untouched. If no input tag is found, the
-// bundle is injected before </body> (or appended) with a warning.
+// true if a <script src> points at an external URL we must not rewrite
+function isUrlSrc(src)
+{
+    return /^(https?:)?\/\//i.test(src) || /^data:/i.test(src);
+}
+
+// transform a game's dev index.html: keep the whole document, but
+//  - replace the LAST <script src> that loads a build input with the inlined
+//    bundle, and drop the other input tags (so any kept external script stays
+//    ahead of the bundle - needed for box2d's loader to run before gameInit);
+//  - rewrite a local (non-URL) non-input <script src> to its basename so it
+//    resolves beside the flattened build output (e.g. ../../dist/box2d.wasm.js
+//    -> box2d.wasm.js); URL/CDN srcs and inline <script> blocks are untouched.
+// If no input tag is found, the bundle is injected before </body> with a warning.
 function transformGameHtml(html, inputBasenames, bundle)
 {
-    let replaced = false;
-
-    // match a <script ...></script> tag and capture its attributes
-    const out = html.replace(/<script\b([^>]*)>\s*<\/script>/gi, (tag, attrs) =>
+    const tagRe = /<script\b([^>]*)>\s*<\/script>/gi;
+    const srcOf = attrs =>
     {
         const m = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i);
-        if (!m)
-            return tag; // inline script (no src) - leave as-is
+        return m ? (m[1] ?? m[2] ?? m[3]) : null;
+    };
+    const isInput = src => inputBasenames.has(normalizeScriptName(basename(src)));
 
-        const src = m[1] ?? m[2] ?? m[3];
-        const isInput = inputBasenames.has(normalizeScriptName(basename(src)));
-        if (!isInput)
-            return tag; // external/non-input script - leave as-is
+    // pass 1: find the index (among <script src> tags, in order) of the LAST
+    // input-matching tag. Only src tags are counted, so pass 2 can align.
+    let scriptIdx = -1, lastInput = -1;
+    for (const mm of html.matchAll(tagRe))
+    {
+        const src = srcOf(mm[1]);
+        if (!src)
+            continue;
+        ++scriptIdx;
+        if (isInput(src))
+            lastInput = scriptIdx;
+    }
 
-        if (replaced)
-            return ''; // drop additional input tags (bundle already inserted)
+    // pass 2: rebuild. seen advances only for src tags (inline tags return early
+    // before ++seen), keeping it aligned with scriptIdx/lastInput from pass 1.
+    let seen = -1;
+    const out = html.replace(tagRe, (tag, attrs) =>
+    {
+        const src = srcOf(attrs);
+        if (!src)
+            return tag; // inline script - leave as-is
 
-        replaced = true;
-        return bundle; // first input tag becomes the inlined bundle
+        const idx = ++seen;
+        if (isInput(src))
+            return idx === lastInput ? bundle : ''; // bundle at last input, drop the rest
+
+        // non-input: rewrite local path to basename so it resolves in the zip
+        if (isUrlSrc(src))
+            return tag;
+        return tag.replace(src, basename(src));
     });
 
-    if (replaced)
+    if (lastInput >= 0)
         return out;
 
     // no <script src> matched a build input: inject the bundle so the game still runs
