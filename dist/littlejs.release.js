@@ -35,7 +35,7 @@ const engineName = 'LittleJS';
  *  @type {string}
  *  @default
  *  @memberof Engine */
-const engineVersion = '1.18.16.1';
+const engineVersion = '1.18.17';
 
 /** Frames per second to update
  *  @type {number}
@@ -2143,6 +2143,8 @@ let canvasFixedSize = vec2();
 let canvasPixelated = false;
 
 /** Disables texture filtering for crisper pixel art
+ *  - Leave true for pixel art so sprites stay sharp when scaled (uses NEAREST filtering)
+ *  - Set false for smooth/high-resolution art to enable bilinear filtering and mipmaps
  *  @type {boolean}
  *  @default
  *  @memberof Settings */
@@ -2496,6 +2498,7 @@ function setCanvasPixelated(pixelated)
 }
 
 /** Disables texture filtering for crisper pixel art
+ *  - Leave true for pixel art; set false for smooth/high-resolution art
  *  @param {boolean} pixelated
  *  @memberof Settings */
 function setTilesPixelated(pixelated) { tilesPixelated = pixelated; }
@@ -5552,12 +5555,19 @@ function touchGamepadRelayout()
     const setZone = (z, css)=> z.style.cssText =
         'position:absolute;pointer-events:auto;touch-action:none;' + css;
 
-    if (paused && touchGamepadCenterButtonSize)
+    if (paused)
     {
-        // while paused, any touch presses start
-        setZone(touchGamepadZoneC, 'inset:0');
+        // the gamepad is hidden while paused, so its side zones must not capture
+        // touches - otherwise they silently steal taps from menus and dialogs
         for (const zone of touchGamepadSideZones) zone.style.display = 'none';
-        touchGamepadZoneC.style.display = '';
+        if (touchGamepadCenterButtonSize)
+        {
+            // any touch presses start
+            setZone(touchGamepadZoneC, 'inset:0');
+            touchGamepadZoneC.style.display = '';
+        }
+        else
+            touchGamepadZoneC.style.display = 'none';
     }
     else
     {
@@ -10354,13 +10364,18 @@ class UISystemPlugin
 
             function updateObject(o)
             {
-                if (!o.visible) return;
+                if (o.destroyed || !o.visible) return;
 
                 // update in reverse order to detect mouse enter/leave
                 updateTransforms(o);
                 for (let i=o.children.length; i--;)
-                    updateObject(o.children[i]);
-                o.update();
+                {
+                    // a child may destroy siblings mid-update (e.g. dialog close)
+                    const child = o.children[i];
+                    child && updateObject(child);
+                }
+                if (!o.destroyed)
+                    o.update();
             }
         }
         function uiRender()
@@ -13995,8 +14010,9 @@ function drawThreeSlice(pos, size, startTile, color, borderSize=1, additiveColor
  *  @memberof DrawUtilities */
 function drawCrescent(pos, size=1, percent=0, color=WHITE, angle=0, invert=false, lineWidth=0, lineColor=BLACK, useWebGL=glEnable, screenSpace=false, context)
 {
-    const points = getCrescentPoints(pos, size, percent, angle, invert);
-    drawPoly(points, color, lineWidth, lineColor, vec2(), 0, useWebGL, screenSpace, context);
+    // build local-space points and let drawPoly apply pos/angle so screen space works
+    const points = getCrescentPoints(vec2(), size, percent, 0, invert);
+    drawPoly(points, color, lineWidth, lineColor, pos, angle, useWebGL, screenSpace, context);
 }
 
 /** Get the list of points that make up a crescent / moon-phase shape
