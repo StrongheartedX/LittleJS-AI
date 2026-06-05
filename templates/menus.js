@@ -58,6 +58,32 @@
 //                  canReveal}) wraps createMenu + a PLAY button +
 //                  attachClickToReveal in one call for the standard title
 //                  pattern. Auto-wires PLAY's onClick to gamepad Start.
+// Title FX:        titleFx on createMenu / createTitleMenu (and the dialog
+//                  helpers) juices a heading. String = one effect by name
+//                  ('neon', 'float', 'sparkle'); object composes channels:
+//                  {fill, motion, sparkle, hue, invert, speed, color}.
+//                  Fills: neon rainbow shine fire gold outline hardshadow 3d
+//                  glitch crt. Motion: wave heartbeat jelly float. Tweaks:
+//                  hue(deg) invert speed(x) color shadow(hardshadow offset
+//                  color) size(em) spacing(letter-spacing em). Effects
+//                  auto-tear-down on hide so sparkle timers never leak.
+//                  showGameOverDialog defaults to gold (win) / red glow
+//                  (loss); override with titleFx, disable with titleFx:null.
+//                  Menu label/text items accept the same spec via `fx:`.
+//                  Powered by applyMenuFx(el, spec) which any consumer can
+//                  call on its own element.
+// Theme:           setMenuTheme({bg, fg, accent, border, itemBg, itemHoverBg,
+//                  backdrop, disabled, subtitleColor, borderWidth, radius,
+//                  font}) sets the matching --menu-* CSS vars on
+//                  #littlejs-menus from JS (no <style> block). Only passed
+//                  keys change; numbers for borderWidth/radius get px. Or pass
+//                  a preset NAME + optional overrides: setMenuTheme('neon',
+//                  {accent:'#f0a'}) — presets: neon casino felt retro arcade
+//                  mono. Call once per game; safe before any menu exists.
+// Entrance anim:   menus fade+scale in on show (~.18s). setMenuAnimations(b)
+//                  toggles it (options checkbox); off under reduced-motion.
+// PLAY/btn glow:   createTitleMenu({playGlow:true}) pulses the PLAY button in
+//                  the accent; any button item takes glow:true.
 // Pause hotkey:    bindPauseKey({menuId, when}) — call from gameUpdate each
 //                  frame. Surfaces 'pause' menu on Esc / gamepad Start,
 //                  plays the activate sound, clears the press. Returns true
@@ -80,6 +106,10 @@
 // Lookups:         getMenu(id), getToolbar(id), getTopMenu(),
 //                  isMenuVisible(), showMenu(id), hideMenu(id),
 //                  hideAllMenus().
+// Demo mode:       isDemoMode() — true when loaded with `#demo` in the URL
+//                  (the arcade launcher's hero cabinet). All menu chrome is
+//                  auto-hidden so the game runs menu-less as a live attract;
+//                  games can also branch on it (e.g. AI-vs-AI vs static board).
 //
 // Lifecycle hook: setMenuVisibilityCallback(v => paused = v) — fires once
 // per show/hide for ALL menus including dialogs. Use this for paused-
@@ -184,12 +214,250 @@
 // instead of the engine's canvas overlay. Same `medalsInit('SaveName')`
 // call, same `medals[id]` map — just a different display path.
 
+// ============================================================================
+// Title / heading FX (titleFx). See applyMenuFx below. Channel model:
+//   fill    one of MENU_FX_FILL   (color/shadow/gradient look)
+//   motion  one of MENU_FX_MOTION (transform; wrapped or per-letter for wave)
+//   sparkle boolean overlay (particle layer)
+//   tweaks  hue (deg), invert (bool), speed (multiplier), color (override)
+// A bare string is shorthand for its channel: 'neon' -> {fill:'neon'},
+// 'float' -> {motion:'float'}, 'sparkle' -> {sparkle:true}.
+// ============================================================================
+const MENU_FX_FILL = ['neon','rainbow','shine','fire','gold','outline','hardshadow','3d','glitch','crt'];
+const MENU_FX_MOTION = ['wave','heartbeat','jelly','float'];
+// NOTE: every motion uses an outer `.m-<name>` wrapper EXCEPT `wave`, which is
+// per-letter and applied as `.fx-wave` on the heading itself — applyMenuFx
+// special-cases it.
+const MENU_FX_CHANNEL = {};
+for (const n of MENU_FX_FILL) MENU_FX_CHANNEL[n] = 'fill';
+for (const n of MENU_FX_MOTION) MENU_FX_CHANNEL[n] = 'motion';
+MENU_FX_CHANNEL['sparkle'] = 'overlay';
+
+function normalizeFxSpec(spec)
+{
+    if (!spec) return null;
+    if (typeof spec === 'string')
+    {
+        const ch = MENU_FX_CHANNEL[spec];
+        if (!ch) { console.warn('applyMenuFx: unknown effect "' + spec + '"'); return null; }
+        if (ch === 'overlay') return { sparkle: true };
+        const out = {}; out[ch] = spec; return out;
+    }
+    return spec;
+}
+
+// Apply a (normalized or string) FX spec to a DOM text element. Returns an
+// idempotent teardown fn that fully reverses every change (classes, wrapper,
+// letter-split, sparkle timer, inline styles). Safe to call teardown twice.
+function applyMenuFx(element, spec)
+{
+    spec = normalizeFxSpec(spec);
+    if (!element || !spec) return () => {};
+
+    const teardowns = [];
+    const target = element;   // fill classes / tweaks / sparkle land here
+
+    // ---- tweaks: speed + color custom props, hue/invert as a filter ----
+    if (typeof spec.speed === 'number' && spec.speed > 0)
+    {
+        const prevSpeed = target.style.getPropertyValue('--fx-speed');
+        target.style.setProperty('--fx-speed', spec.speed);
+        teardowns.push(() => prevSpeed
+            ? target.style.setProperty('--fx-speed', prevSpeed)
+            : target.style.removeProperty('--fx-speed'));
+    }
+    else if (typeof spec.speed === 'number')
+        console.warn('applyMenuFx: speed must be > 0 (got ' + spec.speed + '); ignoring.');
+    if (spec.color)
+    {
+        const prevColor = target.style.getPropertyValue('--fx-color');
+        target.style.setProperty('--fx-color', spec.color);
+        teardowns.push(() => prevColor
+            ? target.style.setProperty('--fx-color', prevColor)
+            : target.style.removeProperty('--fx-color'));
+    }
+    // Secondary color (--fx-color2): the hardshadow offset color.
+    if (spec.shadow)
+    {
+        const prevShadow = target.style.getPropertyValue('--fx-color2');
+        target.style.setProperty('--fx-color2', spec.shadow);
+        teardowns.push(() => prevShadow
+            ? target.style.setProperty('--fx-color2', prevShadow)
+            : target.style.removeProperty('--fx-color2'));
+    }
+    // Typography: size (font-size) and spacing (letter-spacing). A number is
+    // treated as em; pass a string for explicit units.
+    if (spec.size != null)
+    {
+        const prevSize = target.style.fontSize;
+        target.style.fontSize = (typeof spec.size === 'number') ? spec.size + 'em' : spec.size;
+        teardowns.push(() => { target.style.fontSize = prevSize; });
+    }
+    if (spec.spacing != null)
+    {
+        const prevSpacing = target.style.letterSpacing;
+        target.style.letterSpacing = (typeof spec.spacing === 'number') ? spec.spacing + 'em' : spec.spacing;
+        teardowns.push(() => { target.style.letterSpacing = prevSpacing; });
+    }
+    const filters = [];
+    if (typeof spec.hue === 'number') filters.push('hue-rotate(' + spec.hue + 'deg)');
+    if (spec.invert) filters.push('invert(1)');
+    if (filters.length)
+    {
+        const prevFilter = target.style.filter;
+        target.style.filter = (prevFilter ? prevFilter + ' ' : '') + filters.join(' ');
+        teardowns.push(() => { target.style.filter = prevFilter; });
+    }
+
+    // ---- fill ----
+    const fill = (spec.fill && MENU_FX_CHANNEL[spec.fill] === 'fill') ? spec.fill : null;
+    if (spec.fill && !fill) console.warn('applyMenuFx: unknown fill "' + spec.fill + '"');
+    if (fill)
+    {
+        const cls = 'fx-' + fill;
+        target.classList.add(cls);
+        teardowns.push(() => target.classList.remove(cls));
+    }
+
+    // ---- motion ----
+    const motion = (spec.motion && MENU_FX_CHANNEL[spec.motion] === 'motion') ? spec.motion : null;
+    if (spec.motion && !motion) console.warn('applyMenuFx: unknown motion "' + spec.motion + '"');
+    const fillIsGradient = fill && ['gold','rainbow','shine','fire'].includes(fill);
+    if (motion === 'wave' && fillIsGradient)
+    {
+        // wave splits the title into per-letter spans, which breaks a gradient
+        // (background-clip:text) fill — the parent keeps the gradient but loses
+        // its text, so nothing renders. Keep the fill, skip the wave, and point
+        // the developer at a wrapper motion that moves the title as one piece.
+        console.warn('applyMenuFx: "wave" cannot combine with gradient fill "' + fill + '" (the title would vanish) — use motion float/heartbeat/jelly instead. Skipping wave.');
+    }
+    else if (motion === 'wave')
+    {
+        // per-letter on the fill element
+        target.classList.add('fx-wave');
+        const original = target.textContent;
+        const frag = document.createDocumentFragment();
+        [...original].forEach((ch, i) => {
+            const s = document.createElement('span');
+            s.textContent = ch;
+            s.style.animationDelay = (i * 0.09) + 's';
+            frag.appendChild(s);
+        });
+        target.textContent = '';
+        target.appendChild(frag);
+        teardowns.push(() => { target.classList.remove('fx-wave'); target.textContent = original; });
+    }
+    else if (motion)
+    {
+        // wrap in an outer transform element (takes the element's place)
+        const wrap = document.createElement('div');
+        wrap.className = 'm-' + motion;
+        if (element.parentNode)
+        {
+            element.parentNode.insertBefore(wrap, element);
+            wrap.appendChild(element);
+            teardowns.push(() => {
+                if (wrap.parentNode) { wrap.parentNode.insertBefore(element, wrap); wrap.remove(); }
+            });
+        }
+        else console.warn('applyMenuFx: element not in DOM; "' + motion + '" motion skipped');
+    }
+
+    // ---- sparkle overlay ----
+    if (spec.sparkle)
+    {
+        target.classList.add('ov-sparkle');
+        const timer = setInterval(() => {
+            const s = document.createElement('span');
+            s.className = 'ljs-fx-spark';
+            s.style.left = (Math.random() * 100) + '%';
+            s.style.top = (Math.random() * 100) + '%';
+            target.appendChild(s);
+            setTimeout(() => s.remove(), 900);
+        }, 160);
+        teardowns.push(() => {
+            clearInterval(timer);
+            target.classList.remove('ov-sparkle');
+            target.querySelectorAll('.ljs-fx-spark').forEach(s => s.remove());
+        });
+    }
+
+    return () => { while (teardowns.length) teardowns.pop()(); };
+}
+
+// ============================================================================
+// Theme helper — set the menu skin from JS instead of a CSS <style> block.
+// Each friendly key maps to a --menu-* custom property on #littlejs-menus.
+// Only the keys you pass change; everything else keeps its default. Numbers
+// for borderWidth/radius get 'px' appended; pass a string for other units.
+// Safe to call before any menu exists (it inits the root). Global per game.
+//   setMenuTheme({ bg:'#102', accent:'#f0a', radius:16, borderWidth:3 });
+// ============================================================================
+const MENU_THEME_VARS = {
+    bg:          '--menu-bg',
+    fg:          '--menu-fg',
+    accent:      '--menu-accent',
+    border:      '--menu-border-color',
+    itemBg:      '--menu-item-bg',
+    itemHoverBg: '--menu-item-hover-bg',
+    backdrop:    '--menu-backdrop',
+    disabled:    '--menu-disabled',
+    subtitleColor: '--menu-subtitle-color',
+    borderWidth: '--menu-border-width',
+    radius:      '--menu-radius',
+    font:        '--menu-font',
+};
+const MENU_THEME_PX = { borderWidth: 1, radius: 1 };   // keys whose numbers get 'px'
+
+// Named presets — pass the name as the first arg, optionally with an override
+// object: setMenuTheme('neon', {accent:'#f0a'}). Presets are a tuned starting
+// point; the override object wins.
+const MENU_THEME_PRESETS = {
+    neon:   { accent:'#33e0ff', bg:'rgba(8,10,20,.9)',  borderWidth:3, radius:10 },
+    casino: { accent:'#ffd700', bg:'rgba(22,8,0,.93)',  borderWidth:2, radius:6 },
+    felt:   { accent:'#33cc66', bg:'rgba(8,22,14,.93)', borderWidth:2, radius:8 },
+    retro:  { accent:'#46d846', bg:'rgba(0,0,0,.9)',    borderWidth:2, radius:0, font:'monospace' },
+    arcade: { accent:'#ff2aa8', bg:'rgba(10,6,18,.92)', borderWidth:3, radius:8 },
+    mono:   { accent:'#cccccc', bg:'rgba(0,0,0,.85)',   borderWidth:2, radius:4 },
+};
+
+function setMenuTheme(theme, overrides)
+{
+    // String first arg = preset name; merge with any override object.
+    if (typeof theme === 'string')
+    {
+        const preset = MENU_THEME_PRESETS[theme];
+        if (!preset) { console.warn('setMenuTheme: unknown preset "' + theme + '"'); return; }
+        theme = Object.assign({}, preset, overrides);
+    }
+    if (!theme) return;
+    initMenuSystem();
+    for (const key in theme)
+    {
+        if (theme[key] === undefined) continue;
+        const cssVar = MENU_THEME_VARS[key];
+        if (!cssVar) { console.warn('setMenuTheme: unknown key "' + key + '"'); continue; }
+        let value = theme[key];
+        if (typeof value === 'number') value = value + (MENU_THEME_PX[key] ? 'px' : '');
+        menuSystemRoot.style.setProperty(cssVar, value);
+    }
+}
+
+// Toggle the menu entrance fade/scale globally (e.g. an options checkbox).
+function setMenuAnimations(on)
+{
+    initMenuSystem();
+    if (on === false) menuSystemRoot.style.setProperty('--menu-anim-time', '0s');
+    else menuSystemRoot.style.removeProperty('--menu-anim-time');
+}
+
 function createMenu(config)
 {
     initMenuSystem();
 
     const cfg = Object.assign({
         id:            null,
+        titleFx:       null,    // string | {fill,motion,sparkle,hue,invert,speed,color}
         title:         null,
         backdrop:      true,
         dismissable:   true,
@@ -247,6 +515,8 @@ function createMenu(config)
         // menu is visible and this item isn't setVisible(false). Useful
         // for live-counting labels, animated custom elements, etc.
         if (item.onUpdate) built.onUpdate = item.onUpdate;
+        if (item.fx) built.fx = item.fx;   // FX spec applied on show, torn down on hide
+        if (item.glow) built.el.classList.add('ljs-glow');   // pulsing accent highlight
         panel.appendChild(built.el);
         itemList.push(built);
         if (item.id) itemHandles[item.id] = built.handle;
@@ -257,6 +527,14 @@ function createMenu(config)
     }
 
     let visible = false;
+    // FX teardowns for the title + any item with `fx:`. Applied on show,
+    // reversed on hide so sparkle timers never run while a menu is hidden.
+    const fxTeardowns = [];
+    const applyFx = () => {
+        if (titleEl && cfg.titleFx) fxTeardowns.push(applyMenuFx(titleEl, cfg.titleFx));
+        for (const it of itemList) if (it.fx) fxTeardowns.push(applyMenuFx(it.el, it.fx));
+    };
+    const teardownFx = () => { while (fxTeardowns.length) fxTeardowns.pop()(); };
     const handle = {
         id: cfg.id,
         show()
@@ -265,6 +543,7 @@ function createMenu(config)
             visible = true;
             if (cfg.backdrop) backdrop.classList.add('visible');
             panel.classList.add('visible');
+            if (!fxTeardowns.length) applyFx();
             allMenus.push(handle);
             // Auto-select on show only when the user is actively in keyboard
             // or gamepad mode. Pointer mode opens with no selection so the
@@ -295,6 +574,7 @@ function createMenu(config)
             clearSelected();    // Clear outline when menu closes
             backdrop.classList.remove('visible');
             panel.classList.remove('visible');
+            teardownFx();
             const i = allMenus.indexOf(handle);
             if (i >= 0) allMenus.splice(i, 1);
             if (cfg.onHide) cfg.onHide(reason || 'dismiss');
@@ -310,6 +590,15 @@ function createMenu(config)
         // displays; a JS-driven path that sets el.style each frame stays
         // smooth (same pattern works fine for custom-item onUpdate).
         getTitleEl() { return titleEl; },
+        // Live-swap the title FX (e.g. the menu designer). Updates cfg so the
+        // new spec persists across show/hide, and re-applies immediately if
+        // the menu is currently visible.
+        setTitleFx(spec)
+        {
+            cfg.titleFx = spec;
+            if (visible) { teardownFx(); applyFx(); }
+        },
+        getTitleFx() { return cfg.titleFx; },
         destroy()
         {
             if (cfg.id && menusById[cfg.id] === handle) delete menusById[cfg.id];
@@ -373,8 +662,10 @@ function createTitleMenu(config)
         id:            'title',
         title:         '',
         subtitle:      '',
+        titleFx:       null,
         onPlay:        null,
         playLabel:     'PLAY',
+        playGlow:      false,    // pulse the PLAY button with an accent glow
         itemsBefore:   [],
         items:         [],
         revealOnClick: true,
@@ -414,13 +705,14 @@ function createTitleMenu(config)
         id:           cfg.id,
         title:        cfg.title,
         subtitle:     cfg.subtitle,
+        titleFx:      cfg.titleFx,
         dismissable:  false,
         onStart:      playFn,
         onShow,
         onHide:       cfg.onHide,
         items: [
             ...itemsBefore,
-            {type:'button', id:'play', label: cfg.playLabel, onClick: playFn},
+            {type:'button', id:'play', label: cfg.playLabel, onClick: playFn, glow: cfg.playGlow},
             ...cfg.items,
         ],
     });
@@ -562,22 +854,20 @@ function installDefaultToolbar(opts)
             id:   'fs',
             label: buildSvgIcon('fullscreen'),
             title: 'Toggle fullscreen',
-            onClick: toggleFullscreen,
+            onClick: _toolbarToggleFullscreen,
             hideOnTouch: true,
         });
     }
 
     items.push(...opts.extraItemsAfter);
 
-    // Library button (2×2 grid icon) — reopens the arcade's library drawer on
-    // mobile, where the launcher hides its own drawer toggle in-game. Only
-    // meaningful when
-    // (a) we're on a touch device and (b) we're embedded in the arcade iframe,
-    // so it's gated on both here and only revealed once the launcher answers
-    // the handshake below (see _arcadePanelHandshake). Standalone games and
-    // games iframed on some other site never see it.
-    const _wantPanelButton = opts.panelButton && isTouchDevice
-        && window.self !== window.top;
+    // Library button (2×2 grid icon) — toggles the arcade's library sidebar
+    // (a slide-in drawer on touch, the persistent side panel on desktop). Shown
+    // on ALL devices, but only when we're embedded in the arcade iframe — so it's
+    // gated on that here and only revealed once the launcher answers the
+    // handshake below (see _arcadeHandshake). Standalone games and games iframed
+    // on some other site never see it.
+    const _wantPanelButton = opts.panelButton && window.self !== window.top;
     if (_wantPanelButton)
     {
         items.push({
@@ -585,7 +875,7 @@ function installDefaultToolbar(opts)
             id:    'panel',
             label: buildSvgIcon('grid'),   // filled 2×2 squares, sized like its neighbors
             title: 'Library',
-            onClick: _arcadeOpenPanel,
+            onClick: _arcadeTogglePanel,
         });
     }
 
@@ -625,16 +915,20 @@ function installDefaultToolbar(opts)
 
     // The Library button starts hidden and only appears once the launcher
     // answers our handshake — guarantees it never shows unless a real arcade
-    // is listening (and ready to act on the open-panel message).
+    // is listening (and ready to act on the toggle-panel message).
     if (_wantPanelButton)
     {
         const panelItem = toolbar.getItem('panel');
         if (panelItem)
         {
             panelItem.setVisible(false);
-            _arcadePanelHandshake(() => panelItem.setVisible(true));
+            _arcadeHandshake(() => panelItem.setVisible(true));
         }
     }
+    // Even without a Library button, start the handshake when embedded so the
+    // fullscreen button learns the launcher's page fullscreen state.
+    else if (opts.fullscreen && window.self !== window.top)
+        _arcadeHandshake();
 
     // Keep handle to opts so refreshDefaultToolbar can re-evaluate later
     // when the game's underlying state (driving grayedWhen) changes.
@@ -678,34 +972,69 @@ function refreshDefaultToolbar(id)
     }
 }
 
-// Arcade-launcher handshake for the Library button. The game posts a
-// 'hello' to its parent frame and reveals the button only when the launcher
-// replies 'here'. Game-initiated (rather than launcher-initiated) so there's
-// no load-timing race: whenever a toolbar inits it asks, and the launcher
-// answers immediately. The confirmation is cached so a second toolbar (or a
-// re-init) reveals its button right away.
-let _arcadePanelConfirmed = false;
-// Ask the launcher to open its library drawer. No-op (silently caught) when
+// Arcade-launcher handshake. The game posts a 'hello' to its parent frame; the
+// launcher replies 'here' (and includes its current page-level fullscreen
+// state). Game-initiated (rather than launcher-initiated) so there's no
+// load-timing race: whenever a toolbar inits it asks, and the launcher answers
+// immediately. Results are cached so later toolbars/buttons react right away.
+//
+// Two things ride on this:
+//   • the Library button reveals itself only once a real launcher answers.
+//   • the fullscreen button tracks the launcher's PAGE fullscreen state so it
+//     can exit a launcher-owned fullscreen (started from the arcade's own
+//     page-level button) instead of just covering it with the game canvas.
+let _arcadeConfirmed = false;
+let _arcadeParentFullscreen = false;
+const _arcadeConfirmCbs = [];
+let _arcadeHandshakeStarted = false;
+// Ask the launcher to toggle its library sidebar. No-op (silently caught) when
 // there's no parent or it isn't the arcade — callers gate on the handshake.
-function _arcadeOpenPanel()
+function _arcadeTogglePanel()
 {
-    try { window.parent.postMessage({ type: 'littlejsArcadeOpenPanel' }, '*'); }
+    try { window.parent.postMessage({ type: 'littlejsArcadeTogglePanel' }, '*'); }
     catch (e) {}
 }
-function _arcadePanelHandshake(onConfirm)
+// Ask the launcher to exit its page-level fullscreen.
+function _arcadeExitFullscreen()
 {
-    if (_arcadePanelConfirmed) { onConfirm(); return; }
+    try { window.parent.postMessage({ type: 'littlejsArcadeExitFullscreen' }, '*'); }
+    catch (e) {}
+}
+// Start the handshake once; run onConfirm now if already confirmed, else queue it.
+function _arcadeHandshake(onConfirm)
+{
+    if (onConfirm)
+    {
+        if (_arcadeConfirmed) onConfirm();
+        else _arcadeConfirmCbs.push(onConfirm);
+    }
+    if (_arcadeHandshakeStarted) return;
+    _arcadeHandshakeStarted = true;
     window.addEventListener('message', e =>
     {
         const d = e.data;
-        if (d && d.type === 'littlejsArcadeHere')
+        if (!d || typeof d !== 'object') return;
+        if (d.type === 'littlejsArcadeHere')
         {
-            _arcadePanelConfirmed = true;
-            onConfirm();
+            _arcadeConfirmed = true;
+            if (typeof d.fullscreen === 'boolean') _arcadeParentFullscreen = d.fullscreen;
+            while (_arcadeConfirmCbs.length) _arcadeConfirmCbs.shift()();
         }
+        else if (d.type === 'littlejsArcadeFullscreenState')
+            _arcadeParentFullscreen = !!d.fullscreen;
     });
     try { window.parent.postMessage({ type: 'littlejsArcadeHello' }, '*'); }
     catch (e) {}
+}
+// Toolbar fullscreen button. Inside the arcade, when the launcher's PAGE is
+// fullscreen (started from the arcade's own fullscreen button), ask the launcher
+// to exit — so this button works like Escape instead of just stacking the game
+// canvas on top. Otherwise toggle the game's own fullscreen as usual (standalone
+// games are unaffected — _arcadeParentFullscreen stays false there).
+function _toolbarToggleFullscreen()
+{
+    if (_arcadeParentFullscreen) { _arcadeExitFullscreen(); return; }
+    toggleFullscreen();
 }
 
 // ============================================================================
@@ -1232,6 +1561,7 @@ function showAlertDialog(opts)
     const dialog = createMenu({
         id,
         title:         opts.title || null,
+        titleFx:       opts.titleFx,
         dismissable:   true,         // BACK / Esc / B / backdrop all close it
         initialItemId: 'ok',
         onHide:        popMenu,
@@ -1279,11 +1609,18 @@ function showGameOverDialog(opts)
         message = lines.join('\n');
     }
 
+    // Default heading FX: gold shimmer on a win, red glow on a loss.
+    // Caller can override with opts.titleFx, or disable with titleFx:null.
+    let titleFx = opts.titleFx;
+    if (titleFx === undefined)
+        titleFx = won ? { fill:'gold' } : { fill:'neon', color:'#e23' };
+
     showAlertDialog({
-        title: won ? 'YOU WIN!' : 'GAME OVER',
-        icon:  won ? '🏆' : '💥',
+        title:   won ? 'YOU WIN!' : 'GAME OVER',
+        icon:    won ? '🏆' : '💥',
+        titleFx,
         message,
-        onOk: onContinue,
+        onOk:    onContinue,
     });
 }
 
@@ -1338,6 +1675,7 @@ function showConfirmDialog(opts)
     const dialog = createMenu({
         id,
         title:         opts.title || null,
+        titleFx:       opts.titleFx,
         dismissable:   false,
         initialItemId: 'no',
         onHide:        popMenu,
@@ -1367,8 +1705,66 @@ const menuSounds = { select: null, activate: null };
 function setMenuSounds(sounds)
 {
     if (!sounds) { menuSounds.select = menuSounds.activate = null; return; }
-    menuSounds.select   = sounds.select   || null;
-    menuSounds.activate = sounds.activate || null;
+    menuSounds.select   = _menuSoundGuard(sounds.select   || null);
+    menuSounds.activate = _menuSoundGuard(sounds.activate || null);
+}
+
+// --- Silent attract -------------------------------------------------------
+// A game whose title screen is a live "attract" demo (auto-plays behind the
+// menu, like Pong) calls setSilentAttract(true) once in gameInit. While that
+// game sits at its title (isPlaying() === false) ALL game audio is force-muted,
+// yet the menu's own select/activate sounds still play — they run through
+// _menuSoundGuard, which lifts the mute for the duration of the call. So menus
+// stay clicky, the demo stays silent, and a real game (isPlaying() true) is at
+// full volume. soundEnable is left alone, so the audio context still resumes.
+let _silentAttract = false;   // did the game opt in?
+let _demoSilent    = false;   // are we muting game audio right now?
+let _inMenuSound   = false;   // true only while a menu sound is being played
+
+// Demo (attract) mode: the game was loaded with `#demo` in the URL. The arcade
+// launcher's hero cabinet uses this to run a game menu-less as a live attract.
+// initMenuSystem() auto-hides all menu chrome (#littlejs-menus) when this is set,
+// so the launcher no longer has to inject hide-CSS into the iframe — `#demo` is
+// self-describing. Hiding is purely visual: the menu stays tracked in allMenus,
+// so isMenuVisible() is unchanged and installAutoPause(() => isPlaying()) keeps
+// `paused` false at the title (isPlaying() is false there), letting the attract
+// run live behind nothing. Games can also read isDemoMode() to branch behavior
+// (e.g. board games run AI-vs-AI only in demo, a static board otherwise).
+const _demoMode = /demo/.test(location.hash);
+function isDemoMode() { return _demoMode; }
+
+// Patch Sound.prototype.play once (per document) so we can force game sounds to
+// volume 0 during a silent attract, without disabling the engine's audio.
+function _installSoundMute()
+{
+    if (typeof Sound !== 'function' || Sound.prototype._ljsDemoMute) return;
+    Sound.prototype._ljsDemoMute = true;
+    const _origPlay = Sound.prototype.play;
+    Sound.prototype.play = function(...args)
+    {
+        if (_demoSilent && !_inMenuSound) args[1] = 0;   // args[1] is volume
+        return _origPlay.apply(this, args);
+    };
+}
+
+// Wrap a menu-sound callback so invoking it briefly lifts the demo mute.
+function _menuSoundGuard(fn)
+{
+    if (!fn) return null;
+    return function(...a)
+    {
+        const prev = _inMenuSound; _inMenuSound = true;
+        try { return fn.apply(this, a); }
+        finally { _inMenuSound = prev; }
+    };
+}
+
+// Opt a game in/out of silent-attract muting (call once in gameInit).
+function setSilentAttract(on = true)
+{
+    _silentAttract = !!on;
+    _installSoundMute();
+    _demoSilent = _demoMode || (_silentAttract && !_isPlaying);
 }
 
 // ============================================================================
@@ -1411,6 +1807,9 @@ function isPlaying() { return _isPlaying; }
 function setPlaying(p)
 {
     _isPlaying = !!p;
+    // Silent-attract: mute game audio whenever we're not actually playing — and
+    // for the ENTIRE cabinet demo (#demo) even with isPlaying() true.
+    _demoSilent = _demoMode || (_silentAttract && !_isPlaying);
     // Fire registered listeners (games hook these for game-state-driven
     // UI toggles, e.g. hide undo / new-game while at title).
     for (const fn of _playingListeners) fn(_isPlaying);
@@ -1719,15 +2118,15 @@ function ensureOrientationOverlay()
     // who launched an orientation-locked game on a device they can't/won't
     // rotate. The overlay covers the toolbar (so its Library button is hidden),
     // hence this dedicated copy. Only shown inside the launcher: starts hidden
-    // and is revealed by the same handshake, and reuses the open-panel message.
+    // and is revealed by the same handshake, and reuses the toggle-panel message.
     const panelBtn = document.createElement('button');
     panelBtn.className = 'ljs-orient-panel-btn';
     panelBtn.title = 'Library';
     panelBtn.appendChild(buildGridIcon());
     panelBtn.style.display = 'none';
-    panelBtn.addEventListener('click', () => { _arcadeOpenPanel(); panelBtn.blur(); });
+    panelBtn.addEventListener('click', () => { _arcadeTogglePanel(); panelBtn.blur(); });
     el.appendChild(panelBtn);
-    _arcadePanelHandshake(() => { panelBtn.style.display = ''; });
+    _arcadeHandshake(() => { panelBtn.style.display = ''; });
 
     menuSystemRoot.appendChild(el);
     orientationOverlay = el;
@@ -1808,6 +2207,7 @@ function injectStyles()
     --menu-border-width: 2px;
     --menu-title-size:   1.75em;
     --menu-item-size:    1.125em;
+    --menu-anim-time:    0.18s;   /* menu entrance fade/scale; setMenuAnimations(false) -> 0s */
 
     /* button fill */
     --menu-item-bg:       rgba(255, 255, 255, 0.06);
@@ -1854,6 +2254,8 @@ function injectStyles()
     background: var(--menu-backdrop);
     display: none;
 }
+/* Backdrop appears instantly (no fade) — fading it lags a frame behind the
+   panel and you glimpse the undimmed scene. Only the panel animates in. */
 .ljs-menu-backdrop.visible { display: block; }
 .ljs-menu-panel {
     position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -1870,14 +2272,21 @@ function injectStyles()
     display: none; flex-direction: column; gap: var(--menu-item-gap);
     box-sizing: border-box;
 }
-.ljs-menu-panel.visible { display: flex; }
+.ljs-menu-panel.visible { display: flex; animation: ljs-menu-in var(--menu-anim-time, .18s) ease-out; }
+/* Entrance: fade + slight scale-up. The transform keeps the -50%,-50%
+   centering so the panel grows from its center. setMenuAnimations(false)
+   sets --menu-anim-time to 0s; prefers-reduced-motion disables it too. */
+@keyframes ljs-menu-in {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(.94); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 .ljs-menu-title {
     font-size: var(--menu-title-size); font-weight: bold; text-align: center;
     color: var(--menu-accent); margin-bottom: 0.5em;
 }
 .ljs-menu-subtitle {
     font-size: 0.875em; font-weight: bold; text-align: center;
-    letter-spacing: 0.15em; color: var(--menu-fg); opacity: 0.85;
+    letter-spacing: 0.15em; color: var(--menu-subtitle-color, var(--menu-fg)); opacity: 0.85;
     /* Pull tight under the title (cancels the title's margin-bottom plus
        the panel's flex gap). Tune via your own CSS override per menu. */
     margin-top: -1.5em; margin-bottom: -.5em;
@@ -2024,8 +2433,8 @@ button.ljs-grid-cell { cursor: pointer; }
    bar. Landscape hides the bar, and desktop/Safari never get the class. */
 @media (orientation: portrait) {
     html.ios-topbar .ljs-menu-toolbar.anchor-top-left,
-    html.ios-topbar .ljs-menu-toolbar.anchor-top-right { top: 48px; }
-    html.ios-topbar .ljs-orient-panel-btn { top: 48px; }
+    html.ios-topbar .ljs-menu-toolbar.anchor-top-right { top: 30px; }
+    html.ios-topbar .ljs-orient-panel-btn { top: 30px; }
 }
 .ljs-menu-toolbar button {
     /* font-size stays at 1em so the em-based width/height resolve against
@@ -2135,6 +2544,117 @@ button.ljs-grid-cell { cursor: pointer; }
     0%, 100% { transform: rotate(-12deg); }
     50%      { transform: rotate(78deg); }
 }
+
+/* ============================================================
+   Title / heading FX (titleFx) — composable juice effects.
+   Each effect class lives on ONE channel; durations divide by
+   --fx-speed (default 1), tintable fills read --fx-color
+   (default per-effect) so games recolor without new CSS.
+   ============================================================ */
+
+/* FILL channel ------------------------------------------------ */
+.fx-neon{ color:#fff; animation:ljsfx-neon calc(1.8s / var(--fx-speed,1)) ease-in-out infinite; }
+@keyframes ljsfx-neon{
+    0%,100%{ text-shadow:0 0 4px var(--fx-color,#6cf),0 0 10px var(--fx-color,#6cf),0 0 20px var(--fx-color,#09f),0 0 40px var(--fx-color,#06f); }
+    50%{ text-shadow:0 0 6px var(--fx-color,#6cf),0 0 18px var(--fx-color,#6cf),0 0 36px var(--fx-color,#09f),0 0 72px var(--fx-color,#06f); }
+}
+.fx-rainbow{
+    background:linear-gradient(90deg,#f0f,#0ff,#0f0,#ff0,#f80,#f0f); background-size:300% 100%;
+    -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent;
+    animation:ljsfx-hue calc(4s / var(--fx-speed,1)) linear infinite;
+}
+@keyframes ljsfx-hue{ from{background-position:0 0;} to{background-position:300% 0;} }
+.fx-shine{
+    color:var(--fx-color,#a7b5c8);
+    background:linear-gradient(110deg,var(--fx-color,#a7b5c8) 0%,var(--fx-color,#a7b5c8) 40%,#fff 50%,var(--fx-color,#a7b5c8) 60%,var(--fx-color,#a7b5c8) 100%);
+    background-size:250% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    animation:ljsfx-shine calc(2.6s / var(--fx-speed,1)) linear infinite;
+}
+@keyframes ljsfx-shine{ from{background-position:140% 0;} to{background-position:-40% 0;} }
+.fx-fire{
+    background:linear-gradient(0deg,#ff3 0%,#f80 40%,#e22 80%,#a00 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 6px #f60); animation:ljsfx-fire calc(.12s / var(--fx-speed,1)) steps(2) infinite;
+}
+@keyframes ljsfx-fire{ 0%{filter:drop-shadow(0 0 6px #f60);} 100%{filter:drop-shadow(0 -2px 10px #f93);} }
+.fx-gold{
+    background:linear-gradient(100deg,#a67c00 0%,#fde98c 25%,#fff7d6 38%,#fde98c 50%,#a67c00 75%,#fde98c 100%);
+    background-size:250% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent;
+    animation:ljsfx-gold calc(3.2s / var(--fx-speed,1)) linear infinite;
+}
+@keyframes ljsfx-gold{ from{background-position:0 0;} to{background-position:250% 0;} }
+.fx-outline{
+    color:transparent; -webkit-text-fill-color:transparent;
+    -webkit-text-stroke:2px var(--fx-color,var(--menu-accent,#6cf));
+    text-shadow:0 0 12px var(--fx-color,rgba(102,204,255,.4));
+}
+.fx-hardshadow{ color:var(--fx-color,#fff); text-shadow:4px 4px 0 var(--fx-color2,#444),8px 8px 0 rgba(0,0,0,.35); }
+.fx-3d{
+    color:#ffd34d;
+    text-shadow:1px 1px 0 #b9860b,2px 2px 0 #b9860b,3px 3px 0 #936c09,4px 4px 0 #6e5107,5px 5px 0 #4c3805,6px 6px 8px rgba(0,0,0,.6);
+}
+.fx-glitch{ color:var(--fx-color,#fff); animation:ljsfx-glitch calc(2.4s / var(--fx-speed,1)) steps(2) infinite; }
+@keyframes ljsfx-glitch{
+    0%,92%,100%{ text-shadow:1px 0 #f0f,-1px 0 #0ff; transform:translate(0); }
+    93%{ text-shadow:3px 0 #f0f,-3px 0 #0ff; transform:translate(-2px,1px); }
+    95%{ text-shadow:-4px 0 #f0f,4px 0 #0ff; transform:translate(2px,-1px); }
+    97%{ text-shadow:2px 0 #f0f,-2px 0 #0ff; transform:translate(-1px,0); }
+}
+/* CRT: scanlines modulate the TEXT's own alpha via a mask (cuts into the
+   glyphs over any background) instead of laying black bars on top. */
+.fx-crt{ color:#7fffb0; text-shadow:0 0 6px #2f8;
+    -webkit-mask:repeating-linear-gradient(0deg,#000 0 2px,rgba(0,0,0,.3) 2px 4px);
+    mask:repeating-linear-gradient(0deg,#000 0 2px,rgba(0,0,0,.3) 2px 4px);
+    animation:ljsfx-crt calc(3s / var(--fx-speed,1)) steps(40) infinite; }
+@keyframes ljsfx-crt{ 0%,97%,100%{opacity:1;} 98%{opacity:.7;} 99%{opacity:.95;} }
+
+/* MOTION channel (outer wrapper, animates transform) ---------- */
+.m-float{ display:inline-block; animation:ljsfx-float calc(3s / var(--fx-speed,1)) ease-in-out infinite; }
+@keyframes ljsfx-float{ 0%,100%{transform:translateY(-5px);} 50%{transform:translateY(5px);} }
+.m-heartbeat{ display:inline-block; animation:ljsfx-beat calc(1.3s / var(--fx-speed,1)) ease-in-out infinite; }
+@keyframes ljsfx-beat{ 0%,100%{transform:scale(1);} 15%{transform:scale(1.12);} 30%{transform:scale(1);} }
+.m-jelly{ display:inline-block; animation:ljsfx-jelly calc(1.6s / var(--fx-speed,1)) ease-in-out infinite; }
+@keyframes ljsfx-jelly{ 0%,100%{transform:scale(1,1);} 25%{transform:scale(1.1,.85);} 50%{transform:scale(.9,1.1);} 75%{transform:scale(1.05,.95);} }
+/* wave is per-letter, applied to the fill element's letter spans */
+.fx-wave span{ display:inline-block; animation:ljsfx-wave calc(1.4s / var(--fx-speed,1)) ease-in-out infinite; }
+@keyframes ljsfx-wave{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-12px);} }
+
+/* OVERLAY channel -------------------------------------------- */
+/* Shrink the sparkle host to its text so particles only cover the title
+   glyphs, not the full panel width. align-self centers it in the flex menu
+   column; the fit-content + margin-inline:auto pair covers non-flex hosts. */
+.ov-sparkle{ position:relative; width:-moz-fit-content; width:fit-content; max-width:100%; margin-inline:auto; align-self:center; }
+/* .9s is intentionally fixed (not --fx-speed scaled) — it is coupled to the
+   JS particle lifetime in applyMenuFx (spawn/remove timers). */
+.ljs-fx-spark{ position:absolute; width:6px; height:6px; pointer-events:none;
+    background:radial-gradient(circle,#fff 0%,#ffd34d 50%,transparent 70%); border-radius:50%;
+    animation:ljsfx-spark .9s ease-out forwards; }
+@keyframes ljsfx-spark{
+    0%{transform:scale(0) rotate(0);opacity:0;}
+    30%{transform:scale(1.4) rotate(90deg);opacity:1;}
+    100%{transform:scale(0) rotate(180deg) translateY(-18px);opacity:0;}
+}
+
+/* reduced motion --------------------------------------------- */
+/* Primary-button glow — opt-in via item glow:true (or createTitleMenu
+   playGlow:true on PLAY). A gentle accent pulse to draw the eye. */
+@keyframes ljs-menu-glow-pulse {
+    0%,100% { box-shadow: 0 0 2px transparent; }
+    50%     { box-shadow: 0 0 14px var(--menu-accent); }
+}
+button.ljs-menu-item.ljs-glow {
+    animation: ljs-menu-glow-pulse 1.6s ease-in-out infinite;
+    border-color: var(--menu-accent);
+}
+
+@media (prefers-reduced-motion: reduce){
+    .fx-neon,.fx-rainbow,.fx-shine,.fx-fire,.fx-gold,.fx-glitch,.fx-crt,
+    .m-float,.m-heartbeat,.m-jelly,.fx-wave span{ animation:none !important; }
+    .m-float,.m-heartbeat,.m-jelly,.fx-wave span{ transform:none !important; }
+    .ljs-fx-spark{ display:none !important; }
+    .ljs-menu-panel.visible{ animation:none !important; }
+    button.ljs-menu-item.ljs-glow{ animation:none !important; }
+}
 `;
     const style = document.createElement('style');
     style.textContent = css;
@@ -2168,12 +2688,12 @@ function initMenuSystem()
         if (!menuSounds.select)
         {
             const _defaultSelect = new Sound([.4,,910,,,.02,2,.07,-5,-33,,,,,,,,.25]);
-            menuSounds.select = () => _defaultSelect.play();
+            menuSounds.select = _menuSoundGuard(() => _defaultSelect.play());
         }
         if (!menuSounds.activate)
         {
             const _defaultActivate = new Sound([.6,,30,.01,,.02,1,3.4,94,,,,,,,,,.67]);
-            menuSounds.activate = () => _defaultActivate.play();
+            menuSounds.activate = _menuSoundGuard(() => _defaultActivate.play());
         }
     }
 
@@ -2189,6 +2709,20 @@ function initMenuSystem()
     menuSystemRoot = document.createElement('div');
     menuSystemRoot.id = 'littlejs-menus';
     document.body.appendChild(menuSystemRoot);
+
+    // In demo/attract mode (#demo — e.g. the launcher's hero cabinet), hide all
+    // menu chrome so the game runs menu-less behind nothing. setProperty with
+    // 'important' beats any game CSS, matching what the launcher used to inject.
+    // This is visual only — allMenus tracking is untouched, so the demo still
+    // updates live (see _demoMode note above).
+    if (_demoMode)
+    {
+        menuSystemRoot.style.setProperty('display', 'none', 'important');
+        // The cabinet demo runs SILENT — mute all game audio for the whole demo
+        // (even with isPlaying() true) so no startup/loop sfx sneak through.
+        _installSoundMute();
+        _demoSilent = true;
+    }
 
     // Stop pointer events from bubbling to LittleJS's document-level handlers,
     // which would otherwise preventDefault() and break native widget behavior

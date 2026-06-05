@@ -123,10 +123,12 @@ function drawCard(pos, rank, suit, options = {})
     const size    = options.size || CARD_SIZE;
     const angle   = options.angle || 0;
     const tint    = options.tint;
+    const squashX = options.squashX == undefined ? 1 : options.squashX;  // horizontal flip squeeze (1 = none)
     const scale   = size.x / CARD_SIZE.x;
     const bgSize  = size.scale(_CARD_BG_SCALE);   // compensates for paint inset
+    const sqX     = v => vec2(v.x * squashX, v.y);  // squeeze a size's width only
 
-    drawTile(pos, bgSize, _cardSprites.bg, undefined, angle);
+    drawTile(pos, sqX(bgSize), _cardSprites.bg, undefined, angle);
 
     const color    = (suit % 2 === 0) ? _cardRedInk : _cardBlackInk;
     const rankTile = _cardSprites.ranks[rank];
@@ -141,8 +143,8 @@ function drawCard(pos, rank, suit, options = {})
     // (used to flip the bottom-right glyphs 180°).
     const placeAt = (dx, dy, glyphSize, tile, extraAngle = 0) =>
     {
-        const local = vec2(dx, dy).scale(scale).rotate(angle);
-        drawTile(pos.add(local), glyphSize, tile, color, angle + extraAngle);
+        const local = vec2(dx * squashX, dy).scale(scale).rotate(angle);
+        drawTile(pos.add(local), sqX(glyphSize), tile, color, angle + extraAngle);
     };
 
     // Top-left corner: rank above, suit below.
@@ -151,11 +153,11 @@ function drawCard(pos, rank, suit, options = {})
 
     // Main face. Ace = big suit; J/Q/K = big rank glyph; 2-10 = pip pattern.
     if (rank === 0)
-        drawTile(pos, vec2(4.2 * scale), suitTile, color, angle);
+        drawTile(pos, sqX(vec2(4.2 * scale)), suitTile, color, angle);
     else if (rank >= 10)
-        drawTile(pos, vec2(4.6 * scale), rankTile, color, angle);
+        drawTile(pos, sqX(vec2(4.6 * scale)), rankTile, color, angle);
     else
-        _drawPips(pos, rank + 1, suitTile, color, angle, scale);
+        _drawPips(pos, rank + 1, suitTile, color, angle, scale, squashX);
 
     // Bottom-right corner, rotated 180° so glyphs read upside-down.
     placeAt( halfX - _CARD_CORNER_RANK_OFFSET.x, -halfY + _CARD_CORNER_RANK_OFFSET.y, crSize, rankTile, PI);
@@ -163,19 +165,21 @@ function drawCard(pos, rank, suit, options = {})
 
     // Highlight veil last so it sits over the glyphs too. Tint tile has no
     // dark edge, so the bg's border isn't re-tinted.
-    if (tint) drawTile(pos, bgSize, _cardSprites.tint, tint, angle);
+    if (tint) drawTile(pos, sqX(bgSize), _cardSprites.tint, tint, angle);
 }
 
 // Draws a face-down card. options: { size, angle, tint }
 function drawCardBack(pos, options = {})
 {
     ASSERT(_cardSprites, 'initCardAtlas() must be called before drawCardBack()');
-    const size   = options.size || CARD_SIZE;
-    const angle  = options.angle || 0;
-    const tint   = options.tint;
-    const bgSize = size.scale(_CARD_BG_SCALE);
-    drawTile(pos, bgSize, _cardSprites.back, undefined, angle);
-    if (tint) drawTile(pos, bgSize, _cardSprites.tint, tint, angle);
+    const size    = options.size || CARD_SIZE;
+    const angle   = options.angle || 0;
+    const tint    = options.tint;
+    const squashX = options.squashX == undefined ? 1 : options.squashX;
+    const bgSize  = size.scale(_CARD_BG_SCALE);
+    const sqX     = v => vec2(v.x * squashX, v.y);
+    drawTile(pos, sqX(bgSize), _cardSprites.back, undefined, angle);
+    if (tint) drawTile(pos, sqX(bgSize), _cardSprites.tint, tint, angle);
 }
 
 // Draws a solid card-shaped silhouette in `color`. Use for shadows, empty-
@@ -373,7 +377,7 @@ function _cardRoundedRect(ctx, x, y, w, h, r)
 // normalized (+/-1.x, +/-1.y) grid, then scales to fit between the
 // corner glyphs of a 6x8.5 card. `scale` uniformly resizes spacing
 // and pip size; `angle` rotates the layout around `center`.
-function _drawPips(center, v, suitTile, color, angle, scale)
+function _drawPips(center, v, suitTile, color, angle, scale, squashX = 1)
 {
     const spreadX = _CARD_PIP_SPREAD_X * scale;
     const spreadY = _CARD_PIP_SPREAD_Y * scale;
@@ -407,8 +411,8 @@ function _drawPips(center, v, suitTile, color, angle, scale)
             py = (i % 4) / 3 * 2 - 1;
             if (i > 7) { px = 0; py = v === 9 ? 0 : (i - 7 - 1.5) * 1.3; }
         }
-        const offset = vec2(px * spreadX, py * spreadY).rotate(angle);
-        drawTile(center.add(offset), pipSize, suitTile, color, angle);
+        const offset = vec2(px * spreadX * squashX, py * spreadY).rotate(angle);
+        drawTile(center.add(offset), vec2(pipSize.x * squashX, pipSize.y), suitTile, color, angle);
     }
 }
 
@@ -442,12 +446,50 @@ class Card
         this.tweenFrom     = null;   // null = no active tween
         this.tweenTimer    = new Timer();
         this.tweenDuration = 0.2;
+        this.tweenDelay    = 0;      // optional wait before the flight starts (staggered deals)
+        this.tweenSpan     = 0.2;    // duration of the active flight (set by startTween)
+        // Flip animation: squeeze width to ~0, swap the face at the thin point,
+        // then expand back. flipFrom is the face shown during the first half.
+        this.flipTimer     = new Timer();
+        this.flipFrom      = faceUp;
+        this.flipDuration  = 0.18;
+        this.flipDelay     = 0;      // optional wait before the squeeze (deal-on-land)
+        this.flipSpan      = 0.18;   // duration of the squeeze (set by flipTo)
     }
-    startTween(fromPos)
+    // Fly from `fromPos` to the card's current pos. `delay` (seconds) holds the
+    // card at the source before it sets off — used to stagger a deal. `duration`
+    // is the flight time (defaults to tweenDuration).
+    startTween(fromPos, delay = 0, duration = this.tweenDuration)
     {
-        this.tweenFrom = fromPos.copy();
-        this.tweenTimer.set(this.tweenDuration);
+        this.tweenFrom  = fromPos.copy();
+        this.tweenDelay = delay;
+        this.tweenSpan  = duration;
+        this.tweenTimer.set(delay + duration);
     }
+    // Begin a flip to `faceUp`. The old face shows for the first half of the
+    // animation, the new face for the second; flipScaleX() drives the squeeze.
+    // Toggling face is normally instant (card.faceUp = x) — call this instead to
+    // get the animated flip.
+    flipTo(faceUp, duration = this.flipDuration, delay = 0)
+    {
+        if (this.faceUp === faceUp && !this.isFlipping()) return;
+        this.flipFrom  = this.faceUp;
+        this.faceUp    = faceUp;
+        this.flipDelay = delay;
+        this.flipSpan  = duration;
+        this.flipTimer.set(delay + duration);
+    }
+    isFlipping() { return this.flipTimer.active(); }
+    // Progress through the squeeze (0..1), or -1 while still in the pre-flip delay.
+    _flipProgress()
+    {
+        const elapsed = this.flipTimer.getPercent() * (this.flipDelay + this.flipSpan);
+        return elapsed < this.flipDelay ? -1 : (elapsed - this.flipDelay) / this.flipSpan;
+    }
+    // Horizontal scale across the flip: 1 (waiting / edges) -> ~0 (mid) -> 1.
+    flipScaleX() { const p = this._flipProgress(); return p < 0 ? 1 : abs(Math.cos(p * PI)); }
+    // Which face to show right now (old until the squeeze midpoint, new after).
+    flipFaceUp() { const p = this._flipProgress(); return p < .5 ? this.flipFrom : this.faceUp; }
     // True only while actively interpolating; goes false the frame the timer
     // elapses (updateCardTweens clears tweenFrom shortly after).
     isTweening()
@@ -460,7 +502,12 @@ class Card
     {
         if (!this.tweenFrom) return this.pos;
         if (this.tweenTimer.elapsed()) return this.pos;
-        return this.tweenFrom.lerp(this.pos, smoothStep(this.tweenTimer.getPercent()));
+        // Honor an optional start delay: sit at the source until it passes, then
+        // fly to the destination over tweenSpan (staggered deal support).
+        const elapsed = this.tweenTimer.getPercent() * (this.tweenDelay + this.tweenSpan);
+        if (elapsed <= this.tweenDelay) return this.tweenFrom;
+        const p = (elapsed - this.tweenDelay) / this.tweenSpan;
+        return this.tweenFrom.lerp(this.pos, smoothStep(p));
     }
 }
 
@@ -606,6 +653,58 @@ function updateCardTweens(stacks)
                 c.tweenFrom = null;
 }
 
+// Animate a freshly-built layout dealing out from `fromPos` — a "deck" in, e.g.,
+// the top-left. Every card NOT already sitting at fromPos flies from there to
+// its final spot, staggered so they pop off one after another in a row-major
+// deal rhythm. Purely cosmetic: the cards are already logically placed, so
+// play/solve logic is unaffected. Cards already at fromPos (a face-down stock)
+// stay put and read as the deck. Returns the total animation length (seconds)
+// so a caller can wait for it (e.g. an attract player before it starts moving).
+//   opts: { perCard (stagger between cards, s), duration (per-card flight, s),
+//           flip (deal each card face-down and flip it face-up DURING its
+//                 flight — edge-on around mid-air, face-up as it lands) }
+function dealCards(stacks, fromPos, { perCard = 0.025, duration = 0.25, flip = false } = {})
+{
+    let maxLen = 0;
+    for (const s of stacks) maxLen = max(maxLen, s.cards.length);
+    let i = 0;   // counts only the moving cards — drives the stagger
+    // Deal order: lowest stack index first (index 0 = the back / top card of
+    // each fan), stacking DOWN to the front-most card. This is the natural deal —
+    // each new card lands below and in front of the previous one.
+    for (let row = 0; row < maxLen; ++row)
+        for (const s of stacks)
+        {
+            const c = s.cards[row];
+            if (!c || c.pos.distance(fromPos) < .01) continue;   // empty slot or already in the deck
+            const delay = i * perCard;
+            c.startTween(fromPos, delay, duration);
+            if (flip)
+            {
+                const faceUp = c.faceUp;     // intended final face
+                c.faceUp = false;            // leave the deck face-down...
+                c.flipTo(faceUp, duration, delay);   // ...flipping over the whole flight
+            }
+            ++i;
+        }
+    return i ? (i - 1) * perCard + duration : 0;
+}
+
+// Every currently-tweening card across `stacks`, ordered for drawing so a
+// staggered deal peels off the TOP of the deck: cards with the LARGEST start
+// delay first (they sit lowest, still waiting), the next-to-fly card last (on
+// top). Draw these after the settled cards in your render. For ordinary moves
+// (no deal delay) the order is unchanged, so this is safe to use as the single
+// tweening-pass iterator.
+function tweeningCardsInDealOrder(stacks)
+{
+    const out = [];
+    for (const s of stacks)
+        for (const c of s.cards)
+            if (c.isTweening()) out.push(c);
+    out.sort((a, b) => b.tweenDelay - a.tweenDelay);
+    return out;
+}
+
 // Undo/redo + autosave for a card game. The game supplies `serialize()`
 // (current state -> plain object) and `deserialize(snap)` (apply a snapshot).
 // Snapshots persist through menus.js saveData under `saveKey` when that helper
@@ -650,5 +749,88 @@ class CardHistory
         const snap = this.redo.pop();
         this.undo.push(snap);
         this.deserialize(snap);
+    }
+}
+
+// =============================================================================
+// CardDemoPlayer — drives a self-playing "attract" demo for a solitaire game.
+// The host supplies a few callbacks; this harness owns the pacing and the
+// solve -> deal -> play -> pause loop, so multiple card games can share it
+// (FreeCell now, Klondike later). It treats moves as opaque tokens.
+//
+//   planStep(budget)  Advance the host's time-sliced solver by up to `budget`
+//                     work units. Return a non-empty move list once a SOLVABLE
+//                     deal is ready, or null while still searching. The host
+//                     silently discards unsolvable deals and reshuffles, so the
+//                     viewer only ever sees deals that win — no on-screen
+//                     give-ups, and the search never blocks a frame.
+//   deal()            Build the live board for the deal planStep just solved
+//                     (the returned move list is replayed against it).
+//   applyMove(move)   Execute one planned move on the live board, animated.
+//
+// Usage:
+//   const demo = new CardDemoPlayer({ planStep, deal, applyMove });
+//   function gameUpdate(){ if (isDemoMode()){ demo.update(); return; } ... }
+//
+// Options: moveDelay (s between moves, .35), dealPause (s to admire a finished
+// game, 1.4), solveBudget (solver work units per frame, 400), startDelay (s
+// after dealing before the first move, .5).
+// =============================================================================
+class CardDemoPlayer
+{
+    constructor({ planStep, deal, applyMove,
+        moveDelay = .35, dealPause = 1.4, solveBudget = 400, startDelay = .5 })
+    {
+        this.planStep    = planStep;
+        this.deal        = deal;
+        this.applyMove   = applyMove;
+        this.moveDelay   = moveDelay;
+        this.dealPause   = dealPause;
+        this.solveBudget = solveBudget;
+        this.startDelay  = startDelay;
+
+        this.state    = 'solve';   // 'solve' | 'play' | 'pause'
+        this.moveList = null;
+        this.moveIdx  = 0;
+        this.timer    = new Timer();
+    }
+    update()
+    {
+        if (this.state === 'solve')
+        {
+            // Time-sliced: search a little each frame until a solvable deal is
+            // ready. Whatever's on the table (an empty felt at start, or the
+            // previous finished game) just sits there meanwhile.
+            const plan = this.planStep(this.solveBudget);
+            if (plan && plan.length)
+            {
+                this.deal();
+                this.moveList = plan;
+                this.moveIdx  = 0;
+                this.timer.set(this.startDelay);
+                this.state    = 'play';
+            }
+        }
+        else if (this.state === 'play')
+        {
+            if (this.timer.elapsed())
+            {
+                if (this.moveIdx < this.moveList.length)
+                {
+                    this.applyMove(this.moveList[this.moveIdx++]);
+                    this.timer.set(this.moveDelay);
+                }
+                else
+                {
+                    this.timer.set(this.dealPause);
+                    this.state = 'pause';
+                }
+            }
+        }
+        else // 'pause' — admire the win, then go find the next deal
+        {
+            if (this.timer.elapsed())
+                this.state = 'solve';
+        }
     }
 }

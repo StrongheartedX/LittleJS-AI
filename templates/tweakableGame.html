@@ -2,22 +2,17 @@
 <title>LittleJS Tweakables Template</title>
 <meta charset="utf-8">
 </head>
-<script src="engineLoader.js?1780292569262"></script>
-<script src="gameFx.js?1780292569262"></script>
-<script src="textureGenerator.js?1780292569262"></script>
-<script src="menus.js?1780292569262"></script>
-<script src="tweakables.js?1780292569262"></script>
+<script src="engineLoader.js?1780621028804"></script>
+<script src="gameFx.js?1780621028804"></script>
+<script src="textureGenerator.js?1780621028804"></script>
+<script src="menus.js?1780621028804"></script>
+<script src="tweakables.js?1780621028804"></script>
 <script>
 'use strict';
 
-// engine settings, do not remove
-tilesPixelated = false; // Disable pixelation
-paused = false;
-
-// engine settings, customize if necessary
+// engine settings
+cameraScale = 64;
 gravity = vec2(0, -.01);
-cameraPos = vec2(0, 0);
-cameraScale = 32;
 
 ///////////////////////////////////////////////////////////////////////////////
 // TWEAKABLES TEMPLATE
@@ -93,6 +88,14 @@ function gameUpdate()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+function gameUpdatePost()
+{
+    // setup camera and prepare for render
+    const viewSize = vec2(30,18)
+    cameraFit(vec2(0, 0), viewSize);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 function gameRender()
 {
     drawRectGradient(cameraPos, getCameraSize(),
@@ -127,6 +130,6 @@ function gameRenderPost()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-engineInit(gameInit, gameUpdate, () => {}, gameRender, gameRenderPost);
+engineInit(gameInit, gameUpdate, gameUpdatePost, gameRender, gameRenderPost);
 
 </script>

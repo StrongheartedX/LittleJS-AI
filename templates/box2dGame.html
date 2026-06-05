@@ -2,22 +2,17 @@
 <title>LittleJS AI Starter Project</title>
 <meta charset="utf-8">
 </head>
-<script src="engineLoader.js?1780292569262"></script>
-<script src="../dist/box2d.wasm.js?1780292569262"></script>
-<script src="gameFx.js?1780292569262"></script>
-<script src="textureGenerator.js?1780292569262"></script>
-<script src="tweakables.js?1780292569262"></script>
+<script src="engineLoader.js?1780621028804"></script>
+<script src="../dist/box2d.wasm.js?1780621028804"></script>
+<script src="gameFx.js?1780621028804"></script>
+<script src="textureGenerator.js?1780621028804"></script>
+<script src="tweakables.js?1780621028804"></script>
 <script>
 'use strict';
 
-// engine settings, do not remove
+// engine settings
 tilesPixelated = false; // Disable pixelation
-paused = false; // Start unpaused
-
-// engine settings, customize if necessary
 gravity = vec2(0, 0); // No gravity by default
-cameraPos = vec2(0, 0); // Camera centered at origin
-cameraScale = 32; // Camera zoom, larger is more zoomed in
 
 ///////////////////////////////////////////////////////////////////////////////
 // game stuff
@@ -85,6 +80,8 @@ function gameUpdatePost()
 {
     // called after physics and objects are updated
     // setup camera and prepare for render
+    const viewSize = vec2(32,20)
+    cameraFit(vec2(0, 0), viewSize);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

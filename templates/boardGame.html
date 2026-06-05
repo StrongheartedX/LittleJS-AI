@@ -3,20 +3,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
-<script src="engineLoader.js?1780292569262"></script>
-<script src="menus.js?1780292569262"></script>
-<script src="gameFx.js?1780292569262"></script>
-<script src="textureGenerator.js?1780292569262"></script>
-<script src="tweakables.js?1780292569262"></script>
+<script src="engineLoader.js?1780621028804"></script>
+<script src="menus.js?1780621028804"></script>
+<script src="gameFx.js?1780621028804"></script>
+<script src="textureGenerator.js?1780621028804"></script>
+<script src="tweakables.js?1780621028804"></script>
 <script>
 'use strict';
-
-// engine settings, do not remove
-paused = false;
-
-// engine settings, customize if necessary
-cameraScale = 46;
-canvasFixedSize = vec2(700, 1080);
 
 ///////////////////////////////////////////////////////////////////////////////
 // BOARD GAME TEMPLATE
@@ -37,6 +30,12 @@ const PLAYER_2 = 2; // AI (in 'ai' mode)
 let board = [];
 let currentPlayer = PLAYER_1;
 let hoverCell = null;
+
+// Piece drop-shadow — a darkened circle drawn under each piece (press \ to tweak).
+let shadowEnable = true;
+let shadowOffset = 0.12;    // world-unit offset (down-right, opposite the highlight)
+let shadowDarkness = 0.35;  // 0..1 — how much it darkens the board underneath
+let shadowSize = 1.0;       // shadow diameter relative to the piece
 
 // gameMode picks between the two play modes (set in startGame).
 let gameMode = 'pvp'; // 'pvp' | 'ai'
@@ -143,6 +142,13 @@ async function gameInit()
 
     sfxPlace = new SoundGenerator({frequency: 440, release: 0.05, volume: 0.3});
 
+    // Piece shadow tweakables — press \ to open the panel and adjust live.
+    tweakDivider('Piece Shadow');
+    tweak('shadowEnable');
+    tweak('shadowOffset',   {min: 0, max: 0.5});
+    tweak('shadowDarkness', {min: 0, max: 1});
+    tweak('shadowSize',     {min: 0.5, max: 1.5});
+
     // ----- title menu -----
     // Two play modes, so raw createMenu (createTitleMenu assumes one PLAY).
     // onStart wires gamepad Start to launch VS AI directly.
@@ -243,6 +249,10 @@ function gameUpdate()
 
 function gameUpdatePost()
 {
+    const boardWorldSize = BOARD_SIZE * CELL_SIZE;
+
+    // setup camera leaving space for hud
+    cameraFit(vec2(0, 0), vec2(boardWorldSize), { margin: .5, inset: { top: 100 } });
 }
 
 function gameRender()
@@ -272,6 +282,13 @@ function gameRender()
         const cell = board[row][col];
         if (cell === EMPTY) continue;
         const pos = getCellWorldPos(row, col);
+
+        // Soft drop-shadow: a darkening circle offset down-right (opposite the
+        // upper-left highlight). rgb(0,0,0,alpha) blends over the board to darken.
+        if (shadowEnable)
+            drawTile(pos.add(vec2(shadowOffset, -shadowOffset)),
+                vec2(PIECE_DIAMETER * shadowSize), icons.circle, rgb(0, 0, 0, shadowDarkness));
+
         const color = cell === PLAYER_1 ? hsl(0, 0, 0.15) : hsl(0, 0, 0.95);
         drawTile(pos, vec2(PIECE_DIAMETER), icons.circle, color);
         // Specular highlight (upper-left), Othello-style
@@ -284,8 +301,9 @@ function gameRenderPost()
 {
     if (isPlaying())
     {
-        drawTextScreen('R: Restart',
-            vec2(mainCanvasSize.x / 2, mainCanvasSize.y - 50), 42,
+        const text = 'PLAYER ' + currentPlayer;
+        drawTextScreen(text,
+            vec2(mainCanvasSize.x / 2, 70), 70,
             rgb(0.7, 0.7, 0.7), 2, BLACK);
     }
 }
