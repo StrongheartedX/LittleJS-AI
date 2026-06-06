@@ -44,7 +44,7 @@ Each game folder includes a `build.mjs` that concatenates the engine + your sour
 
 ```sh
 npm install                       # once, in the repo root — installs terser + bestzip
-node games/<yourGame>/build.mjs   # builds games/<yourGame>/build/ and <name>.zip
+node games/yourGame/build.mjs   # builds games/yourGame/build/ and <name>.zip
 ```
 
 ### 📝 Feature templates
