@@ -310,6 +310,8 @@ mainCanvas / mainContext     // The main 2D canvas and its context
 drawContext                  // Context currently being drawn to
 glCanvas / glContext         // The WebGL canvas and context
 mainCanvasSize               // Size of the main canvas in pixels
+backgroundCanvas             // Extra canvas composited behind the engine canvases
+setBackgroundCanvas(canvas)  // Set a plugin canvas to include when combining
 setCursor(cursorStyle)       // Set the CSS cursor style
 isOnScreen(pos, size)        // Is a world space area visible on screen?
 combineCanvases()            // Combine all canvases onto mainCanvas (for screenshots)
@@ -366,6 +368,8 @@ audioContext            // The shared Web Audio context
 audioMasterGain         // Master gain node all sound routes through
 audioIsRunning()        // Is the audio context running? (requires user interaction)
 playSamples(sampleChannels, volume=1, rate=1, pan=0, loop=false, sampleRate, gainNode, offset=0, onended) // Low level sample playback
+createAudioBuffer(sampleChannels, sampleRate) // Copy arrays of samples into an audio buffer
+playAudioBuffer(buffer, volume=1, rate=1, pan=0, loop=false, gainNode, offset=0, onended) // Play an audio buffer, shareable between sounds
 ```
 
 ## LittleJS Input System
@@ -442,6 +446,7 @@ vibrateStop()                         // Stop all vibration
 // Input settings
 gamepadsEnable = true                 // Should gamepads be allowed?
 gamepadDirectionEmulateStick = true   // Should dpad be routed to the left analog stick?
+gamepadAxisFilterEnable = true        // Ignore axes that don't rest near center (steering wheels)
 inputWASDEmulateDirection = true      // Should WASD keys be routed to the direction keys?
 inputPreventDefault = true            // Should input events prevent default browser handling?
 inputMouseMoveThreshold = 6           // Screen-px mouse movement per frame that counts as mouse use

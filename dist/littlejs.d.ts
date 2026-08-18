@@ -514,6 +514,13 @@ declare module "littlejsengine" {
      *  @default
      *  @memberof Settings */
     export let gamepadDirectionEmulateStick: boolean;
+    /** If true, axes that do not rest near center are ignored on gamepads without
+     *  standard mapping. Steering wheels and flight sticks report pedal and throttle
+     *  axes that rest at full deflection, which otherwise reads as a stick held down.
+     *  @type {boolean}
+     *  @default
+     *  @memberof Settings */
+    export let gamepadAxisFilterEnable: boolean;
     /** If true the WASD keys are also routed to the direction keys (for better accessibility)
      *  @type {boolean}
      *  @default
@@ -780,6 +787,10 @@ declare module "littlejsengine" {
      *  @param {boolean} enable
      *  @memberof Settings */
     export function setGamepadDirectionEmulateStick(enable: boolean): void;
+    /** Set if axes that do not rest near center are ignored on non-standard gamepads
+     *  @param {boolean} enable
+     *  @memberof Settings */
+    export function setGamepadAxisFilterEnable(enable: boolean): void;
     /** Set if true the WASD keys are also routed to the direction keys
      *  @param {boolean} enable
      *  @memberof Settings */
@@ -1817,6 +1828,11 @@ declare module "littlejsengine" {
      *  @type {OffscreenCanvasRenderingContext2D}
      *  @memberof Draw */
     export let workReadContext: OffscreenCanvasRenderingContext2D;
+    /** Extra canvas to composite behind the engine canvases when combining canvases
+     *  Set by plugins that render to their own canvas below the LittleJS canvases
+     *  @type {HTMLCanvasElement}
+     *  @memberof Draw */
+    export let backgroundCanvas: HTMLCanvasElement;
     /** The size of the main canvas (and other secondary canvases)
      *  @type {Vector2}
      *  @memberof Draw */
@@ -2050,6 +2066,12 @@ declare module "littlejsengine" {
      *  @param {boolean} [additive]
      *  @memberof Draw */
     export function setAdditiveBlendMode(additive?: boolean): void;
+    /** Set an extra canvas to composite behind the engine canvases when combining
+     *  Plugins that insert their own canvas below the LittleJS canvases should set
+     *  this so it appears in screenshots and video capture
+     *  @param {HTMLCanvasElement} [canvas]
+     *  @memberof Draw */
+    export function setBackgroundCanvas(canvas?: HTMLCanvasElement): void;
     /** Combines LittleJS canvases onto the main canvas
      *  This is necessary for things like screenshots and video
      *  @memberof Draw */
@@ -2565,11 +2587,29 @@ declare module "littlejsengine" {
         randomness: any;
         /** @property {number} - Sample rate for this sound */
         sampleRate: number;
-        /** @property {number} - Percentage of this sound currently loaded */
+        /** @property {number} - How many samples per channel this sound has */
+        sampleLength: number;
+        /** @property {AudioBuffer} - Decoded audio shared by every play of this sound
+         *  @type {AudioBuffer} */
+        sampleBuffer: AudioBuffer;
+        /** @private @type {Array<Array<number>|Float32Array>} */
+        private _sampleChannels;
+        /** @property {number} - Percentage of this sound currently loaded, sounds
+         *  fetched from a url stay at 0 until decoding completes */
         loadedPercent: number;
         /** @property {SoundLoadCallback} - function to call when sound is loaded */
         onloadCallback: (sound: Sound) => Sound;
-        sampleChannels: any[][];
+        /** @param {Array<Array<number>|Float32Array>} sampleChannels */
+        set sampleChannels(arg: (number[] | Float32Array)[]);
+        /** Sample data for each channel
+         *  Sounds keep their samples in an audio buffer, so reading this rebuilds
+         *  the arrays from it and caches them. The copies are safe to hold onto,
+         *  playing a sound detaches the buffer's own channel arrays.
+         *  @type {Array<Array<number>|Float32Array>} */
+        get sampleChannels(): (number[] | Float32Array)[];
+        /** Move this sound's samples into an audio buffer that every play can share
+         *  Does nothing if there is already a buffer or no samples to build one from */
+        buildSampleBuffer(): void;
         /** Play the sound
          *  Sounds may not play until a user interaction occurs
          *  @param {Vector2} [pos] - World space position to play the sound if any
@@ -2722,6 +2762,25 @@ declare module "littlejsengine" {
      *  @return {AudioBufferSourceNode} - The source node of the sound played, may be undefined if play fails
      *  @memberof Audio */
     export function playSamples(sampleChannels: any[], volume?: number, rate?: number, pan?: number, loop?: boolean, sampleRate?: number, gainNode?: GainNode, offset?: number, onended?: AudioEndedCallback): AudioBufferSourceNode;
+    /** Play an audio buffer with given settings
+     *  The buffer can be shared by any number of sounds playing at once
+     *  @param {AudioBuffer} buffer - The audio buffer to play
+     *  @param {number}   [volume] - How much to scale volume by
+     *  @param {number}   [rate] - The playback rate to use
+     *  @param {number}   [pan] - How much to apply stereo panning
+     *  @param {boolean}  [loop] - True if the sound should loop when it reaches the end
+     *  @param {GainNode} [gainNode] - Optional gain node for volume control while playing (disconnected when the sound ends)
+     *  @param {number}   [offset] - Offset in seconds to start playback from
+     *  @param {AudioEndedCallback} [onended] - Callback for when the sound ends
+     *  @return {AudioBufferSourceNode} - The source node of the sound played, may be undefined if play fails
+     *  @memberof Audio */
+    export function playAudioBuffer(buffer: AudioBuffer, volume?: number, rate?: number, pan?: number, loop?: boolean, gainNode?: GainNode, offset?: number, onended?: AudioEndedCallback): AudioBufferSourceNode;
+    /** Copy arrays of samples into a new audio buffer
+     *  @param {Array}  sampleChannels - Array of arrays of samples (for stereo playback)
+     *  @param {number} [sampleRate=44100] - Sample rate for the sound
+     *  @return {AudioBuffer} - The audio buffer holding the samples
+     *  @memberof Audio */
+    export function createAudioBuffer(sampleChannels: any[], sampleRate?: number): AudioBuffer;
     /** Generate and play a ZzFX sound
      *
      *  <a href=https://killedbyapixel.github.io/ZzFX/>Create sounds using the ZzFX Sound Designer.</a>
